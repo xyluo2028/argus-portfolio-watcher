@@ -91,6 +91,14 @@ class YahooProvider:
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"yahoo info {symbol}: {e}") from e
 
+    def get_calendar(self, symbol: str) -> dict:
+        """Upcoming dates: 'Earnings Date' (list), 'Ex-Dividend Date', 'Dividend Date'."""
+        try:
+            cal = _yf().Ticker(to_yahoo(symbol)).calendar
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"yahoo calendar {symbol}: {e}") from e
+        return cal if isinstance(cal, dict) else {}
+
     def get_metrics(self, symbol: str) -> dict[str, float | None]:
         return metrics_from_info(self.get_info(symbol))
 

@@ -16,6 +16,7 @@ Conventions every tool follows (so agents don't have to guess):
 from __future__ import annotations
 
 import functools
+from datetime import date, timedelta
 import inspect
 import json
 from typing import Any, Callable
@@ -27,6 +28,7 @@ from mcp.types import ToolAnnotations
 from argus.app import Argus
 from argus.errors import ArgusError
 from argus.market_calendar import parse_ny_datetime
+from argus.services.alerts import KINDS as ALERT_KINDS
 from argus.services.portfolio import TxnInput
 from argus.symbols import normalize_symbol
 
@@ -34,6 +36,7 @@ INSTRUCTIONS = """Argus is the user's local portfolio monitor for US stocks and 
 Start with list_portfolios, then get_portfolio for positions, weights, day and unrealized P&L.
 Market data: get_quotes (batch), get_price_history (+ indicators), get_fundamentals, get_financials
 (SEC filings), compare_symbols, get_performance (time-weighted return vs benchmark).
+Routines: get_daily_brief_data (one call for a brief), get_events, list_alerts/set_alert, notes.
 Writes (add_transaction, delete_transaction, watchlist_add/remove, create_portfolio) change the
 user's records: preview with dry_run=True (the default), show the user the preview, and only then
 call again with dry_run=False. Never place real brokerage orders; Argus only records trades.
@@ -179,6 +182,43 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Find US tickers by symbol or company name."""
         return argus.market.search(query, limit)
 
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_daily_brief_data(portfolio: str, include_news: bool = True) -> dict:
+        """Everything for a pre-market or post-close brief in one call: totals and day P&L vs
+        benchmark, top gainers/losers and largest $ moves, positions near 52-week highs/lows,
+        earnings in the next 7 days (hour: bmo = before open, amc = after close) and results from the
+        last 3 days (with EPS surprise), upcoming ex-dividend dates, alerts fired, theses due for
+        review, watchlist movers >= 3%, and headlines for the biggest movers. Write the brief from
+        these facts; say when a section is empty rather than inventing detail."""
+        return argus.daily_brief(portfolio, quotes_now(), news=include_news)
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None) -> dict:
+        """Earnings (with hour, EPS/revenue estimates, and actuals once reported) and ex-dividend /
+        payment dates for held + watchlist symbols (or `symbols`). `held` marks current holdings."""
+        return argus.upcoming_events(days_ahead, days_back, symbols=symbols)
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def list_alerts(include_inactive: bool = False, fired_since: str | None = None) -> dict:
+        """Alert rules (with the last time each fired) and alerts fired since fired_since
+        (YYYY-MM-DD; default: the last trading session)."""
+        since = date.fromisoformat(fired_since) if fired_since else date.fromisoformat(
+            argus.market_status()["last_session"])
+        argus.evaluate_alerts(quotes_now())
+        return {"alerts": argus.alerts.list(include_inactive), "fired": argus.alerts.fired(since),
+                "kinds": {k: {"label": v.label, "unit": v.unit} for k, v in ALERT_KINDS.items()}}
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def list_notes(symbol: str | None = None, due_within_days: int | None = None, include_archived: bool = False) -> list[dict]:
+        """Thesis and notes per symbol. due_within_days lists notes whose review date is within N days
+        (overdue included)."""
+        due = date.today() + timedelta(days=due_within_days) if due_within_days is not None else None
+        return argus.notes.list(symbol, include_archived, due)
+
     # -- write ----------------------------------------------------------------
     @mcp.tool(annotations=WRITE)
     @_tool
@@ -216,6 +256,36 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
 
     @mcp.tool(annotations=WRITE)
     @_tool
+    def set_alert(symbol: str, kind: str, threshold: float, note: str | None = None) -> dict:
+        """Create an alert. kind: price_above | price_below ($), day_move_pct | day_gain_pct |
+        day_loss_pct (%), near_52w_high | near_52w_low (% from extreme), pe_above | pe_below (x),
+        below_cost_pct | above_cost_pct (% vs the user's average cost), earnings_within_days (days).
+        Fires at most once per trading session; shown in the UI and the daily brief (no push)."""
+        return argus.alerts.create(symbol, kind, threshold, note, actor="mcp")
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def disable_alert(alert_id: int, enable: bool = False) -> dict:
+        """Turn an alert off (or back on with enable=True)."""
+        return argus.alerts.set_active(alert_id, enable, actor="mcp")
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def add_note(symbol: str, text: str, kind: str = "note", review_on: str | None = None) -> dict:
+        """Save a note on a symbol. kind: thesis (why the user owns it / what would change their
+        mind) or note. review_on: YYYY-MM-DD to surface it in the daily brief for re-checking."""
+        return argus.notes.add(symbol, text, kind, date.fromisoformat(review_on) if review_on else None, actor="mcp")
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def update_note(note_id: int, text: str | None = None, review_on: str | None = None,
+                    clear_review: bool = False, archived: bool | None = None) -> dict:
+        """Edit a note's text, move or clear its review date, or archive it."""
+        return argus.notes.update(note_id, text, date.fromisoformat(review_on) if review_on else None,
+                                  clear_review, archived, actor="mcp")
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
     def create_portfolio(name: str, benchmark: str = "SPY") -> dict:
         """Create an empty portfolio with a benchmark for performance comparison."""
         return argus.portfolios.create_portfolio(name, benchmark, actor="mcp")
@@ -225,6 +295,16 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def portfolio_resource(name: str) -> dict:
         """Current positions and totals for a portfolio."""
         return _round(argus.portfolio(name, True, False, quotes_now()))
+
+    @mcp.prompt()
+    def daily_brief(portfolio: str) -> str:
+        """Pre-market or post-close brief for a portfolio."""
+        return (f"Write my daily brief for the '{portfolio}' portfolio using Argus. Call get_daily_brief_data "
+                f"(portfolio='{portfolio}') once. Structure: 1) one-line headline (value, day P&L vs benchmark); "
+                "2) what moved most and why, using only the returned headlines; 3) earnings and dividends coming "
+                "up, with timing (before open / after close) and any recent beats or misses; 4) alerts that fired; "
+                "5) theses due for review, quoting my thesis; 6) watchlist movers. Keep it under 250 words, use "
+                "numbers from the data, and skip empty sections. No buy/sell recommendations.")
 
     @mcp.prompt()
     def position_review(portfolio: str, symbol: str) -> str:

@@ -31,6 +31,7 @@ STREAM_LIMIT = 48
 REST_INTERVAL_S = 60
 SESSION_CHECK_S = 30
 FLUSH_INTERVAL_S = 10
+EVENTS_REFRESH_S = 6 * 3600
 
 
 class LiveHub:
@@ -48,11 +49,13 @@ class LiveHub:
         self._tasks: list[asyncio.Task] = []
         self._ws_task: asyncio.Task | None = None
         self._resubscribe = asyncio.Event()
+        self.fired_alerts: list[dict] = []  # fired this session, newest first (pushed to the UI)
 
     # -- lifecycle ------------------------------------------------------------
     async def start(self) -> None:
         self._tasks = [asyncio.create_task(self._session_loop(), name="argus-session"),
-                       asyncio.create_task(self._flush_loop(), name="argus-flush")]
+                       asyncio.create_task(self._flush_loop(), name="argus-flush"),
+                       asyncio.create_task(self._events_loop(), name="argus-events")]
 
     async def stop(self) -> None:
         for t in [*self._tasks, self._ws_task]:
@@ -81,6 +84,7 @@ class LiveHub:
             "market": self.status,
             "stream": {"state": self.ws_state, "symbols": len(self.streamed)},
             "quotes": {s: q.to_dict() for s, q in self.quotes.items()},
+            "alerts_fired": self.fired_alerts[:20],
         }
 
     # -- what to track --------------------------------------------------------
@@ -118,6 +122,7 @@ class LiveHub:
                     self._ensure_stream(symbols[: self.stream_limit])
                 else:
                     await self._stop_stream()
+                await self._check_alerts()
                 await self._bump()
             except asyncio.CancelledError:
                 raise
@@ -136,6 +141,23 @@ class LiveHub:
                 self.quotes[sym] = q
         if errors:
             log.warning("no quotes for %s", ", ".join(sorted(errors)))
+
+    async def _check_alerts(self) -> None:
+        fired = await asyncio.to_thread(self.argus.evaluate_alerts, dict(self.quotes))
+        if fired:
+            log.info("alerts fired: %s", "; ".join(f["message"] for f in fired))
+            self.fired_alerts = fired + self.fired_alerts
+
+    async def _events_loop(self) -> None:
+        """Keep the earnings/dividend calendar fresh (each symbol refreshes at most daily)."""
+        while True:
+            try:
+                await asyncio.to_thread(self.argus.upcoming_events)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - provider hiccups: try again next cycle
+                log.exception("events refresh failed")
+            await asyncio.sleep(EVENTS_REFRESH_S)
 
     # -- websocket ------------------------------------------------------------
     def _ensure_stream(self, symbols: list[str]) -> None:

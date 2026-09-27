@@ -6,7 +6,7 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -17,15 +17,18 @@ from argus.db import make_engine, session_scope
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
-from argus.market_calendar import NY, market_status, sessions_between
+from argus.market_calendar import NY, market_status, session_date, sessions_between
 from argus.models import Instrument
 from argus.providers.base import Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
+from argus.services.alerts import AlertService
+from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
 from argus.services.market import MarketService
+from argus.services.notes import NoteService
 from argus.services.portfolio import PortfolioService, position_to_dict
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import normalize_symbol
@@ -39,6 +42,9 @@ class Argus:
         self.portfolios = PortfolioService(self.engine)
         self.watchlists = WatchlistService(self.engine)
         self.market = (market_factory or self._default_market)(self.engine, self.settings)
+        self.events = EventsService(self.engine, self.market.directory, self.market.profile_provider)
+        self.alerts = AlertService(self.engine)
+        self.notes = NoteService(self.engine)
 
     @staticmethod
     def _default_market(engine: Engine, s: Settings) -> MarketService:
@@ -144,6 +150,121 @@ class Argus:
                 errors.setdefault(sym, e.message)
             rows.append(row)
         return {"fields": wanted, "rows": rows, "errors": errors}
+
+    # -- tracked symbols, events, alerts, brief ----------------------------------
+    def held_positions(self) -> dict[str, tuple[float, float]]:
+        """symbol -> (total shares, weighted average cost) across all portfolios."""
+        agg: dict[str, list[float]] = {}
+        for p in self.portfolios.list_portfolios():
+            for sym, pos in self.portfolios.positions(p["id"]).items():
+                if pos.is_open:
+                    a = agg.setdefault(sym, [0.0, 0.0])
+                    a[0] += pos.qty
+                    a[1] += pos.cost_basis
+        return {s: (q, c / q) for s, (q, c) in agg.items() if q}
+
+    def tracked_symbols(self) -> list[str]:
+        watched = [i["symbol"] for w in self.watchlists.list_watchlists() for i in self.watchlists.items(w["name"])]
+        return sorted(set(self.held_positions()) | set(watched))
+
+    def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
+                        symbols: list[str] | None = None) -> dict:
+        syms = [normalize_symbol(x) for x in symbols] if symbols else self.tracked_symbols()
+        refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
+        today = datetime.now(NY).date()
+        held = set(self.held_positions())
+        rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead))
+        for r in rows:
+            r["held"] = r["symbol"] in held
+        return {
+            "as_of": today.isoformat(),
+            "upcoming": [r for r in rows if r["date"] >= today.isoformat()],
+            "recent": [r for r in rows if r["date"] < today.isoformat()],
+            "refresh_failed": refreshed["failed"],
+        }
+
+    def evaluate_alerts(self, live_quotes: dict[str, Quote] | None = None) -> list[dict]:
+        """Check active alerts now; returns the ones that newly fired this session."""
+        active = self.alerts.list()
+        if not active:
+            return []
+        syms = sorted({a["symbol"] for a in active})
+        quotes = {s: live_quotes[s] for s in syms if live_quotes and s in live_quotes}
+        missing = [s for s in syms if s not in quotes]
+        if missing:
+            quotes |= self.market.get_quotes(missing)[0]
+        costs = {s: c for s, (_, c) in self.held_positions().items()}
+        today = datetime.now(NY).date()
+
+        def metrics(sym: str) -> dict:
+            try:
+                return self.market.get_fundamentals(sym)["metrics"]
+            except ArgusError:
+                return {}
+
+        return self.alerts.evaluate(quotes, metrics, costs, self.events.next_earnings(syms, today),
+                                    session_date(datetime.now(UTC)))
+
+    def daily_brief(self, ref: str, live_quotes: dict[str, Quote] | None = None, news: bool = True) -> dict:
+        """Structured facts for a pre-market / post-close brief. The agent writes the prose."""
+        status = market_status()
+        summ = self.portfolio(ref, True, False, live_quotes)
+        positions = summ["positions"]
+        bench_sym = summ["portfolio"]["benchmark"]
+        bench = (live_quotes or {}).get(bench_sym) or self.market.get_quotes([bench_sym])[0].get(bench_sym)
+        priced = [p for p in positions if p.get("change_pct") is not None]
+        by_pct = sorted(priced, key=lambda p: p["change_pct"])
+        by_dollar = sorted(priced, key=lambda p: -abs(p.get("day_pnl") or 0))
+
+        def pick(p: dict) -> dict:
+            return {k: p.get(k) for k in ("symbol", "change_pct", "day_pnl", "price", "weight_pct", "unrealized_pct")}
+
+        near = []
+        for p in positions:
+            try:
+                m = self.market.get_fundamentals(p["symbol"], ["high_52w", "low_52w"])["metrics"]
+            except ArgusError:
+                continue
+            price, hi, lo = p.get("price"), m.get("high_52w"), m.get("low_52w")
+            if not (price and hi and lo) or not lo * 0.9 <= price <= hi * 1.1:
+                continue  # missing or inconsistent range (e.g. a different listing's currency)
+            if price >= hi * 0.97:
+                near.append({"symbol": p["symbol"], "near": "52w_high", "gap_pct": (price / hi - 1) * 100})
+            elif price <= lo * 1.03:
+                near.append({"symbol": p["symbol"], "near": "52w_low", "gap_pct": (price / lo - 1) * 100})
+
+        events = self.upcoming_events(days_ahead=7, days_back=3)
+        self.evaluate_alerts(live_quotes)
+        last_session = date.fromisoformat(status["last_session"])
+        today = datetime.now(NY).date()
+        movers = [*by_pct[:3], *by_pct[-3:]] if len(by_pct) > 6 else by_pct
+        out = {
+            "portfolio": summ["portfolio"]["name"],
+            "market": {k: status[k] for k in ("session", "is_trading_day", "last_session", "next_open")},
+            "totals": {k: summ["totals"].get(k) for k in ("market_value", "day_pnl", "day_pnl_pct", "unrealized_pnl",
+                                                         "unrealized_pct", "position_count")},
+            "benchmark": {"symbol": bench_sym, "change_pct": bench.change_pct if bench else None},
+            "top_gainers": [pick(p) for p in reversed(by_pct[-5:])],
+            "top_losers": [pick(p) for p in by_pct[:5]],
+            "largest_dollar_moves": [pick(p) for p in by_dollar[:5]],
+            "near_52w_extremes": near,
+            "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings"],
+            "earnings_recent": [e for e in events["recent"] if e["kind"] == "earnings"],
+            "dividends_upcoming": [e for e in events["upcoming"] if e["kind"] != "earnings"],
+            "alerts_fired": self.alerts.fired(since=min(last_session, today)),
+            "theses_due": self.notes.list(due_by=today + timedelta(days=7)),
+            "watchlist_movers": [
+                {"symbol": i["symbol"], "change_pct": i["quote"]["change_pct"], "price": i["quote"]["price"]}
+                for i in self.watchlist(live_quotes=live_quotes, with_fundamentals=False)["items"]
+                if i["quote"] and i["quote"]["change_pct"] is not None and abs(i["quote"]["change_pct"]) >= 3
+            ],
+        }
+        if news:
+            out["headlines"] = {}
+            for p in movers:  # headlines only for the biggest movers, to keep the brief short
+                if items := self.events.news(p["symbol"], days=2, limit=3):
+                    out["headlines"][p["symbol"]] = items
+        return out
 
     PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
 

@@ -170,6 +170,72 @@ class WatchlistItem(Base):
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class Event(Base):
+    """Scheduled or reported corporate events (earnings, dividends), cached from providers."""
+
+    __tablename__ = "event"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)  # earnings | ex_dividend | dividend_pay
+    d: Mapped[date] = mapped_column(Date, primary_key=True)
+    hour: Mapped[str | None] = mapped_column(String(8))  # bmo | amc | dmh (earnings timing)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)  # estimates, actuals, surprise, amount...
+    source: Mapped[str] = mapped_column(String(16))
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Alert(Base):
+    __tablename__ = "alert"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    kind: Mapped[str] = mapped_column(String(24))  # see argus.services.alerts.KINDS
+    threshold: Mapped[float] = mapped_column(Float)
+    note: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(16), default="cli")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class AlertEvent(Base):
+    """One firing of an alert; at most one per alert per trading session."""
+
+    __tablename__ = "alert_event"
+    __table_args__ = (UniqueConstraint("alert_id", "session_date", name="uq_alert_session"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alert.id"), index=True)
+    session_date: Mapped[date] = mapped_column(Date)
+    ts: Mapped[datetime] = mapped_column(default=utcnow)
+    value: Mapped[float | None] = mapped_column(Float)
+    message: Mapped[str] = mapped_column(Text)
+
+
+class Note(Base):
+    """Investment thesis or free-form note on a symbol, optionally with a review date."""
+
+    __tablename__ = "note"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    kind: Mapped[str] = mapped_column(String(12), default="note")  # thesis | note
+    text: Mapped[str] = mapped_column(Text)
+    review_on: Mapped[date | None] = mapped_column(Date)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(16), default="cli")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class RefreshLog(Base):
+    """When a cached dataset was last refreshed (e.g. 'events:NVDA')."""
+
+    __tablename__ = "refresh_log"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class NavDaily(Base):
     """Filled in P1 by the performance engine."""
 
@@ -183,13 +249,18 @@ class NavDaily(Base):
 
 
 __all__ = [
+    "Alert",
+    "AlertEvent",
     "AuditLog",
+    "Event",
+    "Note",
     "Base",
     "Fundamental",
     "Instrument",
     "NavDaily",
     "Portfolio",
     "PriceBar",
+    "RefreshLog",
     "QuoteCache",
     "Transaction",
     "TxnType",

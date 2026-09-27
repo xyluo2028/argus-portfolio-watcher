@@ -24,9 +24,13 @@ app = typer.Typer(help="Argus: portfolio monitor for US stocks & ETFs.", no_args
 portfolio_app = typer.Typer(help="Create, list and show portfolios.", no_args_is_help=True)
 txn_app = typer.Typer(help="Record and inspect transactions.", no_args_is_help=True)
 import_app = typer.Typer(help="Import holdings from other tools.", no_args_is_help=True)
+alert_app = typer.Typer(help="Price, move, valuation, cost and earnings alerts.", no_args_is_help=True)
+note_app = typer.Typer(help="Thesis and notes per symbol, with review dates.", no_args_is_help=True)
 app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(txn_app, name="txn")
 app.add_typer(import_app, name="import")
+app.add_typer(alert_app, name="alert")
+app.add_typer(note_app, name="note")
 
 console = Console()
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
@@ -273,6 +277,77 @@ def portfolio_performance(ref: str, range_: Annotated[str, typer.Option("--range
         sharpe = "-" if s["sharpe"] is None else f"{s['sharpe']:.2f}"
         console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   Sharpe (rf=0) {sharpe}")
     _run(as_json, lambda: _argus().performance(ref, range_), render)
+
+
+@app.command()
+def brief(portfolio: str, no_news: Annotated[bool, typer.Option("--no-news")] = False, as_json: JsonOpt = False):
+    """Facts for a daily brief: movers, events, fired alerts, theses due (JSON is the useful form)."""
+    def render(b):
+        t = b["totals"]
+        console.print(f"[bold]{b['portfolio']}[/bold] {_money(t['market_value'])}  day "
+                      f"{_cell(t['day_pnl'], _money(t['day_pnl'], True))} ({_pct(t['day_pnl_pct'])})  "
+                      f"{b['benchmark']['symbol']} {_pct(b['benchmark']['change_pct'])}")
+        movers = ", ".join(f"{m['symbol']} {_pct(m['change_pct'])}" for m in b["top_gainers"][:3] + b["top_losers"][:3])
+        console.print(f"Movers: {movers}")
+        for e in b["earnings_upcoming"]:
+            console.print(f"Earnings {e['date']} {e.get('hour') or ''} {e['symbol']}")
+        for a in b["alerts_fired"]:
+            console.print(f"[yellow]Alert[/yellow] {a['message']}")
+        for n in b["theses_due"]:
+            console.print(f"Review {n['symbol']} ({n['review_on']}): {n['text'][:80]}")
+    _run(as_json, lambda: _argus().daily_brief(portfolio, news=not no_news), render)
+
+
+@app.command()
+def events(days: int = 14, as_json: JsonOpt = False):
+    """Upcoming earnings and dividend dates for holdings and watchlist."""
+    def render(d):
+        t = Table("Date", "Symbol", "Event", "When", "EPS est.", "Held")
+        for e in d["upcoming"]:
+            t.add_row(e["date"], e["symbol"], e["kind"].replace("_", " "), e.get("hour") or "",
+                      "-" if e.get("epsEstimate") is None else f"{e['epsEstimate']:.2f}", "yes" if e["held"] else "")
+        console.print(t)
+    _run(as_json, lambda: _argus().upcoming_events(days_ahead=days), render)
+
+
+@alert_app.command("add")
+def alert_add(symbol: str, kind: str, threshold: float, note: str | None = None, as_json: JsonOpt = False):
+    """e.g. `argus alert add NVDA day_move_pct 5` or `argus alert add AMD below_cost_pct 15`."""
+    _run(as_json, lambda: _argus().alerts.create(symbol, kind, threshold, note),
+         lambda a: console.print(f"Alert {a['id']}: {a['symbol']} — {a['label']}"))
+
+
+@alert_app.command("list")
+def alert_list(all_: Annotated[bool, typer.Option("--all")] = False, as_json: JsonOpt = False):
+    def render(rows):
+        t = Table("ID", "Symbol", "Rule", "Last fired", "Note")
+        for a in rows:
+            t.add_row(str(a["id"]), a["symbol"], a["label"] + ("" if a["active"] else " (off)"),
+                      (a.get("last_fired") or {}).get("session_date", ""), a["note"] or "")
+        console.print(t)
+    _run(as_json, lambda: _argus().alerts.list(all_), render)
+
+
+@alert_app.command("off")
+def alert_off(alert_id: int, as_json: JsonOpt = False):
+    _run(as_json, lambda: _argus().alerts.set_active(alert_id, False), lambda a: console.print(f"Alert {a['id']} off"))
+
+
+@note_app.command("add")
+def note_add(symbol: str, text: str, thesis: Annotated[bool, typer.Option("--thesis")] = False,
+             review_on: Annotated[str | None, typer.Option(help="YYYY-MM-DD")] = None, as_json: JsonOpt = False):
+    _run(as_json, lambda: _argus().notes.add(symbol, text, "thesis" if thesis else "note",
+                                             date.fromisoformat(review_on) if review_on else None),
+         lambda n: console.print(f"Saved {n['kind']} {n['id']} on {n['symbol']}"))
+
+
+@note_app.command("list")
+def note_list(symbol: str | None = None, as_json: JsonOpt = False):
+    def render(rows):
+        for n in rows:
+            console.print(f"[bold]{n['symbol']}[/bold] #{n['id']} {n['kind']}"
+                          + (f" (review {n['review_on']})" if n["review_on"] else "") + f": {n['text']}")
+    _run(as_json, lambda: _argus().notes.list(symbol), render)
 
 
 # -- transactions -----------------------------------------------------------------

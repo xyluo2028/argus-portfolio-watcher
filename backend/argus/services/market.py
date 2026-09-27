@@ -28,6 +28,12 @@ METRIC_FIELDS = (
     "expense_ratio_pct",
 )
 
+# Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
+# (VIST in MXN, CNQ in CAD) while Yahoo reports the US listing in USD, so these prefer Yahoo.
+# Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
+PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm"}
+FUNDAMENTALS_VERSION = 2  # bump to invalidate cached rows when merge rules change
+
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
 
@@ -151,20 +157,27 @@ class MarketService:
         with session_scope(self.engine) as s:
             row = s.get(Fundamental, symbol)
             cached = (row.metrics, row.sources, row.as_of) if row else None
-        if cached and not refresh and now - cached[2] < timedelta(seconds=self.settings.fundamentals_max_age_s):
+        fresh = cached and cached[1].get("_version") == FUNDAMENTALS_VERSION and \
+            now - cached[2] < timedelta(seconds=self.settings.fundamentals_max_age_s)
+        if fresh and not refresh:
             metrics, sources, as_of = cached
         else:
-            metrics, sources = {}, {}
+            by_provider: dict[str, dict] = {}
             errors = []
             for provider in self.fundamentals_providers:
                 try:
-                    got = provider.get_metrics(symbol)
+                    by_provider[provider.name] = provider.get_metrics(symbol)
                 except ProviderError as e:
                     errors.append(str(e))
-                    continue
-                for k, v in got.items():
-                    if v is not None and metrics.get(k) is None:
-                        metrics[k], sources[k] = v, provider.name
+            metrics, sources = {}, {}
+            names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
+            for field in METRIC_FIELDS:
+                order = sorted(names, key=lambda n: n != "yahoo") if field in PRICE_CURRENCY_FIELDS else names
+                for n in order:
+                    v = by_provider[n].get(field)
+                    if v is not None:
+                        metrics[field], sources[field] = v, n
+                        break
             if not metrics:
                 if cached:
                     metrics, sources, as_of = cached  # stale beats nothing
@@ -172,6 +185,7 @@ class MarketService:
                     raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors) or None)
             else:
                 as_of = now
+                sources["_version"] = FUNDAMENTALS_VERSION
                 with session_scope(self.engine) as s:
                     s.merge(Fundamental(symbol=symbol, as_of=as_of, metrics=metrics, sources=sources))
         wanted = fields or list(METRIC_FIELDS)
@@ -179,7 +193,7 @@ class MarketService:
             "symbol": symbol,
             "as_of": as_of.isoformat(),
             "metrics": {f: metrics.get(f) for f in wanted},
-            "sources": {f: sources.get(f) for f in wanted if f in sources},
+            "sources": {f: sources[f] for f in wanted if f in sources},
         }
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:

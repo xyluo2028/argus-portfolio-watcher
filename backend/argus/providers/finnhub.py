@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
@@ -131,6 +131,21 @@ class FinnhubProvider:
     def get_profile(self, symbol: str) -> dict:
         d = self._get("/stock/profile2", symbol=symbol)
         return d if isinstance(d, dict) else {}
+
+    # -- events & news --------------------------------------------------------
+    def earnings_calendar(self, symbol: str, start: date, end: date) -> list[dict]:
+        """Scheduled/reported earnings: date, hour (bmo/amc/dmh), EPS and revenue estimate/actual."""
+        d = self._get("/calendar/earnings", symbol=symbol, **{"from": start.isoformat(), "to": end.isoformat()})
+        return list((d or {}).get("earningsCalendar") or [])
+
+    def earnings_surprises(self, symbol: str) -> list[dict]:
+        """Last ~4 reported quarters: actual vs estimate EPS and surprise %."""
+        d = self._get("/stock/earnings", symbol=symbol)
+        return d if isinstance(d, list) else []
+
+    def company_news(self, symbol: str, start: date, end: date) -> list[dict]:
+        d = self._get("/company-news", symbol=symbol, **{"from": start.isoformat(), "to": end.isoformat()})
+        return d if isinstance(d, list) else []
 
     # -- symbol directory ---------------------------------------------------
     def symbol_directory(self) -> dict[str, SymbolInfo]:

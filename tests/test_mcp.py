@@ -55,3 +55,15 @@ def test_errors_carry_code_and_hint(mcp):
     with pytest.raises(ToolError, match=r"INSUFFICIENT_SHARES: .*\(hint: "):
         asyncio.run(mcp.call_tool("add_transaction", {"portfolio": "growth", "type": "SELL", "symbol": "AAA",
                                                        "qty": 99, "price": 1, "dry_run": False}))
+
+
+def test_routine_tools(mcp):
+    a = call(mcp, "set_alert", {"symbol": "AAA", "kind": "day_gain_pct", "threshold": 5})
+    listed = call(mcp, "list_alerts", {"fired_since": "2000-01-01"})
+    assert listed["alerts"][0]["id"] == a["id"] and listed["fired"][0]["symbol"] == "AAA"
+    n = call(mcp, "add_note", {"symbol": "AAA", "text": "why I own it", "kind": "thesis", "review_on": "2000-01-01"})
+    assert call(mcp, "list_notes", {"due_within_days": 0})[0]["id"] == n["id"]
+    brief = call(mcp, "get_daily_brief_data", {"portfolio": "growth", "include_news": False})
+    assert brief["top_gainers"][0]["symbol"] == "AAA" and brief["theses_due"]
+    prompts = {p.name for p in asyncio.run(mcp.list_prompts())}
+    assert {"daily_brief", "position_review"} <= prompts

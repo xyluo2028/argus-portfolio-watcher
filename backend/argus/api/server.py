@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -20,6 +21,7 @@ from argus.errors import ArgusError
 from argus.live import LiveHub
 from argus.mcp_server import create_mcp
 from argus.market_calendar import parse_ny_datetime
+from argus.services.alerts import KINDS
 from argus.services.portfolio import TxnInput
 from argus.symbols import normalize_symbol
 
@@ -46,6 +48,27 @@ class TxnBody(BaseModel):
 class WatchBody(BaseModel):
     symbols: list[str]
     note: str | None = None
+
+
+class AlertBody(BaseModel):
+    symbol: str
+    kind: str
+    threshold: float
+    note: str | None = None
+
+
+class NoteBody(BaseModel):
+    symbol: str
+    text: str
+    kind: str = "note"
+    review_on: str | None = None
+
+
+class NotePatch(BaseModel):
+    text: str | None = None
+    review_on: str | None = None
+    clear_review: bool = False
+    archived: bool | None = None
 
 
 class PortfolioBody(BaseModel):
@@ -161,6 +184,44 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def compare(symbols: str, fields: str | None = None):
         f = [x.strip() for x in fields.split(",")] if fields else None
         return await run(argus.compare, symbols.split(","), f)
+
+    # -- routines: brief, events, alerts, notes ------------------------------------
+    @app.get("/api/brief/{ref}")
+    async def brief(ref: str, news: bool = True):
+        return await run(argus.daily_brief, ref, dict(hub.quotes), news)
+
+    @app.get("/api/events")
+    async def events(days_ahead: int = 14, days_back: int = 7):
+        return await run(argus.upcoming_events, days_ahead, days_back)
+
+    @app.get("/api/alerts")
+    async def alerts(include_inactive: bool = False):
+        since = date.fromisoformat(hub.status["last_session"])
+        return {"alerts": await run(argus.alerts.list, include_inactive),
+                "fired": await run(argus.alerts.fired, since),
+                "kinds": {k: {"label": v.label, "unit": v.unit} for k, v in KINDS.items()}}
+
+    @app.post("/api/alerts", status_code=201)
+    async def create_alert(body: AlertBody):
+        return await run(argus.alerts.create, body.symbol, body.kind, body.threshold, body.note, "ui")
+
+    @app.patch("/api/alerts/{alert_id}")
+    async def toggle_alert(alert_id: int, active: bool):
+        return await run(argus.alerts.set_active, alert_id, active, "ui")
+
+    @app.get("/api/notes")
+    async def notes(symbol: str | None = None, include_archived: bool = False):
+        return await run(argus.notes.list, symbol, include_archived)
+
+    @app.post("/api/notes", status_code=201)
+    async def add_note(body: NoteBody):
+        review = date.fromisoformat(body.review_on) if body.review_on else None
+        return await run(argus.notes.add, body.symbol, body.text, body.kind, review, "ui")
+
+    @app.patch("/api/notes/{note_id}")
+    async def update_note(note_id: int, body: NotePatch):
+        review = date.fromisoformat(body.review_on) if body.review_on else None
+        return await run(argus.notes.update, note_id, body.text, review, body.clear_review, body.archived, "ui")
 
     # -- live stream -------------------------------------------------------------
     @app.get("/api/stream")

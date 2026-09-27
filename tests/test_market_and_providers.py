@@ -105,3 +105,21 @@ def test_sec_prefers_restated_value():
     ]}}}}}
     assert build_financials(facts)["periods"][0]["revenue"] == 95
     json.dumps(build_financials(facts))  # serializable
+
+
+class _Fund:
+    def __init__(self, name, data):
+        self.name, self.data = name, data
+
+    def get_metrics(self, symbol):
+        return self.data
+
+
+def test_price_currency_fields_prefer_yahoo_ratios_keep_order(make_argus):
+    fh = _Fund("finnhub", {"pe_ttm": 9.0, "high_52w": 1425.0, "low_52w": 617.0, "market_cap": 1.4e11})
+    yh = _Fund("yahoo", {"pe_ttm": 8.8, "high_52w": 81.4, "low_52w": 33.5, "market_cap": 7.5e9, "pe_forward": 7.0})
+    a = make_argus(fundamentals=[fh, yh])
+    out = a.market.get_fundamentals("VIST")
+    assert out["metrics"]["pe_ttm"] == 9.0 and out["sources"]["pe_ttm"] == "finnhub"
+    assert out["metrics"]["high_52w"] == 81.4 and out["sources"]["market_cap"] == "yahoo"
+    assert out["metrics"]["pe_forward"] == 7.0 and "_version" not in out["sources"]
