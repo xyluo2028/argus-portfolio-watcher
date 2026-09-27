@@ -84,7 +84,7 @@
 
 <header class="doc">
   <h1>Argus: Design Doc</h1>
-  <div class="meta">v0.3 · 2026-09-27 · Status: <b>all questions resolved, ready for P0</b> · Scope: MVP = portfolio monitor, then phased add-ons</div>
+  <div class="meta">v0.4 · 2026-09-28 · Status: <b>P0–P2 built</b> (branch main-claude-code-v0) · Scope: MVP = portfolio monitor, then phased add-ons</div>
   <nav class="toc">
     <a href="#goals">1. Goals</a><a href="#decisions">2. Decisions so far</a><a href="#arch">3. Architecture</a>
     <a href="#data">4. Market data</a><a href="#realtime">5. Trade-day refresh</a><a href="#model">6. Data model</a>
@@ -502,9 +502,9 @@ flowchart LR
 <h2 id="roadmap">11. Roadmap</h2>
 <div class="tbl"><table>
   <tr><th>Phase</th><th>Deliverable</th><th>Done when</th></tr>
-  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>argus</code> CLI, <b>Investing.com migration</b> (<code>argus import</code> + <code>import_positions</code>)</td><td>Importing the Investing.com export gives the same lot and position counts, the same shares and average price per symbol, and total cost within $0.05 of the export's summary. <code>argus portfolio --json</code> shows the result.</td></tr>
-  <tr><td><span class="tag t-p1">P1</span> Monitor MVP</td><td>Scheduler and live quote loop with SSE; dashboard, ticker detail, watchlist, transactions and compare pages; multiple portfolios; benchmark compare; <b>MCP server with P1 tools</b></td><td>During market hours the UI updates within about 15s; Claude can answer "how's my portfolio today" and log a trade through MCP</td></tr>
-  <tr><td><span class="tag t-p2">P2</span> Routines</td><td>Events calendar, brief data tool, alerts (price, %, valuation, 52-week, earnings T-1) shown in the UI and MCP, thesis notes, MCP prompts</td><td>Asking Claude Desktop "give me today's brief" produces a brief using only this app's MCP data</td></tr>
+  <tr><td><span class="tag t-p0">P0</span> Foundation ✓</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>argus</code> CLI, <b>Investing.com migration</b> (<code>argus import</code> + <code>import_positions</code>)</td><td>Importing the Investing.com export gives the same lot and position counts, the same shares and average price per symbol, and total cost within $0.05 of the export's summary. <code>argus portfolio --json</code> shows the result.</td></tr>
+  <tr><td><span class="tag t-p1">P1</span> Monitor MVP ✓</td><td>Scheduler and live quote loop with SSE; dashboard, ticker detail, watchlist, transactions and compare pages; multiple portfolios; benchmark compare; <b>MCP server with P1 tools</b></td><td>During market hours the UI updates within about 15s; Claude can answer "how's my portfolio today" and log a trade through MCP</td></tr>
+  <tr><td><span class="tag t-p2">P2</span> Routines ✓</td><td>Events calendar, brief data tool, alerts (price, %, valuation, 52-week, earnings T-1) shown in the UI and MCP, thesis notes, MCP prompts</td><td>Asking Claude Desktop "give me today's brief" produces a brief using only this app's MCP data</td></tr>
   <tr><td><span class="tag t-p3">P3</span> Analysis</td><td>Target weights, drift and what-if trades, exposure analysis, broker CSV import, paid-provider adapters, optional extended hours, notifications, options</td><td>As needed</td></tr>
 </table></div>
 
@@ -579,7 +579,7 @@ flowchart LR
 <div class="q" style="opacity:.7"><b class="n">Q10 ✓</b><b>Investing.com export format?</b> CSV download.
   <div class="def">Resolved: see the importer spec in section 12a. Only the fields listed there are read; every other column is ignored.</div></div>
 
-<footer>Argus (portfolio monitor) · design v0.3 · diagrams rendered with Mermaid.</footer>
+<footer>Argus (portfolio monitor) · design v0.4 · diagrams rendered with Mermaid.</footer>
 </div>
 
 <script type="module">
