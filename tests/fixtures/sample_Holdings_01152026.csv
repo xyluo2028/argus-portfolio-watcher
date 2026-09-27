@@ -1,0 +1,21 @@
+"Open Positions Summary"
+"","Name","Symbol","Exchange","Type","Amount","Avg Price","Current Price","Market Value","Commission","Net P/L"
+"","Apple","AAPL.O","NASDAQ","BUY","15.00000000","180.00","200.00","$3,000.00","$0.00","$300.00"
+"","Coca-Cola","KO","NYSE","BUY","10.00000000","60.00","62.00","$620.00","$0.00","$20.00"
+"","SPDR S&P 500","SPY.K","NYSE","BUY","2.00000000","500.00","510.00","$1,020.00","$0.00","$20.00"
+
+"Market Value","$4,640.00"
+"Open P/L","$340.00 / 7.91%"
+"Daily P/L","$12.00 / 0.26%"
+"Total P/L","$340.00"
+
+
+"Open Positions"
+"","Name","Symbol","Exchange","Open Date","Type","Amount","Open Price","Current Price","Market Value","Commission","Net P/L"
+"","Apple","AAPL.O","NASDAQ","01/02/2026","BUY","10.00000000","170.00","200.00","$2,000.00","$0.00","$300.00"
+"","Apple","AAPL.O","NASDAQ","01/10/2026","BUY","5.00000000","200.00","200.00","$1,000.00","$0.00","$0.00"
+"","Coca-Cola","KO","NYSE","01/02/2026","BUY","10.00000000","60.00","62.00","$620.00","$0.00","$20.00"
+"","SPDR S&P 500","SPY.K","NYSE","01/02/2026","BUY","1.00000000","500.00","510.00","$510.00","$0.00","$10.00"
+"","SPDR S&P 500","SPY.K","NYSE","01/02/2026","BUY","1.00000000","500.00","510.00","$510.00","$0.00","$10.00"
+
+
