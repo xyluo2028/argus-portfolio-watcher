@@ -71,6 +71,16 @@ class NotePatch(BaseModel):
     archived: bool | None = None
 
 
+class TargetsBody(BaseModel):
+    level: str
+    weights: dict[str, float]
+    dry_run: bool = True
+
+
+class SimBody(BaseModel):
+    trades: list[dict]
+
+
 class PortfolioBody(BaseModel):
     name: str
     benchmark: str = "SPY"
@@ -222,6 +232,23 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def update_note(note_id: int, body: NotePatch):
         review = date.fromisoformat(body.review_on) if body.review_on else None
         return await run(argus.notes.update, note_id, body.text, review, body.clear_review, body.archived, "ui")
+
+    # -- analysis -------------------------------------------------------------------
+    @app.get("/api/portfolios/{ref}/exposure")
+    async def get_exposure(ref: str):
+        return await run(argus.exposure, ref, dict(hub.quotes))
+
+    @app.get("/api/portfolios/{ref}/drift")
+    async def get_drift(ref: str, level: str = "symbol", tolerance_pp: float = 2.0):
+        return await run(argus.drift, ref, level, tolerance_pp, dict(hub.quotes))
+
+    @app.put("/api/portfolios/{ref}/targets")
+    async def put_targets(ref: str, body: TargetsBody):
+        return await run(argus.set_targets, ref, body.level, body.weights, body.dry_run, "ui")
+
+    @app.post("/api/portfolios/{ref}/simulate")
+    async def simulate(ref: str, body: SimBody):
+        return await run(argus.simulate_trades, ref, body.trades, dict(hub.quotes))
 
     # -- live stream -------------------------------------------------------------
     @app.get("/api/stream")

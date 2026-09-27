@@ -40,6 +40,15 @@ def _pct(v) -> float | None:
     return None if f is None else f * 100
 
 
+# funds_data keys -> the sector names Yahoo uses for individual stocks.
+YAHOO_FUND_SECTORS = {
+    "realestate": "Real Estate", "consumer_cyclical": "Consumer Cyclical", "basic_materials": "Basic Materials",
+    "consumer_defensive": "Consumer Defensive", "technology": "Technology",
+    "communication_services": "Communication Services", "financial_services": "Financial Services",
+    "healthcare": "Healthcare", "industrials": "Industrials", "energy": "Energy", "utilities": "Utilities",
+}
+
+
 class YahooProvider:
     name = "yahoo"
 
@@ -98,6 +107,22 @@ class YahooProvider:
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"yahoo calendar {symbol}: {e}") from e
         return cal if isinstance(cal, dict) else {}
+
+    def get_fund_profile(self, symbol: str) -> dict:
+        """ETF sector weights (Yahoo sector names, fractions summing to ~1) and top holdings.
+        Empty for anything that isn't a fund."""
+        try:
+            fd = _yf().Ticker(to_yahoo(symbol)).funds_data
+            sectors = fd.sector_weightings or {}
+            th = fd.top_holdings
+        except Exception:  # noqa: BLE001 - yfinance raises for non-funds; treat as "no profile"
+            return {}
+        holdings = []
+        if th is not None and not th.empty:
+            for sym, row in th.iterrows():
+                holdings.append({"symbol": str(sym), "name": row.get("Name"), "weight": float(row.get("Holding Percent") or 0)})
+        return {"sectors": {YAHOO_FUND_SECTORS.get(k, k): float(v) for k, v in sectors.items() if v},
+                "top_holdings": holdings}
 
     def get_metrics(self, symbol: str) -> dict[str, float | None]:
         return metrics_from_info(self.get_info(symbol))

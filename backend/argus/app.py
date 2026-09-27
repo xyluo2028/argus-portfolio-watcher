@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 
 from argus.config import Settings, load_settings
 from argus.db import make_engine, session_scope
@@ -18,18 +18,19 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import Instrument
+from argus.models import AuditLog, FundProfile, Instrument, Target
 from argus.providers.base import Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
+from argus.services import analysis
 from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
 from argus.services.market import MarketService
 from argus.services.notes import NoteService
-from argus.services.portfolio import PortfolioService, position_to_dict
+from argus.services.portfolio import PortfolioService, TxnInput, position_to_dict
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import normalize_symbol
 
@@ -265,6 +266,133 @@ class Argus:
                 if items := self.events.news(p["symbol"], days=2, limit=3):
                     out["headlines"][p["symbol"]] = items
         return out
+
+    # -- analysis: exposure, targets, drift, what-if -------------------------------
+    FUND_PROFILE_MAX_AGE = timedelta(days=7)
+
+    def fund_profiles(self, symbols: list[str]) -> dict[str, dict]:
+        """ETF look-through data, cached a week; non-funds are cached as empty profiles."""
+        now = datetime.now(UTC)
+        out: dict[str, dict] = {}
+        with session_scope(self.engine) as s:
+            for fp in s.scalars(select(FundProfile).where(FundProfile.symbol.in_(symbols))):
+                if now - fp.as_of < self.FUND_PROFILE_MAX_AGE:
+                    out[fp.symbol] = fp.data
+        yahoo = self.market.profile_provider
+        todo = [x for x in symbols if x not in out]
+        if yahoo is not None and todo:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                fetched = dict(zip(todo, pool.map(yahoo.get_fund_profile, todo)))
+            with session_scope(self.engine) as s:
+                for sym, data in fetched.items():
+                    s.merge(FundProfile(symbol=sym, as_of=now, data=data))
+            out |= fetched
+        return {k: v for k, v in out.items() if v}
+
+    def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        summ = self.portfolio(ref, True, False, live_quotes)
+        rows = summ["positions"]
+        return {"portfolio": summ["portfolio"]["name"],
+                **analysis.exposure(rows, self.fund_profiles([r["symbol"] for r in rows]))}
+
+    def targets(self, ref: str, level: str) -> dict[str, float]:
+        p = self.portfolios.get_portfolio(ref)
+        with session_scope(self.engine) as s:
+            return {t.key: t.weight_pct for t in s.scalars(select(Target).where(Target.portfolio_id == p.id,
+                                                                                 Target.level == level))}
+
+    def set_targets(self, ref: str, level: str, weights: dict[str, float], dry_run: bool = True,
+                    actor: str = "cli") -> dict:
+        """Replace all targets at `level` (symbol | sector). Weights are percents."""
+        if level not in ("symbol", "sector"):
+            raise ArgusError("INVALID_ARG", "level must be 'symbol' or 'sector'.")
+        if any(w < 0 or w > 100 for w in weights.values()):
+            raise ArgusError("INVALID_ARG", "Each target must be between 0 and 100 (percent).")
+        clean = {(normalize_symbol(k) if level == "symbol" else k.strip()): float(w) for k, w in weights.items()}
+        p = self.portfolios.get_portfolio(ref)
+        preview = self.drift(ref, level, targets=clean)
+        preview["dry_run"] = dry_run
+        if not dry_run:
+            with session_scope(self.engine) as s:
+                for t in s.scalars(select(Target).where(Target.portfolio_id == p.id, Target.level == level)):
+                    s.delete(t)
+                for k, w in clean.items():
+                    s.add(Target(portfolio_id=p.id, level=level, key=k, weight_pct=w))
+                s.add(AuditLog(actor=actor, action="set_targets", entity="portfolio", entity_id=str(p.id),
+                               after={"level": level, "weights": clean}))
+        return preview
+
+    def drift(self, ref: str, level: str = "symbol", tolerance_pp: float = 2.0,
+              live_quotes: dict[str, Quote] | None = None, targets: dict[str, float] | None = None) -> dict:
+        summ = self.portfolio(ref, True, False, live_quotes)
+        tg = targets if targets is not None else self.targets(ref, level)
+        return {"portfolio": summ["portfolio"]["name"], **analysis.drift(summ["positions"], tg, level, tolerance_pp)}
+
+    def simulate_trades(self, ref: str, trades: list[dict], live_quotes: dict[str, Quote] | None = None) -> dict:
+        """What-if: apply hypothetical BUY/SELL trades (qty, or dollar `amount`) at `price` or the
+        current quote; nothing is saved. Returns before/after weights, exposure and realized P&L."""
+        p = self.portfolios.get_portfolio(ref)
+        before = self.portfolio(ref, True, False, live_quotes)
+        now = datetime.now(UTC)
+        syms = sorted({normalize_symbol(t["symbol"]) for t in trades})
+        quotes = dict(live_quotes or {})
+        missing = [s for s in syms if s not in quotes]
+        if missing:
+            quotes |= self.market.get_quotes(missing)[0]
+        items: list[TxnInput] = []
+        cash = 0.0
+        for i, t in enumerate(trades):
+            sym = normalize_symbol(t["symbol"])
+            side = str(t.get("side", "BUY")).upper()
+            if side not in ("BUY", "SELL"):
+                raise ArgusError("INVALID_ARG", f"Trade {i + 1}: side must be BUY or SELL.")
+            price = t.get("price") or (quotes[sym].price if sym in quotes else None)
+            if not price:
+                raise ArgusError("NO_PRICE", f"No price for {sym}; pass price explicitly.")
+            qty = t.get("qty") or (t["amount"] / price if t.get("amount") else None)
+            if not qty or qty <= 0:
+                raise ArgusError("INVALID_ARG", f"Trade {i + 1}: give qty or amount > 0.")
+            items.append(TxnInput(side, sym, now, qty, price, float(t.get("fee") or 0.0), id=10**9 + i))
+            cash += (-1 if side == "BUY" else 1) * qty * price
+        state = build_positions([*self.portfolios.active_transactions(p.id), *items])  # validates oversells
+        sim_quotes = dict(quotes)
+        for s in syms:
+            if s not in sim_quotes:
+                last = next(x for x in reversed(items) if x.symbol == s)
+                sim_quotes[s] = Quote(s, last.price, None, None, None, None, now, "simulated")
+        after_rows = []
+        by_symbol = {r["symbol"]: r for r in before["positions"]}
+        for sym, pos in state.items():
+            if not pos.is_open:
+                continue
+            base = dict(by_symbol.get(sym, {"symbol": sym, "sector": None, "type": None, "name": None}))
+            q = sim_quotes.get(sym)
+            px = q.price if q else base.get("price") or pos.avg_cost
+            base |= {"qty": pos.qty, "avg_cost": pos.avg_cost, "cost_basis": pos.cost_basis, "price": px,
+                     "market_value": pos.qty * px}
+            after_rows.append(base)
+        total_after = sum(r["market_value"] for r in after_rows)
+        for r in after_rows:
+            r["weight_pct"] = r["market_value"] / total_after * 100 if total_after else None
+        realized_after = sum(ps.realized_pnl for ps in state.values())
+        changed = {normalize_symbol(t["symbol"]) for t in trades}
+        profiles = self.fund_profiles([r["symbol"] for r in after_rows])
+        return {
+            "portfolio": p.name,
+            "trades": [{"symbol": x.symbol, "side": x.type, "qty": x.qty, "price": x.price} for x in items],
+            "net_cash": cash,  # + frees cash (sells), - needs cash (buys)
+            "realized_pnl_from_trades": realized_after - before["totals"]["realized_pnl"],
+            "value_before": before["totals"]["market_value"],
+            "value_after": total_after,
+            "positions_changed": [
+                {"symbol": s, "weight_before": (by_symbol.get(s) or {}).get("weight_pct"),
+                 "weight_after": next((r["weight_pct"] for r in after_rows if r["symbol"] == s), 0.0),
+                 "qty_after": next((r["qty"] for r in after_rows if r["symbol"] == s), 0.0)} for s in sorted(changed)],
+            "concentration_before": analysis.concentration([analysis.value(r) for r in before["positions"]]),
+            "concentration_after": analysis.concentration([r["market_value"] for r in after_rows]),
+            "sector_lookthrough_after": analysis.exposure(after_rows, profiles).get("by_sector_lookthrough", []),
+            "saved": False,
+        }
 
     PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
 

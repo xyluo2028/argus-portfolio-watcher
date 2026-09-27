@@ -37,6 +37,7 @@ Start with list_portfolios, then get_portfolio for positions, weights, day and u
 Market data: get_quotes (batch), get_price_history (+ indicators), get_fundamentals, get_financials
 (SEC filings), compare_symbols, get_performance (time-weighted return vs benchmark).
 Routines: get_daily_brief_data (one call for a brief), get_events, list_alerts/set_alert, notes.
+Analysis: get_exposure, get_drift/set_targets, simulate_trades (what-if, never saved).
 Writes (add_transaction, delete_transaction, watchlist_add/remove, create_portfolio) change the
 user's records: preview with dry_run=True (the default), show the user the preview, and only then
 call again with dry_run=False. Never place real brokerage orders; Argus only records trades.
@@ -219,6 +220,31 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         due = date.today() + timedelta(days=due_within_days) if due_within_days is not None else None
         return argus.notes.list(symbol, include_archived, due)
 
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_exposure(portfolio: str) -> dict:
+        """Where the money is: stock vs ETF split, sector weights direct and looked through ETFs,
+        concentration (top-1/5/10 weight, HHI, effective number of positions), and single-stock
+        exposure including indirect holdings via ETFs' published top holdings (a lower bound)."""
+        return argus.exposure(portfolio, quotes_now())
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_drift(portfolio: str, level: str = "symbol", tolerance_pp: float = 2.0) -> dict:
+        """Current vs target weights (level: symbol | sector) with drift in percentage points,
+        the $ trade that would close each gap (+ buy / - sell) and whether it's outside the band.
+        Set targets first with set_targets."""
+        return argus.drift(portfolio, level, tolerance_pp, quotes_now())
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def simulate_trades(portfolio: str, trades: list[dict]) -> dict:
+        """What-if, nothing is saved. trades: [{"symbol": "NVDA", "side": "SELL", "qty": 5},
+        {"symbol": "VOO", "side": "BUY", "amount": 1000}] (price defaults to the current quote).
+        Returns net cash (+ freed / - needed), FIFO realized P&L, weights before/after for the traded
+        symbols, concentration before/after and look-through sector weights after."""
+        return argus.simulate_trades(portfolio, trades, quotes_now())
+
     # -- write ----------------------------------------------------------------
     @mcp.tool(annotations=WRITE)
     @_tool
@@ -283,6 +309,14 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Edit a note's text, move or clear its review date, or archive it."""
         return argus.notes.update(note_id, text, date.fromisoformat(review_on) if review_on else None,
                                   clear_review, archived, actor="mcp")
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def set_targets(portfolio: str, level: str, weights: dict[str, float], dry_run: bool = True) -> dict:
+        """Replace the portfolio's target weights at one level: symbol ({"NVDA": 15, "VOO": 30, ...})
+        or sector ({"Technology": 40, "Healthcare": 10, ...}; use the sector names from get_exposure).
+        Percents; should sum to 100. dry_run (default) returns the resulting drift without saving."""
+        return argus.set_targets(portfolio, level, weights, dry_run, actor="mcp")
 
     @mcp.tool(annotations=WRITE)
     @_tool

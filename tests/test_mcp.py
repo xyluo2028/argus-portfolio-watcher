@@ -67,3 +67,13 @@ def test_routine_tools(mcp):
     assert brief["top_gainers"][0]["symbol"] == "AAA" and brief["theses_due"]
     prompts = {p.name for p in asyncio.run(mcp.list_prompts())}
     assert {"daily_brief", "position_review"} <= prompts
+
+
+def test_analysis_tools(mcp):
+    e = call(mcp, "get_exposure", {"portfolio": "growth"})
+    assert e["concentration"]["positions"] == 1
+    sim = call(mcp, "simulate_trades", {"portfolio": "growth", "trades": [{"symbol": "AAA", "side": "SELL", "qty": 5}]})
+    assert sim["saved"] is False and sim["net_cash"] == 550
+    prev = call(mcp, "set_targets", {"portfolio": "growth", "level": "symbol", "weights": {"AAA": 100}})
+    assert prev["dry_run"] is True
+    assert call(mcp, "get_drift", {"portfolio": "growth"})["rows"][0]["target_pct"] is None  # not saved

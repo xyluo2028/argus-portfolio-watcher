@@ -236,6 +236,27 @@ class RefreshLog(Base):
     at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class Target(Base):
+    """Target weight for a symbol or a sector within a portfolio."""
+
+    __tablename__ = "target"
+
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolio.id"), primary_key=True)
+    level: Mapped[str] = mapped_column(String(8), primary_key=True)  # symbol | sector
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    weight_pct: Mapped[float] = mapped_column(Float)
+
+
+class FundProfile(Base):
+    """ETF sector weights and top holdings (Yahoo), for look-through exposure."""
+
+    __tablename__ = "fund_profile"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(default=utcnow)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)  # {"sectors": {...}, "top_holdings": [...]}
+
+
 class NavDaily(Base):
     """Filled in P1 by the performance engine."""
 
@@ -255,12 +276,14 @@ __all__ = [
     "Event",
     "Note",
     "Base",
+    "FundProfile",
     "Fundamental",
     "Instrument",
     "NavDaily",
     "Portfolio",
     "PriceBar",
     "RefreshLog",
+    "Target",
     "QuoteCache",
     "Transaction",
     "TxnType",

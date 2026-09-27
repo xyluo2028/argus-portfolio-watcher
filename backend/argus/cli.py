@@ -350,6 +350,51 @@ def note_list(symbol: str | None = None, as_json: JsonOpt = False):
     _run(as_json, lambda: _argus().notes.list(symbol), render)
 
 
+@portfolio_app.command("exposure")
+def portfolio_exposure(ref: str, as_json: JsonOpt = False):
+    """Sector weights (direct and ETF look-through), concentration, top stock exposure."""
+    def render(e):
+        c = e["concentration"]
+        console.print(f"[bold]{e['portfolio']}[/bold]  top-1 {c['top1_pct']:.1f}%  top-5 {c['top5_pct']:.1f}%  "
+                      f"effective positions {c['effective_positions']:.1f} of {c['positions']}")
+        t = Table("Sector (look-through)", "Weight")
+        for r in e["by_sector_lookthrough"]:
+            t.add_row(r["key"], f"{r['weight_pct']:.1f}%")
+        console.print(t)
+    _run(as_json, lambda: _argus().exposure(ref), render)
+
+
+@portfolio_app.command("drift")
+def portfolio_drift(ref: str, level: str = "symbol", as_json: JsonOpt = False):
+    """Current vs target weights; set targets with `argus portfolio targets`."""
+    def render(d):
+        t = Table("Key", "Weight", "Target", "Drift (pp)", "Trade to target")
+        for r in d["rows"]:
+            if r["target_pct"] is None:
+                continue
+            t.add_row(r["key"], f"{r['weight_pct']:.1f}%", f"{r['target_pct']:.1f}%",
+                      _cell(r["drift_pp"], f"{r['drift_pp']:+.1f}"), _money(r["trade_to_target"], True))
+        console.print(t)
+        console.print(f"Untargeted: {d['untargeted_pct']:.1f}%  " + " ".join(d["warnings"]))
+    _run(as_json, lambda: _argus().drift(ref, level), render)
+
+
+@portfolio_app.command("targets")
+def portfolio_targets(ref: str, level: str, weights: Annotated[list[str], typer.Argument(help="KEY=PCT, e.g. NVDA=15 VOO=30")],
+                      dry_run: DryRunOpt = False, as_json: JsonOpt = False):
+    """Replace target weights at a level (symbol | sector)."""
+    def go():
+        parsed = {}
+        for w in weights:
+            k, _, v = w.rpartition("=")
+            if not k:
+                raise ArgusError("INVALID_ARG", f"'{w}' should look like KEY=PCT.")
+            parsed[k] = float(v)
+        return _argus().set_targets(ref, level, parsed, dry_run)
+    _run(as_json, go, lambda d: console.print(("Preview: " if d["dry_run"] else "Saved. ") +
+                                              f"targets sum {d['targets_sum_pct']:.1f}% " + " ".join(d["warnings"])))
+
+
 # -- transactions -----------------------------------------------------------------
 @txn_app.command("add")
 def txn_add(portfolio: str,
