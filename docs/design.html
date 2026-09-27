@@ -461,7 +461,7 @@ sequenceDiagram
 </div>
 
 <pre><code># register with Claude Code (stdio)
-claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/portfolio-monitor argus mcp
+claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/argus-portfolio-watcher argus mcp
 
 # or over HTTP while `argus serve` is running
 claude mcp add --transport http argus http://localhost:8765/mcp</code></pre>
@@ -510,7 +510,7 @@ flowchart LR
 
 <!-- ============================================================ -->
 <h2 id="layout">12. Repo layout</h2>
-<pre><code>argus/   (local folder: portfolio-monitor/)
+<pre><code>argus-portfolio-watcher/
 ├─ pyproject.toml            # uv; entry point `argus`
 ├─ backend/argus/
 │  ├─ core/                  # db.py, models.py, services/{portfolio,market,analytics}.py
