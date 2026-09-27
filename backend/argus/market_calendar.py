@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 import exchange_calendars as xcals
 import pandas as pd
 
+from argus.errors import ArgusError
+
 NY = ZoneInfo("America/New_York")
 PRE_MARKET_OPEN = time(4, 0)
 POST_MARKET_HOURS = timedelta(hours=4)
@@ -75,3 +77,17 @@ def session_date(ts: datetime) -> date:
     if st["session"] != "closed":
         return ts.astimezone(NY).date()
     return date.fromisoformat(st["last_session"])
+
+
+def parse_ny_datetime(s: str | None) -> datetime:
+    """Parse user input: None -> now; "YYYY-MM-DD" -> that day's 16:00 close; else ISO in New York time."""
+    if not s:
+        return datetime.now(UTC)
+    try:
+        if len(s) == 10:
+            return datetime.combine(date.fromisoformat(s), time(16, 0), NY)
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=NY)
+    except ValueError as e:
+        raise ArgusError("INVALID_ARG", f"Bad date '{s}'.",
+                         hint="Use YYYY-MM-DD or YYYY-MM-DDTHH:MM (New York time).") from e

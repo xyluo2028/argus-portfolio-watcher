@@ -17,6 +17,7 @@ from argus.errors import ArgusError
 from argus.importers import investing
 from argus.market_calendar import market_status
 from argus.models import Instrument
+from argus.providers.base import Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
@@ -58,11 +59,18 @@ class Argus:
         return {"quotes": [quotes[s].to_dict() for s in syms if s in quotes], "errors": errors,
                 "market": market_status()}
 
-    def portfolio(self, ref: str, with_quotes: bool = True, include_lots: bool = False) -> dict:
+    def portfolio(self, ref: str, with_quotes: bool = True, include_lots: bool = False,
+                  live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Portfolio summary. `live_quotes` (from the web server's hub) are preferred over the cache."""
         state = self.portfolios.positions(ref)
         open_syms = [s for s, p in state.items() if p.is_open]
-        quotes, errors = self.market.get_quotes(open_syms) if with_quotes and open_syms else ({}, {})
-        out = self.portfolios.summary(ref, quotes, include_lots=include_lots)
+        quotes = {s: live_quotes[s] for s in open_syms if live_quotes and s in live_quotes}
+        missing = [s for s in open_syms if s not in quotes]
+        errors: dict[str, str] = {}
+        if with_quotes and missing:
+            got, errors = self.market.get_quotes(missing)
+            quotes |= got
+        out = self.portfolios.summary(ref, quotes if with_quotes else {}, include_lots=include_lots)
         out["quote_errors"] = errors
         return out
 

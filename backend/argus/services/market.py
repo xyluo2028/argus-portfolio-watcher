@@ -73,7 +73,7 @@ class MarketService:
                     errors[sym] = str(e)
                 continue
             quotes.update(got)
-            self._store_quotes(got.values())
+            self.store_quotes(got.values())
             missing = [s for s in missing if s not in got]
         for sym in missing:
             errors.setdefault(sym, "unknown symbol or no provider returned a quote")
@@ -81,7 +81,7 @@ class MarketService:
             errors.pop(sym, None)
         return quotes, errors
 
-    def _store_quotes(self, quotes) -> None:
+    def store_quotes(self, quotes) -> None:
         rows = [dict(symbol=q.symbol, price=q.price, prev_close=q.prev_close, open=q.open, high=q.high, low=q.low,
                      as_of=q.as_of, source=q.source, delayed=q.delayed, fetched_at=datetime.now(UTC))
                 for q in quotes]

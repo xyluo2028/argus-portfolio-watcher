@@ -13,13 +13,19 @@ dependencies = [
     "pandas>=2.2",
     "exchange-calendars>=4.5",
     "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "websockets>=13",
 ]
 
 [project.scripts]
 argus = "argus.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -30,3 +36,5 @@ packages = ["backend/argus"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# starlette nags about its own test client transport; not actionable here
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

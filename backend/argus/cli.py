@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, time
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from argus.errors import ArgusError
-from argus.market_calendar import NY
+from argus.market_calendar import NY, parse_ny_datetime
 from argus.symbols import normalize_symbol
 
 app = typer.Typer(help="Argus: portfolio monitor for US stocks & ETFs.", no_args_is_help=True,
@@ -79,17 +79,20 @@ def _cell(v, text: str) -> str:
     return f"[{_color(v)}]{text}[/{_color(v)}]"
 
 
-def _parse_when(s: str | None) -> datetime:
-    if not s:
-        return datetime.now(UTC)
+@app.command()
+def serve(port: Annotated[int | None, typer.Option(help="Default: ARGUS_PORT or 8787")] = None,
+          host: str = "127.0.0.1"):
+    """Run the web UI, JSON API and live price stream (http://localhost:8787)."""
+    from argus.api.server import serve as run_server
+    from argus.config import load_settings
+
     try:
-        if len(s) == 10:
-            # A bare date means "at that day's close".
-            return datetime.combine(date.fromisoformat(s), time(16, 0), NY)
-        dt = datetime.fromisoformat(s)
-        return dt if dt.tzinfo else dt.replace(tzinfo=NY)
-    except ValueError as e:
-        raise ArgusError("INVALID_ARG", f"Bad date '{s}'.", hint="Use YYYY-MM-DD or YYYY-MM-DDTHH:MM (New York time).") from e
+        run_server(port or load_settings().port, host)
+    except ArgusError as e:
+        console.print(f"[red]Error ({e.code}):[/red] {e.message}")
+        if e.hint:
+            console.print(f"[dim]Hint: {e.hint}[/dim]")
+        raise typer.Exit(1)
 
 
 # -- market ---------------------------------------------------------------------
@@ -260,7 +263,7 @@ def txn_add(portfolio: str,
     from argus.services.portfolio import TxnInput
 
     def go():
-        item = TxnInput(type=type, symbol=symbol, ts=_parse_when(when), qty=qty, price=price, fee=fee,
+        item = TxnInput(type=type, symbol=symbol, ts=parse_ny_datetime(when), qty=qty, price=price, fee=fee,
                         amount=amount, note=note, external_id=idempotency_key)
         return _argus().portfolios.add_transactions(portfolio, [item], source="cli", dry_run=dry_run)
 
