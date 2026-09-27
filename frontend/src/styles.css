@@ -174,3 +174,7 @@ td .name { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .error { border: 1px solid var(--down); color: var(--text); background: var(--flash-down); border-radius: 8px; padding: 10px 12px; }
 .tooltip { position: fixed; z-index: 50; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+
+.alert-strip { border-color: var(--warn); }
+.alert-strip ul { margin: 6px 0; padding-left: 18px; }
+textarea.input { resize: vertical; font: inherit; }

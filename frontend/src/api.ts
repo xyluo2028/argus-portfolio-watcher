@@ -134,6 +134,7 @@ export interface StreamUpdate {
   market: MarketStatus;
   stream: { state: "disabled" | "idle" | "connected" | "reconnecting"; symbols: number };
   quotes: Record<string, Quote>;
+  alerts_fired?: FiredAlert[];
   portfolio?: Summary;
 }
 
@@ -178,6 +179,23 @@ export interface WatchItem {
   symbol: string; note: string | null; added_at: string; quote: Quote | null; metrics: Record<string, number | null> | null;
 }
 
+export interface CalEvent {
+  symbol: string; kind: "earnings" | "ex_dividend" | "dividend_pay"; date: string; hour: string | null; held: boolean;
+  epsEstimate?: number; epsActual?: number; epsSurprisePct?: number; revenueEstimate?: number; revenueActual?: number;
+}
+
+export interface AlertRule {
+  id: number; symbol: string; kind: string; threshold: number; unit: string; label: string; note: string | null;
+  active: boolean; created_by: string; last_fired?: { session_date: string; message: string };
+}
+
+export interface FiredAlert { alert_id: number; symbol: string; kind: string; message: string; note: string | null; session_date?: string; ts?: string }
+
+export interface NoteItem {
+  id: number; symbol: string; kind: "thesis" | "note"; text: string; review_on: string | null; archived: boolean;
+  created_by: string; created_at: string; updated_at: string;
+}
+
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
 
 export const api = {
@@ -205,6 +223,19 @@ export const api = {
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
   search: (q: string) => get<{ symbol: string; name: string | null; type: string | null }[]>(`/api/search?q=${enc(q)}&limit=8`),
+  events: (daysAhead = 14, daysBack = 7) =>
+    get<{ as_of: string; upcoming: CalEvent[]; recent: CalEvent[] }>(`/api/events?days_ahead=${daysAhead}&days_back=${daysBack}`),
+  alerts: (includeInactive = false) =>
+    get<{ alerts: AlertRule[]; fired: FiredAlert[]; kinds: Record<string, { label: string; unit: string }> }>(
+      `/api/alerts${includeInactive ? "?include_inactive=true" : ""}`),
+  createAlert: (body: { symbol: string; kind: string; threshold: number; note?: string }) =>
+    send<AlertRule>("POST", "/api/alerts", body),
+  toggleAlert: (id: number, active: boolean) => send<AlertRule>("PATCH", `/api/alerts/${id}?active=${active}`),
+  notes: (symbol?: string) => get<NoteItem[]>(`/api/notes${symbol ? `?symbol=${enc(symbol)}` : ""}`),
+  addNote: (body: { symbol: string; text: string; kind: "thesis" | "note"; review_on?: string }) =>
+    send<NoteItem>("POST", "/api/notes", body),
+  updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
+    send<NoteItem>("PATCH", `/api/notes/${id}`, body),
   quotes: (symbols: string[]) =>
     get<{ quotes: Quote[]; errors: Record<string, string> }>(`/api/quotes?symbols=${symbols.map(enc).join(",")}`),
 };

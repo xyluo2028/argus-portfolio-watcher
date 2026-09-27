@@ -11,7 +11,9 @@ import {
   type StreamUpdate,
 } from "../api";
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
+import { EventsCard } from "../components/EventsCard";
 import { RevenueColumns } from "../components/RevenueColumns";
+import { SymbolNotes } from "../components/SymbolNotes";
 import { big, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
 
 const RANGES = [
@@ -199,6 +201,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
           ) : <p className="muted">Not held in {portfolio}.</p>}
         </div>
       </section>
+
+      <SymbolNotes symbol={symbol} />
+      <EventsCard symbol={symbol} />
 
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>

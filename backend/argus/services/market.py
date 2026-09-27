@@ -199,6 +199,9 @@ class MarketService:
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         if self.sec is None:
             raise ArgusError("NOT_CONFIGURED", "SEC EDGAR provider is not configured.")
+        if not self.settings.sec_user_agent:
+            raise ArgusError("NOT_CONFIGURED", "Reported financials need SEC_USER_AGENT in .env.",
+                             hint='SEC asks for a contact, e.g. SEC_USER_AGENT="argus you@example.com"; then restart.')
         try:
             return {"symbol": symbol, "source": "sec", **self.sec.get_financials(symbol, period, limit)}
         except ProviderError as e:

@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { Alerts } from "./pages/Alerts";
 import { Compare } from "./pages/Compare";
 import { Dashboard } from "./pages/Dashboard";
 import { Ticker } from "./pages/Ticker";
@@ -48,6 +49,7 @@ export function App() {
           <NavLink to="/watchlist">Watchlist</NavLink>
           <NavLink to="/transactions">Transactions</NavLink>
           <NavLink to="/compare">Compare</NavLink>
+          <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
         </nav>
         {portfolios && portfolios.length > 0 && (
           <select value={current} onChange={(e) => setCurrent(e.target.value)} aria-label="Portfolio">
@@ -73,6 +75,7 @@ export function App() {
               <Route path="/watchlist" element={<Watchlist live={live} />} />
               <Route path="/transactions" element={<Transactions portfolio={current} />} />
               <Route path="/compare" element={<Compare portfolio={current} />} />
+              <Route path="/alerts" element={<Alerts live={live} />} />
             </Routes>
           )}
       </main>

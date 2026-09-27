@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
+import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
 import { PerformanceCard } from "../components/PerformanceCard";
 import { money, pct, tone } from "../format";
@@ -77,6 +79,14 @@ export function Dashboard({ portfolio, live }: Props) {
         </div>
       </section>
 
+      {live?.alerts_fired && live.alerts_fired.length > 0 && (
+        <section className="card alert-strip" aria-live="polite">
+          <strong>Alerts this session</strong>
+          <ul>{live.alerts_fired.slice(0, 5).map((a) => <li key={a.alert_id}>{a.message}{a.note ? <span className="muted"> · {a.note}</span> : null}</li>)}</ul>
+          <Link to="/alerts" className="small">All alerts →</Link>
+        </section>
+      )}
+
       {summary.quote_errors && Object.keys(summary.quote_errors).length > 0 && (
         <div className="error">No quote for {Object.keys(summary.quote_errors).join(", ")}; their value is missing from totals.</div>
       )}
@@ -88,6 +98,8 @@ export function Dashboard({ portfolio, live }: Props) {
         <h2>Holdings</h2>
         <HoldingsTable positions={summary.positions} />
       </section>
+
+      <EventsCard />
 
       <section className="grid-2">
         <div className="card">
