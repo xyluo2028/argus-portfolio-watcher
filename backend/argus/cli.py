@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Callable
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -207,22 +208,36 @@ def portfolio_show(ref: Annotated[str, typer.Argument(help="Portfolio name or id
     _run(as_json, lambda: _argus().portfolio(ref, with_quotes=not no_quotes, include_lots=lots), _render_portfolio)
 
 
+def _short(v, signed=False) -> str:
+    """Compact money: cents below 100, whole dollars above (fits 80 columns)."""
+    if v is None:
+        return "-"
+    fmt = ("{:+,.2f}" if signed else "{:,.2f}") if abs(v) < 100 else ("{:+,.0f}" if signed else "{:,.0f}")
+    return fmt.format(v)
+
+
+def _short_pct(v) -> str:
+    return "-" if v is None else f"{v:+.1f}%"
+
+
 def _render_portfolio(d):
     tot, mkt = d["totals"], d["market"]
-    t = Table("Symbol", "Qty", "Avg cost", "Price", "Day %", "Day P&L", "Value", "Weight", "Unrl P&L", "Unrl %",
-              title=f"{d['portfolio']['name']}  ·  market {mkt['session']}")
+    t = Table(title=f"{d['portfolio']['name']}  ·  market {mkt['session']}", box=box.SIMPLE_HEAD,
+              pad_edge=False, padding=(0, 1), collapse_padding=True)
+    for name in ("Sym", "Qty", "Avg", "Price", "Day%", "Day$", "Value", "Wt", "P&L", "P&L%"):
+        t.add_column(name, justify="left" if name == "Sym" else "right", no_wrap=True)
     for r in d["positions"]:
-        t.add_row(r["symbol"], f"{r['qty']:g}", _money(r["avg_cost"]), _money(r.get("price")),
-                  _cell(r.get("change_pct"), _pct(r.get("change_pct"))),
-                  _cell(r.get("day_pnl"), _money(r.get("day_pnl"), True)), _money(r.get("market_value")),
+        t.add_row(r["symbol"], f"{r['qty']:g}", _short(r["avg_cost"]), _short(r.get("price")),
+                  _cell(r.get("change_pct"), _short_pct(r.get("change_pct"))),
+                  _cell(r.get("day_pnl"), _short(r.get("day_pnl"), True)), _short(r.get("market_value")),
                   "-" if r.get("weight_pct") is None else f"{r['weight_pct']:.1f}%",
-                  _cell(r.get("unrealized_pnl"), _money(r.get("unrealized_pnl"), True)),
-                  _cell(r.get("unrealized_pct"), _pct(r.get("unrealized_pct"))))
+                  _cell(r.get("unrealized_pnl"), _short(r.get("unrealized_pnl"), True)),
+                  _cell(r.get("unrealized_pct"), _short_pct(r.get("unrealized_pct"))))
     console.print(t)
-    console.print(f"Value [bold]{_money(tot['market_value'])}[/bold]   Cost {_money(tot['cost_basis'])}   "
-                  f"Unrealized {_cell(tot['unrealized_pnl'], _money(tot['unrealized_pnl'], True))} "
-                  f"({_pct(tot['unrealized_pct'])})   Day {_cell(tot['day_pnl'], _money(tot['day_pnl'], True))} "
-                  f"({_pct(tot['day_pnl_pct'])})   Realized {_money(tot['realized_pnl'], True)}")
+    console.print(f"Value [bold]{_money(tot['market_value'])}[/bold]  Cost {_money(tot['cost_basis'])}")
+    console.print(f"Unrealized {_cell(tot['unrealized_pnl'], _money(tot['unrealized_pnl'], True))} "
+                  f"({_pct(tot['unrealized_pct'])})  Day {_cell(tot['day_pnl'], _money(tot['day_pnl'], True))} "
+                  f"({_pct(tot['day_pnl_pct'])})  Realized {_money(tot['realized_pnl'], True)}")
     if d.get("quote_errors"):
         console.print(f"[yellow]No quote for: {', '.join(d['quote_errors'])}[/yellow]")
 
