@@ -109,6 +109,18 @@ select, .btn {
 .chip[aria-pressed="true"] { color: var(--text); border-color: var(--text-2); }
 .chip .key { width: 12px; height: 2px; border-radius: 1px; }
 
+.input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+  color: var(--text); font: inherit; flex: 1; min-width: 90px; }
+.input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.ghost { background: none; border-color: transparent; color: var(--muted); padding: 2px 8px; }
+.btn.ghost:hover { color: var(--text); background: var(--surface-2); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.preview { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); }
+.tag.agent { border-color: var(--accent); color: var(--text); }
+@media (max-width: 640px) { .nav { order: 3; width: 100%; overflow-x: auto; } }
+
 /* live badge */
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

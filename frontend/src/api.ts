@@ -143,8 +143,8 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path);
+async function get<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(path, init);
   const body = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = body?.error ?? {};
@@ -154,6 +154,31 @@ async function get<T>(path: string): Promise<T> {
 }
 
 const enc = encodeURIComponent;
+const send = <T>(method: string, path: string, body?: unknown) =>
+  get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+
+export interface Txn {
+  id: number; type: string; symbol: string; qty: number; price: number; fee: number; amount: number;
+  ts: string; note: string | null; source: string; external_id: string | null; deleted: boolean;
+}
+
+export interface TxnDraft {
+  type: string; symbol: string; qty?: number; price?: number; fee?: number; amount?: number;
+  date?: string; note?: string; idempotency_key?: string; dry_run?: boolean;
+}
+
+export interface PositionPreview { symbol: string; qty: number; avg_cost: number | null; cost_basis: number; realized_pnl: number }
+
+export interface TxnResult {
+  portfolio: string; dry_run: boolean; to_insert: number; skipped_existing: string[]; inserted_ids: number[];
+  positions: { before: PositionPreview; after: PositionPreview }[];
+}
+
+export interface WatchItem {
+  symbol: string; note: string | null; added_at: string; quote: Quote | null; metrics: Record<string, number | null> | null;
+}
+
+export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
 
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
@@ -168,6 +193,18 @@ export const api = {
     get<Financials>(`/api/financials/${enc(symbol)}?period=${period}&limit=8`),
   performance: (name: string, range: string) =>
     get<Performance>(`/api/portfolios/${enc(name)}/performance?range=${range}`),
+  transactions: (name: string, includeDeleted = false) =>
+    get<Txn[]>(`/api/portfolios/${enc(name)}/transactions${includeDeleted ? "?include_deleted=true" : ""}`),
+  addTransaction: (name: string, draft: TxnDraft) =>
+    send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
+  deleteTransaction: (id: number, dryRun: boolean) =>
+    send<{ deleted: Txn; dry_run: boolean }>("DELETE", `/api/transactions/${id}?dry_run=${dryRun}`),
+  watchlist: (name = "Watchlist") => get<{ watchlist: string; items: WatchItem[]; errors: Record<string, string> }>(`/api/watchlists/${enc(name)}`),
+  watchAdd: (symbols: string[], note?: string, name = "Watchlist") =>
+    send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),
+  watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
+  compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
+  search: (q: string) => get<{ symbol: string; name: string | null; type: string | null }[]>(`/api/search?q=${enc(q)}&limit=8`),
   quotes: (symbols: string[]) =>
     get<{ quotes: Quote[]; errors: Record<string, string> }>(`/api/quotes?symbols=${symbols.map(enc).join(",")}`),
 };

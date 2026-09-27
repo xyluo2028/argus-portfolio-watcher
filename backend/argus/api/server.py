@@ -43,6 +43,11 @@ class TxnBody(BaseModel):
     dry_run: bool = False
 
 
+class WatchBody(BaseModel):
+    symbols: list[str]
+    note: str | None = None
+
+
 class PortfolioBody(BaseModel):
     name: str
     benchmark: str = "SPY"
@@ -134,6 +139,28 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.delete("/api/transactions/{txn_id}")
     async def delete_transaction(txn_id: int, dry_run: bool = False):
         return await run(argus.portfolios.delete_transaction, txn_id, "ui", dry_run)
+
+    # -- watchlist & compare ------------------------------------------------------
+    @app.get("/api/watchlists")
+    async def watchlists():
+        return await run(argus.watchlists.list_watchlists)
+
+    @app.get("/api/watchlists/{name}")
+    async def watchlist(name: str):
+        return await run(argus.watchlist, name, dict(hub.quotes))
+
+    @app.post("/api/watchlists/{name}")
+    async def watchlist_add(name: str, body: WatchBody):
+        return await run(argus.watchlists.add, body.symbols, body.note, name, "ui")
+
+    @app.delete("/api/watchlists/{name}/{symbol}")
+    async def watchlist_remove(name: str, symbol: str):
+        return await run(argus.watchlists.remove, [symbol], name, "ui")
+
+    @app.get("/api/compare")
+    async def compare(symbols: str, fields: str | None = None):
+        f = [x.strip() for x in fields.split(",")] if fields else None
+        return await run(argus.compare, symbols.split(","), f)
 
     # -- live stream -------------------------------------------------------------
     @app.get("/api/stream")

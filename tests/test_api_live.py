@@ -63,3 +63,11 @@ def test_tracked_symbols_orders_by_value_and_adds_benchmark(make_argus):
         TxnInput("BUY", "BIG", datetime(2026, 9, 1, tzinfo=UTC), 1, 1000),
     ])
     assert LiveHub(a).tracked_symbols() == ["BIG", "SMALL", "SPY"]
+
+
+def test_watchlist_endpoints(client):
+    assert client.post("/api/watchlists/Watchlist", json={"symbols": ["aaa"], "note": "idea"}).json()["added"] == ["AAA"]
+    items = client.get("/api/watchlists/Watchlist").json()["items"]
+    assert items[0]["symbol"] == "AAA" and items[0]["quote"]["price"] == 110
+    assert client.delete("/api/watchlists/Watchlist/AAA").json()["removed"] == ["AAA"]
+    assert client.get("/api/compare?symbols=AAA,SPY&fields=pe_ttm").json()["rows"][1]["symbol"] == "SPY"
