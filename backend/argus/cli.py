@@ -125,7 +125,9 @@ def quotes(symbols: Annotated[list[str], typer.Argument(help="Tickers, e.g. NVDA
 
 
 @app.command()
-def history(symbol: str, period: str = "1y", interval: str = "1d", as_json: JsonOpt = False):
+def history(symbol: str, period: str = "1y", interval: str = "1d",
+            indicators: Annotated[str | None, typer.Option(help="e.g. sma50,sma200,rsi14,macd,bb20")] = None,
+            as_json: JsonOpt = False):
     """OHLCV bars (daily bars are cached locally)."""
     def render(d):
         bars = d["bars"]
@@ -134,7 +136,8 @@ def history(symbol: str, period: str = "1y", interval: str = "1d", as_json: Json
         for b in bars[-10:]:
             t.add_row(b["ts"][:10], _money(b["o"]), _money(b["h"]), _money(b["l"]), _money(b["c"]), f"{b['v']:,.0f}")
         console.print(t)
-    _run(as_json, lambda: _argus().history(symbol, period, interval), render)
+    specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
+    _run(as_json, lambda: _argus().history(symbol, period, interval, specs), render)
 
 
 @app.command()

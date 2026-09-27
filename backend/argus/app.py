@@ -14,6 +14,7 @@ from sqlalchemy import Engine
 from argus.config import Settings, load_settings
 from argus.db import make_engine, session_scope
 from argus.errors import ArgusError
+from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import market_status
 from argus.models import Instrument
@@ -74,11 +75,26 @@ class Argus:
         out["quote_errors"] = errors
         return out
 
-    def history(self, symbol: str, period: str = "1y", interval: str = "1d") -> dict:
+    def history(self, symbol: str, period: str = "1y", interval: str = "1d",
+                indicators: list[str] | None = None) -> dict:
+        """OHLCV bars, optionally with indicators computed over a warm-up window.
+
+        Indicators need earlier bars (a 200-day SMA needs 200 days), so they are computed
+        on the full cached daily history and then trimmed to the requested period.
+        """
         sym = normalize_symbol(symbol)
         bars = self.market.get_history(sym, period, interval)
-        return {"symbol": sym, "interval": interval, "period": period, "source": "yahoo",
-                "bars": [{"ts": b.ts.isoformat(), "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]}
+        out = {"symbol": sym, "interval": interval, "period": period, "source": "yahoo",
+               "bars": [{"ts": b.ts.isoformat(), "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]}
+        if indicators:
+            full = self.market.get_history(sym, "max" if interval == "1d" else period, interval) if bars else []
+            offset = len(full) - len(bars)
+            computed = indicators_mod.compute(full, indicators)
+            out["indicators"] = {
+                k: ({kk: vv[offset:] for kk, vv in v.items()} if isinstance(v, dict) else v[offset:])
+                for k, v in computed.items()
+            }
+        return out
 
     # -- import ---------------------------------------------------------------
     def import_investing(self, path: Path, portfolio: str | None = None, opening_through: date | None = None,

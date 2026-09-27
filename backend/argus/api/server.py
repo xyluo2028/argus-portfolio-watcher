@@ -81,8 +81,9 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.quotes, [s for s in symbols.split(",") if s.strip()])
 
     @app.get("/api/history/{symbol}")
-    async def history(symbol: str, period: str = "1y", interval: str = "1d"):
-        return await run(argus.history, symbol, period, interval)
+    async def history(symbol: str, period: str = "1y", interval: str = "1d", indicators: str | None = None):
+        specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
+        return await run(argus.history, symbol, period, interval, specs)
 
     @app.get("/api/fundamentals/{symbol}")
     async def fundamentals(symbol: str, fields: str | None = None, refresh: bool = False):
