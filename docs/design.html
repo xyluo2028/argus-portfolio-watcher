@@ -164,7 +164,7 @@ flowchart LR
     DB[("SQLite (WAL)<br/>data/argus.sqlite")]
   end
   subgraph FACES["Interfaces"]
-    API["REST + SSE<br/>FastAPI :8765"]
+    API["REST + SSE<br/>FastAPI :8787"]
     MCP["MCP server<br/>stdio + streamable HTTP /mcp"]
     CLI["argus CLI<br/>--json output"]
   end
@@ -464,7 +464,7 @@ sequenceDiagram
 claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/argus-portfolio-watcher argus mcp
 
 # or over HTTP while `argus serve` is running
-claude mcp add --transport http argus http://localhost:8765/mcp</code></pre>
+claude mcp add --transport http argus http://localhost:8787/mcp</code></pre>
 
 <!-- ============================================================ -->
 <h2 id="habits">10. Features inspired by your routines</h2>

@@ -19,6 +19,8 @@ class Settings:
     db_path: Path
     finnhub_api_key: str | None
     sec_user_agent: str | None
+    # 8765 is a common default for other local tools; 8787 avoids the clash.
+    port: int = 8787
     # A cached quote younger than this is served without hitting a provider.
     quote_max_age_s: int = 15
     fundamentals_max_age_s: int = 24 * 3600
@@ -36,4 +38,5 @@ def load_settings() -> Settings:
         db_path=db_path,
         finnhub_api_key=os.environ.get("FINNHUB_API_KEY") or None,
         sec_user_agent=os.environ.get("SEC_USER_AGENT") or None,
+        port=int(os.environ.get("ARGUS_PORT") or 8787),
     )
