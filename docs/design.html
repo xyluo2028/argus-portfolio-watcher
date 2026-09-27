@@ -84,12 +84,12 @@
 
 <header class="doc">
   <h1>Argus: Design Doc</h1>
-  <div class="meta">v0.2 · 2026-09-27 · Status: <b>decisions closed, ready for P0</b> · Scope: MVP = portfolio monitor, then phased add-ons</div>
+  <div class="meta">v0.3 · 2026-09-27 · Status: <b>all questions resolved, ready for P0</b> · Scope: MVP = portfolio monitor, then phased add-ons</div>
   <nav class="toc">
     <a href="#goals">1. Goals</a><a href="#decisions">2. Decisions so far</a><a href="#arch">3. Architecture</a>
     <a href="#data">4. Market data</a><a href="#realtime">5. Trade-day refresh</a><a href="#model">6. Data model</a>
     <a href="#analytics">7. Metrics &amp; analytics</a><a href="#ui">8. UI</a><a href="#agent">9. Agent / MCP</a>
-    <a href="#habits">10. Your routines</a><a href="#roadmap">11. Roadmap</a><a href="#layout">12. Repo layout</a>
+    <a href="#habits">10. Your routines</a><a href="#roadmap">11. Roadmap</a><a href="#layout">12. Repo layout</a><a href="#importer">12a. Importer</a>
     <a href="#risks">13. Risks</a><a href="#questions">14. Open questions ❓</a>
   </nav>
 </header>
@@ -136,7 +136,7 @@
   <tr><td>Live data</td><td><b>Finnhub free key</b> (WebSocket + quote/metrics/earnings/news), yfinance for history and as fallback. Key lives in <code>.env</code> (gitignored).</td><td>Q2. Free: 60 requests/min, about 50 streamed symbols.</td></tr>
   <tr><td>Cost basis</td><td><b>FIFO</b> for realized P&amp;L; average cost shown for display only</td><td>Q3. Matches the default at most US brokers and on the 1099-B.</td></tr>
   <tr><td>Cash</td><td><b>Positions only</b>, no cash balances. Buys count as money in; sell proceeds and dividends count as money out.</td><td>Q4. Simpler bookkeeping. Returns are still time-weighted.</td></tr>
-  <tr><td>Migration</td><td>Import current <b>Investing.com</b> holdings as one <b>opening lot per symbol at average cost</b>. Trades after that are FIFO lots.</td><td>Q5. No need to reconstruct old trades. Performance history starts on the import date.</td></tr>
+  <tr><td>Migration</td><td>Import the Investing.com <b>"Open Positions" lots</b> (date, shares, price) into a portfolio named after the file (<code>growth</code>). Lots dated on the days you <b>entered existing holdings</b> become <code>OPENING</code> lots; later-dated lots become <code>BUY</code>s. Trades after that are FIFO lots.</td><td>Q5 and Q10. The export has real per-purchase lots, so FIFO is exact. Only the "growth" portfolio for now.</td></tr>
   <tr><td>Instruments</td><td>Long-only US stocks and ETFs. No options or shorts.</td><td>Q6</td></tr>
   <tr><td>UI</td><td>English only, green for up</td><td>Q7</td></tr>
   <tr><td>Notifications</td><td>None for now. P2 alerts show only in the UI and in MCP responses.</td><td>Q8</td></tr>
@@ -345,7 +345,7 @@ erDiagram
     text note
   }
 </pre>
-<div class="cap">Transaction types are <code>OPENING</code> (a migrated position at average cost), <code>BUY</code>, <code>SELL</code>, <code>DIVIDEND</code>, <code>SPLIT</code> and <code>FEE</code>. There are no cash transactions. Every write also appends a row to <code>AUDIT_LOG</code> (actor = ui/mcp/cli, before, after), which isn't drawn here.</div>
+<div class="cap">Transaction types are <code>OPENING</code> (a holding you already owned when it was imported: original cost kept, performance counted from that day's market value), <code>BUY</code>, <code>SELL</code>, <code>DIVIDEND</code>, <code>SPLIT</code> and <code>FEE</code>. There are no cash transactions. Every write also appends a row to <code>AUDIT_LOG</code> (actor = ui/mcp/cli/import, before, after), which isn't drawn here.</div>
 </div>
 
 <!-- ============================================================ -->
@@ -361,7 +361,7 @@ erDiagram
 </div>
 <div class="card">
   <h3 style="margin-top:0">Performance vs benchmark</h3>
-  <p>Portfolios hold positions only, with no cash. Market value V<sub>t</sub> = Σ qty<sub>t</sub> · close<sub>t</sub> is rebuilt from the trade log and daily bars. The daily return is r<sub>t</sub> = (V<sub>t</sub> + D<sub>t</sub> − F<sub>t</sub>) / V<sub>t−1</sub> − 1, where F<sub>t</sub> is buy cost minus sell proceeds that day, and D<sub>t</sub> is dividends. Chaining these daily returns gives the <b>time-weighted return</b> (TWR), so adding money doesn't count as performance. History starts at the import date. The benchmark (SPY by default, set per portfolio) is normalized to the same start date. Also reported: total return, CAGR, max drawdown, volatility and Sharpe (risk-free rate from the 3-month T-bill).</p>
+  <p>Portfolios hold positions only, with no cash. Market value V<sub>t</sub> = Σ qty<sub>t</sub> · close<sub>t</sub> is rebuilt from the trade log and daily bars. The daily return is r<sub>t</sub> = (V<sub>t</sub> + D<sub>t</sub> − F<sub>t</sub>) / V<sub>t−1</sub> − 1, where F<sub>t</sub> is buy cost minus sell proceeds that day, and D<sub>t</sub> is dividends. Chaining these daily returns gives the <b>time-weighted return</b> (TWR), so adding money doesn't count as performance. <code>OPENING</code> lots enter as a flow at that day's <b>closing market value</b>, not at their original cost. That way a stock bought years ago at a much lower price doesn't show up as a one-day gain on the import date. Cost basis and unrealized P&amp;L still use the original price. History starts at the earliest opening date. The benchmark (SPY by default, set per portfolio) is normalized to the same start date. Also reported: total return, CAGR, max drawdown, volatility and Sharpe (risk-free rate from the 3-month T-bill).</p>
 </div>
 
 <!-- ============================================================ -->
@@ -430,7 +430,7 @@ erDiagram
   <tr><td><code>get_performance</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>TWR, drawdown, vs benchmark over a range</td></tr>
   <tr><td><code>list_transactions</code> · <code>search_symbol</code> · <code>get_watchlist</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Lookups</td></tr>
   <tr><td><code>add_transaction</code> · <code>edit_transaction</code> · <code>delete_transaction</code></td><td class="t-w">write</td><td><span class="tag t-p1">P1</span></td><td>Trade log. <code>dry_run</code> returns the position before and after</td></tr>
-  <tr><td><code>import_positions</code></td><td class="t-w">write</td><td><span class="tag t-p0">P0</span></td><td>Bulk import of opening lots (symbol, shares, avg cost, optional date) from a CSV or rows Claude reads from an Investing.com screenshot. <code>dry_run</code> shows the parsed table first.</td></tr>
+  <tr><td><code>import_positions</code></td><td class="t-w">write</td><td><span class="tag t-p0">P0</span></td><td>Bulk import of lots (symbol, shares, price, date, and OPENING or BUY) from an Investing.com CSV or rows Claude reads from a screenshot. <code>dry_run</code> shows the parsed lots and the reconciliation first.</td></tr>
   <tr><td><code>create_portfolio</code> · <code>watchlist_add</code> · <code>watchlist_remove</code></td><td class="t-w">write</td><td><span class="tag t-p1">P1</span></td><td>Portfolio and watchlist management</td></tr>
   <tr><td><code>get_daily_brief_data</code></td><td class="t-r">read</td><td><span class="tag t-p2">P2</span></td><td>Structured facts for a brief: movers, P&amp;L, events today and this week, alerts fired, news headlines</td></tr>
   <tr><td><code>get_events</code></td><td class="t-r">read</td><td><span class="tag t-p2">P2</span></td><td>Earnings, dividends and splits for holdings and watchlist</td></tr>
@@ -502,7 +502,7 @@ flowchart LR
 <h2 id="roadmap">11. Roadmap</h2>
 <div class="tbl"><table>
   <tr><th>Phase</th><th>Deliverable</th><th>Done when</th></tr>
-  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>argus</code> CLI, <b>Investing.com migration</b> (<code>argus import</code> + <code>import_positions</code>)</td><td>Your Investing.com holdings are imported, and <code>argus portfolio --json</code> matches the Investing.com totals for share count and cost</td></tr>
+  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>argus</code> CLI, <b>Investing.com migration</b> (<code>argus import</code> + <code>import_positions</code>)</td><td>Importing the Investing.com export gives the same lot and position counts, the same shares and average price per symbol, and total cost within $0.05 of the export's summary. <code>argus portfolio --json</code> shows the result.</td></tr>
   <tr><td><span class="tag t-p1">P1</span> Monitor MVP</td><td>Scheduler and live quote loop with SSE; dashboard, ticker detail, watchlist, transactions and compare pages; multiple portfolios; benchmark compare; <b>MCP server with P1 tools</b></td><td>During market hours the UI updates within about 15s; Claude can answer "how's my portfolio today" and log a trade through MCP</td></tr>
   <tr><td><span class="tag t-p2">P2</span> Routines</td><td>Events calendar, brief data tool, alerts (price, %, valuation, 52-week, earnings T-1) shown in the UI and MCP, thesis notes, MCP prompts</td><td>Asking Claude Desktop "give me today's brief" produces a brief using only this app's MCP data</td></tr>
   <tr><td><span class="tag t-p3">P3</span> Analysis</td><td>Target weights, drift and what-if trades, exposure analysis, broker CSV import, paid-provider adapters, optional extended hours, notifications, options</td><td>As needed</td></tr>
@@ -526,13 +526,29 @@ flowchart LR
 ├─ .env                      # FINNHUB_API_KEY, SEC_USER_AGENT (gitignored)
 └─ docs/design.html          # this doc</code></pre>
 
+<h3 id="importer">12a. Investing.com importer spec</h3>
+<p>The file is UTF-8 with a BOM and contains several sections, each starting with a title row. Argus reads <b>only these fields</b> and ignores everything else: live prices, P&amp;L, weights, earnings dates, market cap, technical signals and so on. Argus fetches all of that itself.</p>
+<div class="tbl"><table>
+  <tr><th>Section · column</th><th>Argus field</th><th>Parsing</th></tr>
+  <tr><td>"Open Positions" · Symbol</td><td><code>symbol</code></td><td>Strip Reuters suffixes <code>.O</code> (NASDAQ) and <code>.K</code>/<code>.N</code> (NYSE). Bare symbols are kept as-is. Each symbol is checked with Finnhub before import.</td></tr>
+  <tr><td>· Name, Exchange</td><td><code>instrument.name</code>, <code>exchange</code></td><td>Only used to create the instrument record if it's missing</td></tr>
+  <tr><td>· Open Date</td><td><code>ts</code></td><td><code>MM/DD/YYYY</code>, treated as the market close in New York time</td></tr>
+  <tr><td>· Type</td><td>must be <code>BUY</code></td><td>Any other value (a short position) is rejected</td></tr>
+  <tr><td>· Amount, Open Price, Commission</td><td><code>qty</code>, <code>price</code>, <code>fee</code></td><td>Remove <code>$</code> and <code>,</code> characters</td></tr>
+  <tr><td>"Open Positions Summary" · Amount, Avg Price</td><td>not stored</td><td><b>Check only</b>: share count and average price per symbol must match the lots</td></tr>
+  <tr><td>Totals · "Market Value", "Open P/L"</td><td>not stored</td><td><b>Check only</b>: total lot cost must equal market value minus open P/L, within $0.05</td></tr>
+  <tr><td>File name <code>&lt;portfolio&gt;_Holdings_MMDDYYYY.csv</code></td><td><code>portfolio.name</code></td><td>Can be overridden with <code>--portfolio</code></td></tr>
+</table></div>
+<p><b>OPENING vs BUY:</b> lots dated on or before <code>--opening-through</code> (a date you pass on the command line) become <code>OPENING</code>; later ones become <code>BUY</code>. The <code>--dry-run</code> preview shows each lot's type and the check results before anything is written. Re-running the same file is safe: each lot gets an ID made from its symbol, date, quantity and price, so it can't be imported twice.</p>
+<pre><code>argus import investing data/growth_Holdings_09272026.csv --opening-through 2026-08-27 --dry-run</code></pre>
+
 <!-- ============================================================ -->
 <h2 id="risks">13. Risks &amp; mitigations</h2>
 <div class="tbl"><table>
   <tr><th>Risk</th><th>Mitigation</th></tr>
   <tr><td>yfinance breaks or gets rate-limited (it's unofficial)</td><td>Fallback order per data type, cache everything, batch requests, back off on errors, and show "stale" in the UI instead of failing. A paid adapter can replace it later.</td></tr>
   <tr><td>Different sources give different fundamentals (e.g. PE definitions differ)</td><td>Store <code>source</code> with each metric, document definitions in the UI tooltip, and prefer EDGAR for statement data.</td></tr>
-  <tr><td>Migrated average cost differs from real FIFO lots (tax numbers won't match your broker for pre-import shares)</td><td>Opening lots are labelled "migrated · avg cost". You can later replace one with real dated lots, and the history rebuilds.</td></tr>
+  <tr><td>Imported lots are only open lots. Sells made before the import aren't in the export.</td><td>Realized P&amp;L starts at zero on the import date. Performance is measured from the opening dates onward, not before.</td></tr>
   <tr><td>Corporate actions (splits, ticker changes) corrupt cost basis</td><td>A <code>SPLIT</code> transaction type plus split detection from provider data that prompts you to confirm.</td></tr>
   <tr><td>An agent books a wrong trade</td><td>Dry-run preview, idempotency keys, soft delete and an audit log. The UI shows a badge on agent-entered trades.</td></tr>
   <tr><td>Free-tier limits with a large watchlist</td><td>Only stream held and watched symbols (fine up to about 50 for Finnhub free). Everything else is fetched on demand.</td></tr>
@@ -551,7 +567,7 @@ flowchart LR
 <div class="q" style="opacity:.7"><b class="n">Q4 ✓</b><b>Track cash?</b>
   <div class="def">Resolved: positions only. Buys count as money in; sells and dividends count as money out.</div></div>
 <div class="q" style="opacity:.7"><b class="n">Q5 ✓</b><b>Starting data?</b>
-  <div class="def">Resolved: migrate from Investing.com as one opening lot per symbol at average cost.</div></div>
+  <div class="def">Resolved: import the real per-purchase lots from the export (better than average cost). Lots dated on the days you entered existing holdings become <code>OPENING</code> lots.</div></div>
 <div class="q" style="opacity:.7"><b class="n">Q6 ✓</b><b>Shorts and options?</b>
   <div class="def">Resolved: skipped for now.</div></div>
 <div class="q" style="opacity:.7"><b class="n">Q7 ✓</b><b>UI language?</b>
@@ -560,10 +576,10 @@ flowchart LR
   <div class="def">Resolved: no notifications for now. Alerts appear in the UI and MCP only.</div></div>
 <div class="q" style="opacity:.7"><b class="n">Q9 ✓</b><b>Premium data?</b>
   <div class="def">Resolved: skipped. Only free sources.</div></div>
-<div class="q"><b class="n">Q10</b><b>Investing.com export format.</b> Can you export your portfolio(s) from Investing.com as CSV? If so, share one file (just the header row plus a fake row is enough) and I'll build the importer to match it exactly. If not, send a screenshot of the holdings table, and Claude reads it and calls <code>import_positions</code>.
-  <div class="def">Default: a generic CSV importer with column mapping (symbol, shares, avg cost, optional open date and portfolio name). Watchlists are imported the same way.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q10 ✓</b><b>Investing.com export format?</b> CSV download.
+  <div class="def">Resolved: see the importer spec in section 12a. Only the fields listed there are read; every other column is ignored.</div></div>
 
-<footer>Argus (portfolio monitor) · design v0.2 · diagrams rendered with Mermaid.</footer>
+<footer>Argus (portfolio monitor) · design v0.3 · diagrams rendered with Mermaid.</footer>
 </div>
 
 <script type="module">
