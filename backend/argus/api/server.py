@@ -161,7 +161,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str):
             f = UI_DIST / path
-            return FileResponse(f if path and f.is_file() else UI_DIST / "index.html")
+            if path and f.is_file():
+                return FileResponse(f)
+            # index.html names the hashed bundles, so it must never be served stale after a rebuild.
+            return FileResponse(UI_DIST / "index.html", headers={"Cache-Control": "no-cache"})
     else:
         @app.get("/", include_in_schema=False)
         async def no_ui():

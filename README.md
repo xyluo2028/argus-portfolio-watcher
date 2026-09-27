@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** P0 (foundation) done: data model, FIFO lots, market data, `argus` CLI, Investing.com import. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 (foundation) done. P1 (monitor MVP) in progress: web dashboard, ticker charts and the live price stream work; performance vs benchmark, watchlist and the MCP server are next. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -41,6 +41,17 @@ cp .env.example .env   # add FINNHUB_API_KEY and SEC_USER_AGENT
 Without `FINNHUB_API_KEY`, quotes and metrics fall back to Yahoo (slower, unofficial).
 `SEC_USER_AGENT` is only needed for `argus financials`.
 
+## Web UI
+
+```bash
+(cd frontend && npm install && npm run build)   # once, and after UI changes
+uv run argus serve                               # http://localhost:8787
+```
+
+During market hours prices stream live (Finnhub WebSocket for the largest ~48 positions, REST
+refresh for the rest each minute). Set `ARGUS_PORT` in `.env` to use another port. For UI
+development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite proxies `/api`).
+
 ## Usage
 
 ```bash
@@ -54,7 +65,7 @@ uv run argus txn add growth BUY NVDA --qty 5 --price 225 --dry-run
 uv run argus quotes NVDA MSFT
 uv run argus fundamentals NVDA --fields pe_ttm,pe_forward,pb,ps_ttm
 uv run argus financials NVDA --period quarterly
-uv run argus history NVDA --period 6mo
+uv run argus history NVDA --period 6mo --indicators sma50,rsi14
 uv run argus market-status
 ```
 

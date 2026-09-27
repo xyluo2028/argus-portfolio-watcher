@@ -38,8 +38,12 @@ class Quote:
         return (self.price / self.prev_close - 1) * 100
 
     def to_dict(self) -> dict:
+        from argus.market_calendar import session_date  # base types stay import-light
+
         d = asdict(self)
         d["as_of"] = self.as_of.isoformat()
+        # Trading day the price belongs to; fetch-time stamps (Yahoo) on a weekend map to Friday.
+        d["session_date"] = session_date(self.as_of).isoformat()
         d["change"] = self.change
         d["change_pct"] = self.change_pct
         return d
