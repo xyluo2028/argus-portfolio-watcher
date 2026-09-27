@@ -5,7 +5,8 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 
 from __future__ import annotations
 
-from datetime import date
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -16,13 +17,14 @@ from argus.db import make_engine, session_scope
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
-from argus.market_calendar import market_status
+from argus.market_calendar import NY, market_status, sessions_between
 from argus.models import Instrument
 from argus.providers.base import Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services.lots import build_positions
+from argus.services import performance as performance_mod
 from argus.services.market import MarketService
 from argus.services.portfolio import PortfolioService, position_to_dict
 from argus.symbols import normalize_symbol
@@ -95,6 +97,55 @@ class Argus:
                 for k, v in computed.items()
             }
         return out
+
+    PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
+
+    def performance(self, ref: str, range_: str = "all", live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Daily value and TWR vs the portfolio's benchmark; `range_` slices and rebases the series."""
+        if range_ not in self.PERF_RANGES:
+            raise ArgusError("INVALID_ARG", f"Unknown range '{range_}'.", hint=f"Use one of {', '.join(self.PERF_RANGES)}.")
+        p = self.portfolios.get_portfolio(ref)
+        txns = self.portfolios.active_transactions(p.id)
+        if not txns:
+            return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "series": []}
+        start = min(t.ts for t in txns).astimezone(NY).date()
+        status = market_status()
+        end = date.fromisoformat(status["last_session"])
+        sessions = sessions_between(start, end)
+        symbols = sorted({t.symbol for t in txns} | {p.benchmark})
+        with ThreadPoolExecutor(max_workers=8) as pool:  # first run fetches ~all symbols from Yahoo
+            closes = dict(zip(symbols, pool.map(lambda s: self.market.daily_closes(s, start), symbols)))
+
+        # While a session is open, add today as a provisional point priced from live quotes.
+        today = datetime.now(NY).date()
+        if status["session"] != "closed" and status["is_trading_day"] and live_quotes and today not in sessions:
+            sessions.append(today)
+            for sym, q in live_quotes.items():
+                if sym in closes:
+                    closes[sym][today] = q.price
+
+        bench = closes.pop(p.benchmark, {}) if p.benchmark not in {t.symbol for t in txns} else closes.get(p.benchmark, {})
+        points = performance_mod.compute_series(txns, sessions, closes, bench)
+        cutoff = {"1mo": today - timedelta(days=31), "3mo": today - timedelta(days=92),
+                  "ytd": date(today.year, 1, 1) - timedelta(days=1), "1y": today - timedelta(days=366)}.get(range_)
+        if cutoff:
+            # Base the slice on the last close at or before the cutoff.
+            base = max((i for i, pt in enumerate(points) if pt.d <= cutoff), default=0)
+            points = points[base:]
+        base_idx = points[0].index if points else 1.0
+        base_bench = points[0].bench_index if points else None
+        return {
+            "portfolio": p.name,
+            "range": range_,
+            "benchmark": p.benchmark,
+            "provisional_today": bool(points) and points[-1].d == today and status["session"] != "closed",
+            "summary": performance_mod.summarize(points),
+            "series": [{
+                "d": pt.d.isoformat(), "value": pt.value, "flow_in": pt.flow_in, "flow_out": pt.flow_out,
+                "twr_pct": (pt.index / base_idx - 1) * 100,
+                "bench_pct": (pt.bench_index / base_bench - 1) * 100 if pt.bench_index and base_bench else None,
+            } for pt in points],
+        }
 
     # -- import ---------------------------------------------------------------
     def import_investing(self, path: Path, portfolio: str | None = None, opening_through: date | None = None,

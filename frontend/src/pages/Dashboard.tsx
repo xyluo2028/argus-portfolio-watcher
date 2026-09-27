@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { HoldingsTable } from "../components/HoldingsTable";
+import { PerformanceCard } from "../components/PerformanceCard";
 import { money, pct, tone } from "../format";
 
 interface Props {
@@ -79,6 +80,9 @@ export function Dashboard({ portfolio, live }: Props) {
       {summary.quote_errors && Object.keys(summary.quote_errors).length > 0 && (
         <div className="error">No quote for {Object.keys(summary.quote_errors).join(", ")}; their value is missing from totals.</div>
       )}
+
+      {/* Refetch once per session day (and when the session changes), not on every tick. */}
+      <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />
 
       <section className="card">
         <h2>Holdings</h2>

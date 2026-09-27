@@ -248,6 +248,25 @@ def _render_portfolio(d):
         console.print(f"[yellow]No quote for: {', '.join(d['quote_errors'])}[/yellow]")
 
 
+@portfolio_app.command("performance")
+def portfolio_performance(ref: str, range_: Annotated[str, typer.Option("--range", help="1mo | 3mo | ytd | 1y | all")] = "all",
+                          as_json: JsonOpt = False):
+    """Time-weighted return vs the benchmark, drawdown and volatility."""
+    def render(d):
+        s = d["summary"]
+        if not s:
+            console.print("No transactions yet.")
+            return
+        console.print(f"[bold]{d['portfolio']}[/bold] {s['start']} → {s['end']} ({s['sessions']} sessions)")
+        console.print(f"Return (TWR) {_cell(s['twr_pct'], _pct(s['twr_pct']))}   {d['benchmark']} "
+                      f"{_cell(s['benchmark_pct'], _pct(s['benchmark_pct']))}   Excess "
+                      f"{_cell(s['excess_pct'], _pct(s['excess_pct']))}")
+        vol = "-" if s["volatility_pct"] is None else f"{s['volatility_pct']:.1f}%"
+        sharpe = "-" if s["sharpe"] is None else f"{s['sharpe']:.2f}"
+        console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   Sharpe (rf=0) {sharpe}")
+    _run(as_json, lambda: _argus().performance(ref, range_), render)
+
+
 # -- transactions -----------------------------------------------------------------
 @txn_app.command("add")
 def txn_add(portfolio: str,

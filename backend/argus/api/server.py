@@ -111,6 +111,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def portfolio(ref: str, lots: bool = False):
         return await run(argus.portfolio, ref, True, lots, hub.quotes)
 
+    @app.get("/api/portfolios/{ref}/performance")
+    async def performance(ref: str, range: str = "all"):  # noqa: A002 - query param name
+        return await run(argus.performance, ref, range, dict(hub.quotes))
+
     @app.get("/api/portfolios/{ref}/transactions")
     async def transactions(ref: str, symbol: str | None = None, include_deleted: bool = False):
         return await run(argus.portfolios.list_transactions, ref, symbol, include_deleted)

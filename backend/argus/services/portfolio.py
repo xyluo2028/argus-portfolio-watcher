@@ -180,6 +180,11 @@ class PortfolioService:
                 q = q.where(Transaction.deleted.is_(False))
             return [txn_to_dict(t) for t in s.scalars(q.order_by(Transaction.ts, Transaction.id))]
 
+    def active_transactions(self, portfolio: str | int) -> list[Transaction]:
+        p = self.get_portfolio(portfolio)
+        with session_scope(self.engine) as s:
+            return self._active_txns(s, p.id)
+
     # -- positions ------------------------------------------------------------
     def positions(self, portfolio: str | int) -> dict[str, PositionState]:
         p = self.get_portfolio(portfolio)

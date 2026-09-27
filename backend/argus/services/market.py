@@ -9,7 +9,7 @@ Freshness rules:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import Engine, select
 from sqlalchemy.dialects.sqlite import insert
@@ -17,7 +17,7 @@ from sqlalchemy.dialects.sqlite import insert
 from argus.config import Settings
 from argus.db import session_scope
 from argus.errors import ArgusError
-from argus.market_calendar import market_status
+from argus.market_calendar import NY, market_status
 from argus.models import Fundamental, Instrument, PriceBar, QuoteCache
 from argus.providers.base import Bar, ProviderError, Quote
 
@@ -118,6 +118,13 @@ class MarketService:
             rows = s.scalars(select(PriceBar).where(PriceBar.symbol == symbol, PriceBar.interval == "1d",
                                                     PriceBar.ts >= start).order_by(PriceBar.ts))
             return [Bar(r.ts, r.o, r.h, r.l, r.c, r.v) for r in rows]
+
+    def daily_closes(self, symbol: str, start: date) -> dict[date, float]:
+        """Close per New York trading date from `start` on (cached daily bars)."""
+        days = (datetime.now(UTC).date() - start).days + 7
+        period = next((p for p, n in PERIODS.items() if n >= days), "max")
+        return {b.ts.astimezone(NY).date(): b.c for b in self.get_history(symbol, period, "1d")
+                if b.ts.astimezone(NY).date() >= start}
 
     def _fetch_history(self, symbol, start, end, interval) -> list[Bar]:
         try:

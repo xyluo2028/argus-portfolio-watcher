@@ -91,3 +91,8 @@ def parse_ny_datetime(s: str | None) -> datetime:
     except ValueError as e:
         raise ArgusError("INVALID_ARG", f"Bad date '{s}'.",
                          hint="Use YYYY-MM-DD or YYYY-MM-DDTHH:MM (New York time).") from e
+
+
+def sessions_between(start: date, end: date) -> list[date]:
+    """Trading days in [start, end], ascending."""
+    return [ts.date() for ts in _cal().sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))]

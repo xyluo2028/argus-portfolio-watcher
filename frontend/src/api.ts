@@ -116,6 +116,19 @@ export interface Financials {
   periods: FinancialPeriod[];
 }
 
+export interface Performance {
+  portfolio: string;
+  range: string;
+  benchmark: string;
+  provisional_today: boolean;
+  summary: {
+    start?: string; end?: string; sessions?: number; twr_pct?: number; benchmark_pct?: number | null;
+    excess_pct?: number | null; max_drawdown_pct?: number; volatility_pct?: number | null; sharpe?: number | null;
+    gain?: number; net_invested?: number; start_value?: number; end_value?: number;
+  };
+  series: { d: string; value: number; twr_pct: number; bench_pct: number | null }[];
+}
+
 export interface StreamUpdate {
   version: number;
   market: MarketStatus;
@@ -153,6 +166,8 @@ export const api = {
   fundamentals: (symbol: string) => get<Fundamentals>(`/api/fundamentals/${enc(symbol)}`),
   financials: (symbol: string, period: "quarterly" | "annual") =>
     get<Financials>(`/api/financials/${enc(symbol)}?period=${period}&limit=8`),
+  performance: (name: string, range: string) =>
+    get<Performance>(`/api/portfolios/${enc(name)}/performance?range=${range}`),
   quotes: (symbols: string[]) =>
     get<{ quotes: Quote[]; errors: Record<string, string> }>(`/api/quotes?symbols=${symbols.map(enc).join(",")}`),
 };
