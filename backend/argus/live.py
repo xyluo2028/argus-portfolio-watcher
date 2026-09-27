@@ -174,12 +174,18 @@ class LiveHub:
                         self._resubscribe.clear()
                         recv = asyncio.create_task(ws.recv())
                         resub = asyncio.create_task(self._resubscribe.wait())
-                        done, _ = await asyncio.wait({recv, resub}, return_when=asyncio.FIRST_COMPLETED)
-                        if recv in done:
-                            resub.cancel()
+                        try:
+                            done, _ = await asyncio.wait({recv, resub}, return_when=asyncio.FIRST_COMPLETED)
+                        finally:
+                            # Also runs on cancellation, so no orphaned recv task outlives the socket.
+                            for t in (recv, resub):
+                                if not t.done():
+                                    t.cancel()
+                            await asyncio.gather(recv, resub, return_exceptions=True)
+                        if recv in done and not recv.cancelled() and recv.exception() is None:
                             await self._on_ws_message(recv.result())
-                        else:
-                            recv.cancel()
+                        elif recv in done:
+                            raise recv.exception() or ConnectionError("websocket receive cancelled")
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 - network errors: reconnect with backoff
