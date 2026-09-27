@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** P0 foundation, P1 monitor MVP and P2 routines are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, and a 25-tool MCP server. P3 (target weights, drift, what-if) is next. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 foundation, P1 monitor MVP, P2 routines and P3 analysis are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, exposure with ETF look-through, targets & drift, what-if trades, and a 29-tool MCP server. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -28,7 +28,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 | P0 Foundation ✓ | Schema, data providers, trade log → FIFO lots/positions, `argus` CLI, Investing.com CSV import |
 | P1 Monitor MVP ✓ | Live quote loop, dashboard, ticker detail, watchlist, benchmark compare, MCP tools |
 | P2 Routines ✓ | Earnings/events, daily-brief data tool, alerts, thesis notes |
-| P3 Analysis | Target weights and drift, what-if trades, more data providers |
+| P3 Analysis ✓ | Exposure (ETF look-through), target weights and drift, what-if trades |
 
 ## Setup
 
@@ -54,8 +54,9 @@ development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite prox
 
 ## Use it from Claude (MCP)
 
-Argus exposes 25 tools: portfolio, quotes, history with indicators, fundamentals, SEC
-financials, compare, performance, transactions, watchlist, events, alerts, notes, and
+Argus exposes 29 tools: portfolio, quotes, history with indicators, fundamentals, SEC
+financials, compare, performance, transactions, watchlist, events, alerts, notes, exposure,
+drift/targets, what-if (`simulate_trades`), and
 `get_daily_brief_data`, which gathers everything for a brief in one call. Write tools default
 to `dry_run=true` and accept an `idempotency_key`. The prompts `daily_brief` and
 `position_review` package common routines.

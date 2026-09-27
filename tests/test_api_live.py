@@ -15,7 +15,7 @@ def client(make_argus):
     a = make_argus([FakeQuotes("fake", {"AAA": (110, 100), "SPY": (500, 495)})])
     a.portfolios.create_portfolio("growth")
     app = create_app(a, start_hub=False)
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://localhost") as c:
         yield c
 
 
@@ -71,3 +71,8 @@ def test_watchlist_endpoints(client):
     assert items[0]["symbol"] == "AAA" and items[0]["quote"]["price"] == 110
     assert client.delete("/api/watchlists/Watchlist/AAA").json()["removed"] == ["AAA"]
     assert client.get("/api/compare?symbols=AAA,SPY&fields=pe_ttm").json()["rows"][1]["symbol"] == "SPY"
+
+
+def test_rejects_foreign_host_header(client):
+    assert client.get("/api/portfolios", headers={"host": "evil.example"}).status_code == 400
+    assert client.get("/api/portfolios", headers={"host": "localhost:8787"}).status_code == 200

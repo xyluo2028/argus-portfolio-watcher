@@ -13,6 +13,7 @@ from datetime import date
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 from argus.app import Argus
@@ -103,6 +104,9 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                 await hub.stop()
 
     app = FastAPI(title="Argus", lifespan=lifespan)
+    # Only answer requests addressed to this machine: blocks DNS-rebinding pages in the browser
+    # from reading or changing the portfolio through a hostile hostname that resolves to 127.0.0.1.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
     app.state.argus = argus
     app.state.hub = hub
 
