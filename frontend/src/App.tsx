@@ -4,6 +4,7 @@ import { api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Alerts } from "./pages/Alerts";
+import { Analysis } from "./pages/Analysis";
 import { Compare } from "./pages/Compare";
 import { Dashboard } from "./pages/Dashboard";
 import { Ticker } from "./pages/Ticker";
@@ -48,6 +49,7 @@ export function App() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/watchlist">Watchlist</NavLink>
           <NavLink to="/transactions">Transactions</NavLink>
+          <NavLink to="/analysis">Analysis</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
         </nav>
@@ -75,6 +77,7 @@ export function App() {
               <Route path="/watchlist" element={<Watchlist live={live} />} />
               <Route path="/transactions" element={<Transactions portfolio={current} />} />
               <Route path="/compare" element={<Compare portfolio={current} />} />
+              <Route path="/analysis" element={<Analysis portfolio={current} />} />
               <Route path="/alerts" element={<Alerts live={live} />} />
             </Routes>
           )}

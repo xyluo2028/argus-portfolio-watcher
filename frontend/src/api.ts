@@ -196,6 +196,26 @@ export interface NoteItem {
   created_by: string; created_at: string; updated_at: string;
 }
 
+export interface WeightRow { key: string; value: number; weight_pct: number }
+export interface Concentration { top1_pct: number; top5_pct: number; top10_pct: number; hhi: number; effective_positions: number; positions: number }
+
+export interface Exposure {
+  portfolio: string; total_value: number; by_type: WeightRow[]; by_sector_direct: WeightRow[];
+  by_sector_lookthrough: WeightRow[]; concentration: Concentration; funds_without_profile: string[];
+  top_stock_exposure: { symbol: string; name?: string; direct: number; via_etfs: number; via: string[]; total: number; total_pct: number }[];
+}
+
+export interface DriftRow { key: string; value: number; weight_pct: number; target_pct: number | null; drift_pp?: number; trade_to_target?: number; outside_band?: boolean }
+export interface Drift { portfolio: string; level: string; total_value: number; tolerance_pp: number; targets_sum_pct: number; untargeted_pct: number; rows: DriftRow[]; warnings: string[]; dry_run?: boolean }
+
+export interface SimTrade { symbol: string; side: "BUY" | "SELL"; qty?: number; amount?: number; price?: number }
+export interface SimResult {
+  trades: { symbol: string; side: string; qty: number; price: number }[]; net_cash: number; realized_pnl_from_trades: number;
+  value_before: number | null; value_after: number;
+  positions_changed: { symbol: string; weight_before: number | null; weight_after: number; qty_after: number }[];
+  concentration_before: Concentration; concentration_after: Concentration; sector_lookthrough_after: WeightRow[];
+}
+
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
 
 export const api = {
@@ -236,6 +256,11 @@ export const api = {
     send<NoteItem>("POST", "/api/notes", body),
   updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
     send<NoteItem>("PATCH", `/api/notes/${id}`, body),
+  exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),
+  drift: (name: string, level: string) => get<Drift>(`/api/portfolios/${enc(name)}/drift?level=${level}`),
+  setTargets: (name: string, level: string, weights: Record<string, number>, dryRun: boolean) =>
+    send<Drift>("PUT", `/api/portfolios/${enc(name)}/targets`, { level, weights, dry_run: dryRun }),
+  simulate: (name: string, trades: SimTrade[]) => send<SimResult>("POST", `/api/portfolios/${enc(name)}/simulate`, { trades }),
   quotes: (symbols: string[]) =>
     get<{ quotes: Quote[]; errors: Record<string, string> }>(`/api/quotes?symbols=${symbols.map(enc).join(",")}`),
 };
