@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** design phase. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 (foundation) done: data model, FIFO lots, market data, `argus` CLI, Investing.com import. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -30,10 +30,41 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 | P2 Routines | Earnings/events, daily-brief data tool, alerts, thesis notes |
 | P3 Analysis | Target weights and drift, what-if trades, more data providers |
 
-## Setup (once code lands)
+## Setup
 
 ```bash
+brew install uv
+uv sync
 cp .env.example .env   # add FINNHUB_API_KEY and SEC_USER_AGENT
+```
+
+Without `FINNHUB_API_KEY`, quotes and metrics fall back to Yahoo (slower, unofficial).
+`SEC_USER_AGENT` is only needed for `argus financials`.
+
+## Usage
+
+```bash
+# Import an Investing.com holdings export (Portfolio > Holdings > Export).
+# Lots dated on/before --opening-through are holdings you already owned (OPENING).
+uv run argus import investing data/growth_Holdings_09272026.csv --opening-through 2026-08-27 --dry-run
+uv run argus import investing data/growth_Holdings_09272026.csv --opening-through 2026-08-27
+
+uv run argus portfolio show growth            # live positions, day & unrealized P&L
+uv run argus txn add growth BUY NVDA --qty 5 --price 225 --dry-run
+uv run argus quotes NVDA MSFT
+uv run argus fundamentals NVDA --fields pe_ttm,pe_forward,pb,ps_ttm
+uv run argus financials NVDA --period quarterly
+uv run argus history NVDA --period 6mo
+uv run argus market-status
+```
+
+Every command accepts `--json` and returns `{"ok": true, "data": ...}` or
+`{"ok": false, "error": {"code", "message", "hint"}}`, which is the format agents use.
+
+## Development
+
+```bash
+uv run pytest
 ```
 
 Secrets (`.env`) and local data (`data/`, including imported CSVs and the SQLite database) are gitignored.
