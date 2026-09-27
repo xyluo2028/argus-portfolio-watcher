@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** P0 (foundation) done. P1 (monitor MVP) in progress: web dashboard, ticker charts and the live price stream work; performance vs benchmark, watchlist and the MCP server are next. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 (foundation) done. P1 (monitor MVP) in progress: web dashboard, ticker charts, live price stream, performance vs benchmark and the MCP server work; watchlist/transactions/compare pages are next. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -52,6 +52,23 @@ During market hours prices stream live (Finnhub WebSocket for the largest ~48 po
 refresh for the rest each minute). Set `ARGUS_PORT` in `.env` to use another port. For UI
 development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite proxies `/api`).
 
+## Use it from Claude (MCP)
+
+Argus exposes 17 tools: portfolio, quotes, history with indicators, fundamentals, SEC
+financials, compare, performance, transactions and watchlist. Write tools default to
+`dry_run=true` and accept an `idempotency_key`.
+
+```bash
+# Claude Code, stdio (works whether or not `argus serve` is running)
+claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/argus-portfolio-watcher argus mcp
+
+# or over HTTP while `argus serve` is running (uses the live price stream)
+claude mcp add --transport http argus http://localhost:8787/mcp/
+```
+
+For Claude Desktop, add the same stdio command under `mcpServers` in
+`claude_desktop_config.json` (command `uv`, args `["run", "--directory", "<repo path>", "argus", "mcp"]`).
+
 ## Usage
 
 ```bash
@@ -61,6 +78,7 @@ uv run argus import investing data/growth_Holdings_09272026.csv --opening-throug
 uv run argus import investing data/growth_Holdings_09272026.csv --opening-through 2026-08-27
 
 uv run argus portfolio show growth            # live positions, day & unrealized P&L
+uv run argus portfolio performance growth --range ytd
 uv run argus txn add growth BUY NVDA --qty 5 --price 225 --dry-run
 uv run argus quotes NVDA MSFT
 uv run argus fundamentals NVDA --fields pe_ttm,pe_forward,pb,ps_ttm

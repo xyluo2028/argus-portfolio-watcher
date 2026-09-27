@@ -95,6 +95,14 @@ def serve(port: Annotated[int | None, typer.Option(help="Default: ARGUS_PORT or 
         raise typer.Exit(1)
 
 
+@app.command("mcp")
+def mcp_cmd():
+    """Run the MCP server over stdio (for Claude Desktop / Claude Code)."""
+    from argus.mcp_server import run_stdio
+
+    run_stdio()
+
+
 # -- market ---------------------------------------------------------------------
 @app.command("market-status")
 def market_status_cmd(as_json: JsonOpt = False):

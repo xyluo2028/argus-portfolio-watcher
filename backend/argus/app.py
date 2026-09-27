@@ -27,6 +27,7 @@ from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
 from argus.services.market import MarketService
 from argus.services.portfolio import PortfolioService, position_to_dict
+from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import normalize_symbol
 
 
@@ -36,6 +37,7 @@ class Argus:
         self.settings = settings or load_settings()
         self.engine = make_engine(self.settings.db_path)
         self.portfolios = PortfolioService(self.engine)
+        self.watchlists = WatchlistService(self.engine)
         self.market = (market_factory or self._default_market)(self.engine, self.settings)
 
     @staticmethod
@@ -97,6 +99,51 @@ class Argus:
                 for k, v in computed.items()
             }
         return out
+
+    COMPARE_FIELDS = ("pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "market_cap",
+                      "revenue_growth_yoy_pct", "gross_margin_pct", "net_margin_pct", "roe_pct", "dividend_yield_pct",
+                      "beta")
+
+    def watchlist(self, name: str = DEFAULT_WATCHLIST, live_quotes: dict[str, Quote] | None = None,
+                  with_fundamentals: bool = True) -> dict:
+        """Watchlist items with quotes and (cached daily) valuation metrics."""
+        items = self.watchlists.items(name)
+        syms = [i["symbol"] for i in items]
+        quotes = {s: live_quotes[s] for s in syms if live_quotes and s in live_quotes}
+        missing = [s for s in syms if s not in quotes]
+        errors: dict[str, str] = {}
+        if missing:
+            got, errors = self.market.get_quotes(missing)
+            quotes |= got
+        for i in items:
+            q = quotes.get(i["symbol"])
+            i["quote"] = q.to_dict() if q else None
+            if with_fundamentals:
+                try:
+                    i["metrics"] = self.market.get_fundamentals(i["symbol"], list(self.COMPARE_FIELDS))["metrics"]
+                except ArgusError as e:
+                    i["metrics"] = None
+                    errors.setdefault(i["symbol"], e.message)
+        return {"watchlist": name, "items": items, "errors": errors}
+
+    def compare(self, symbols: list[str], fields: list[str] | None = None) -> dict:
+        """Side-by-side quote + metrics for 2-10 symbols."""
+        syms = list(dict.fromkeys(normalize_symbol(s) for s in symbols if s.strip()))
+        if not 1 <= len(syms) <= 10:
+            raise ArgusError("INVALID_ARG", "Compare 1 to 10 symbols.")
+        wanted = fields or list(self.COMPARE_FIELDS)
+        quotes, errors = self.market.get_quotes(syms)
+        rows = []
+        for sym in syms:
+            row: dict = {"symbol": sym}
+            q = quotes.get(sym)
+            row |= {"price": q.price, "change_pct": q.change_pct} if q else {"price": None, "change_pct": None}
+            try:
+                row |= self.market.get_fundamentals(sym, wanted)["metrics"]
+            except ArgusError as e:
+                errors.setdefault(sym, e.message)
+            rows.append(row)
+        return {"fields": wanted, "rows": rows, "errors": errors}
 
     PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
 

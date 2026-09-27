@@ -18,6 +18,7 @@ from argus.app import Argus
 from argus.config import REPO_ROOT
 from argus.errors import ArgusError
 from argus.live import LiveHub
+from argus.mcp_server import create_mcp
 from argus.market_calendar import parse_ny_datetime
 from argus.services.portfolio import TxnInput
 from argus.symbols import normalize_symbol
@@ -50,14 +51,18 @@ class PortfolioBody(BaseModel):
 def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     argus = argus or Argus()
     hub = LiveHub(argus)
+    # MCP over streamable HTTP at /mcp/, reading the same live quotes as the UI.
+    mcp = create_mcp(argus, live_quotes=lambda: dict(hub.quotes))
+    mcp_app = mcp.streamable_http_app(streamable_http_path="/")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        if start_hub:
-            await hub.start()
-        yield
-        if start_hub:
-            await hub.stop()
+        async with mcp.session_manager.run():
+            if start_hub:
+                await hub.start()
+            yield
+            if start_hub:
+                await hub.stop()
 
     app = FastAPI(title="Argus", lifespan=lifespan)
     app.state.argus = argus
@@ -157,6 +162,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/health")
     async def health():
         return {"ok": True, "stream": hub.ws_state, "session": hub.status["session"]}
+
+    app.mount("/mcp", mcp_app)
 
     # -- web UI ----------------------------------------------------------------------
     if UI_DIST.exists():
