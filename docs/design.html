@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Portfolio Monitor Design</title>
+<title>Argus Design</title>
 <style>
   :root {
     --bg: #f7f7f5; --surface: #ffffff; --surface-2: #f0f0ec; --text: #1c1c1a; --muted: #6b6b66;
@@ -83,7 +83,7 @@
 <div class="wrap">
 
 <header class="doc">
-  <h1>Portfolio Monitor: Design Doc</h1>
+  <h1>Argus: Design Doc</h1>
   <div class="meta">v0.2 · 2026-09-27 · Status: <b>decisions closed, ready for P0</b> · Scope: MVP = portfolio monitor, then phased add-ons</div>
   <nav class="toc">
     <a href="#goals">1. Goals</a><a href="#decisions">2. Decisions so far</a><a href="#arch">3. Architecture</a>
@@ -155,18 +155,18 @@ flowchart LR
     FH["Finnhub free key<br/>WebSocket trades · earnings · news"]
     SEC["SEC EDGAR XBRL<br/>official financials"]
   end
-  subgraph CORE["pm core (Python)"]
+  subgraph CORE["argus core (Python)"]
     PR["Provider layer<br/>adapters + fallback + rate limit"]
     MD["Market service<br/>quotes · bars · fundamentals · calendar"]
     PF["Portfolio service<br/>trades → lots → positions · cash"]
     AN["Analytics<br/>P&amp;L · NAV · TWR · indicators · valuation"]
     SCH["Scheduler<br/>market-session aware"]
-    DB[("SQLite (WAL)<br/>data/pm.sqlite")]
+    DB[("SQLite (WAL)<br/>data/argus.sqlite")]
   end
   subgraph FACES["Interfaces"]
     API["REST + SSE<br/>FastAPI :8765"]
     MCP["MCP server<br/>stdio + streamable HTTP /mcp"]
-    CLI["pm CLI<br/>--json output"]
+    CLI["argus CLI<br/>--json output"]
   end
   subgraph CLIENTS["Clients"]
     UI["Browser UI<br/>React"]
@@ -194,7 +194,7 @@ flowchart LR
 <div class="cap">Everything runs on your Mac. SQLite in WAL mode lets the web server and a separately spawned MCP stdio process share one database safely.</div>
 </div>
 
-<div class="decision"><b>How the MCP server runs.</b> <code>pm serve</code> starts the API, the UI, the scheduler and an HTTP MCP endpoint at <code>/mcp</code>. <code>pm mcp</code> is a stdio entry point for Claude Desktop that imports the same core and reads and writes the same database. If the live server isn't running, it fetches quotes on demand and caches them. So agents keep working whether or not the app is open.</div>
+<div class="decision"><b>How the MCP server runs.</b> <code>argus serve</code> starts the API, the UI, the scheduler and an HTTP MCP endpoint at <code>/mcp</code>. <code>argus mcp</code> is a stdio entry point for Claude Desktop that imports the same core and reads and writes the same database. If the live server isn't running, it fetches quotes on demand and caches them. So agents keep working whether or not the app is open.</div>
 
 <!-- ============================================================ -->
 <h2 id="data">4. Market data (free tier, pluggable)</h2>
@@ -416,7 +416,7 @@ erDiagram
   <li><b>Freshness on every value</b>: <code>as_of</code>, <code>source</code>, <code>delayed</code>, <code>market_session</code>.</li>
   <li><b>Safe writes</b>: <code>dry_run</code> by default in the tool description, <code>idempotency_key</code> so a retry can't double-book a trade, soft delete, and an audit log entry with actor=mcp.</li>
   <li><b>Clear errors</b>, e.g. <code>{code:"UNKNOWN_SYMBOL", hint:"did you mean GOOGL?"}</code>.</li>
-  <li><b>The CLI mirrors the MCP tools</b> (<code>pm quotes NVDA MSFT --json</code>), so Claude Code can use either.</li>
+  <li><b>The CLI mirrors the MCP tools</b> (<code>argus quotes NVDA MSFT --json</code>), so Claude Code can use either.</li>
 </ul>
 
 <div class="tbl"><table>
@@ -461,10 +461,10 @@ sequenceDiagram
 </div>
 
 <pre><code># register with Claude Code (stdio)
-claude mcp add portfolio -- uv run --directory ~/Documents/github/project-hatching/portfolio-monitor pm mcp
+claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/portfolio-monitor argus mcp
 
-# or over HTTP while `pm serve` is running
-claude mcp add --transport http portfolio http://localhost:8765/mcp</code></pre>
+# or over HTTP while `argus serve` is running
+claude mcp add --transport http argus http://localhost:8765/mcp</code></pre>
 
 <!-- ============================================================ -->
 <h2 id="habits">10. Features inspired by your routines</h2>
@@ -478,7 +478,7 @@ flowchart LR
     R3["Alerts &amp; thesis check"]
     R4["Rebalance / analysis"]
   end
-  subgraph App["Portfolio Monitor (MCP)"]
+  subgraph App["Argus (MCP)"]
     T1["get_daily_brief_data"]
     T2["get_events"]
     T3["list_alerts · thesis notes"]
@@ -502,7 +502,7 @@ flowchart LR
 <h2 id="roadmap">11. Roadmap</h2>
 <div class="tbl"><table>
   <tr><th>Phase</th><th>Deliverable</th><th>Done when</th></tr>
-  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>pm</code> CLI, <b>Investing.com migration</b> (<code>pm import</code> + <code>import_positions</code>)</td><td>Your Investing.com holdings are imported, and <code>pm portfolio --json</code> matches the Investing.com totals for share count and cost</td></tr>
+  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>argus</code> CLI, <b>Investing.com migration</b> (<code>argus import</code> + <code>import_positions</code>)</td><td>Your Investing.com holdings are imported, and <code>argus portfolio --json</code> matches the Investing.com totals for share count and cost</td></tr>
   <tr><td><span class="tag t-p1">P1</span> Monitor MVP</td><td>Scheduler and live quote loop with SSE; dashboard, ticker detail, watchlist, transactions and compare pages; multiple portfolios; benchmark compare; <b>MCP server with P1 tools</b></td><td>During market hours the UI updates within about 15s; Claude can answer "how's my portfolio today" and log a trade through MCP</td></tr>
   <tr><td><span class="tag t-p2">P2</span> Routines</td><td>Events calendar, brief data tool, alerts (price, %, valuation, 52-week, earnings T-1) shown in the UI and MCP, thesis notes, MCP prompts</td><td>Asking Claude Desktop "give me today's brief" produces a brief using only this app's MCP data</td></tr>
   <tr><td><span class="tag t-p3">P3</span> Analysis</td><td>Target weights, drift and what-if trades, exposure analysis, broker CSV import, paid-provider adapters, optional extended hours, notifications, options</td><td>As needed</td></tr>
@@ -510,9 +510,9 @@ flowchart LR
 
 <!-- ============================================================ -->
 <h2 id="layout">12. Repo layout</h2>
-<pre><code>portfolio-monitor/
-├─ pyproject.toml            # uv; entry point `pm`
-├─ backend/pm/
+<pre><code>argus/   (local folder: portfolio-monitor/)
+├─ pyproject.toml            # uv; entry point `argus`
+├─ backend/argus/
 │  ├─ core/                  # db.py, models.py, services/{portfolio,market,analytics}.py
 │  ├─ providers/             # base.py (Provider protocol), yfinance_p.py, finnhub_p.py, sec_edgar.py
 │  ├─ indicators.py
@@ -522,7 +522,7 @@ flowchart LR
 │  └─ cli.py                 # Typer; --json everywhere
 ├─ frontend/                 # Vite + React + TS + TanStack Query + lightweight-charts
 ├─ tests/                    # P&amp;L/lot fixtures, provider contract tests (recorded)
-├─ data/pm.sqlite            # gitignored
+├─ data/argus.sqlite            # gitignored
 ├─ .env                      # FINNHUB_API_KEY, SEC_USER_AGENT (gitignored)
 └─ docs/design.html          # this doc</code></pre>
 
@@ -563,7 +563,7 @@ flowchart LR
 <div class="q"><b class="n">Q10</b><b>Investing.com export format.</b> Can you export your portfolio(s) from Investing.com as CSV? If so, share one file (just the header row plus a fake row is enough) and I'll build the importer to match it exactly. If not, send a screenshot of the holdings table, and Claude reads it and calls <code>import_positions</code>.
   <div class="def">Default: a generic CSV importer with column mapping (symbol, shares, avg cost, optional open date and portfolio name). Watchlists are imported the same way.</div></div>
 
-<footer>Portfolio Monitor · design v0.2 · diagrams rendered with Mermaid.</footer>
+<footer>Argus (portfolio monitor) · design v0.2 · diagrams rendered with Mermaid.</footer>
 </div>
 
 <script type="module">
