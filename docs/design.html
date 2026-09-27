@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Monitor Design</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --surface-2: #f0f0ec; --text: #1c1c1a; --muted: #6b6b66;
+    --border: #e2e2dc; --accent: #2f6fdb; --accent-soft: #e6eefc; --up: #1a8a4a; --down: #c8372d;
+    --warn-bg: #fff6e0; --warn-border: #e8c46a; --code-bg: #f2f2ee;
+    --p0: #6b6b66; --p1: #2f6fdb; --p2: #8a4fd6; --p3: #b8742a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --surface: #1d1d1b; --surface-2: #262623; --text: #ececE8; --muted: #9b9b94;
+      --border: #33332f; --accent: #6b9bf0; --accent-soft: #1f2a40; --up: #4cc27f; --down: #ef6b61;
+      --warn-bg: #2e2716; --warn-border: #7a6428; --code-bg: #262623;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413; --surface: #1d1d1b; --surface-2: #262623; --text: #ececE8; --muted: #9b9b94;
+    --border: #33332f; --accent: #6b9bf0; --accent-soft: #1f2a40; --up: #4cc27f; --down: #ef6b61;
+    --warn-bg: #2e2716; --warn-border: #7a6428; --code-bg: #262623;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 16px 80px; }
+  header.doc { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 8px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 21px; margin: 48px 0 12px; padding-top: 8px; }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 16px 0 0; font-size: 13px; }
+  nav.toc a { color: var(--accent); text-decoration: none; }
+  p, li { max-width: 78ch; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  pre code { background: none; padding: 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+    margin: 14px 0; overflow-x: auto; }
+  .diagram .cap { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .mermaid { display: flex; justify-content: center; min-width: 560px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin: 14px 0; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--surface-2); }
+  tr:last-child td { border-bottom: none; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid currentColor; white-space: nowrap; }
+  .t-p0 { color: var(--p0); } .t-p1 { color: var(--p1); } .t-p2 { color: var(--p2); } .t-p3 { color: var(--p3); }
+  .t-w { color: var(--down); } .t-r { color: var(--up); }
+  .callout { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 10px; padding: 12px 16px; margin: 14px 0; }
+  .decision { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+  .q { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin: 10px 0; }
+  .q b.n { color: var(--accent); margin-right: 6px; }
+  .q .def { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  /* wireframe */
+  .wf { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin: 14px 0; font-size: 13px; }
+  .wf-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .wf-tabs span { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); margin-right: 4px; }
+  .wf-tabs span.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .wf-live { font-size: 12px; color: var(--up); }
+  .wf-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .wf-kpi { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+  .wf-kpi .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .wf-kpi .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .wf-body { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+  @media (max-width: 720px) { .wf-body { grid-template-columns: 1fr; } }
+  .wf-box { border: 1px dashed var(--border); border-radius: 8px; padding: 10px; min-height: 120px; color: var(--muted); }
+  .wf-box table td, .wf-box table th { padding: 5px 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  svg.spark { width: 100%; height: 110px; }
+  footer { margin-top: 60px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Portfolio Monitor: Design Doc</h1>
+  <div class="meta">v0.2 · 2026-09-27 · Status: <b>decisions closed, ready for P0</b> · Scope: MVP = portfolio monitor, then phased add-ons</div>
+  <nav class="toc">
+    <a href="#goals">1. Goals</a><a href="#decisions">2. Decisions so far</a><a href="#arch">3. Architecture</a>
+    <a href="#data">4. Market data</a><a href="#realtime">5. Trade-day refresh</a><a href="#model">6. Data model</a>
+    <a href="#analytics">7. Metrics &amp; analytics</a><a href="#ui">8. UI</a><a href="#agent">9. Agent / MCP</a>
+    <a href="#habits">10. Your routines</a><a href="#roadmap">11. Roadmap</a><a href="#layout">12. Repo layout</a>
+    <a href="#risks">13. Risks</a><a href="#questions">14. Open questions ❓</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="goals">1. Goals &amp; non-goals</h2>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0">Goals</h3>
+    <ul>
+      <li>Build and track your <b>own portfolios</b> from a trade log (multiple portfolios + a watchlist).</li>
+      <li><b>Near real-time prices on trading days</b>, with live P&amp;L, day change and weights.</li>
+      <li><b>Charts</b>: candlesticks with indicators, plus portfolio performance vs a benchmark (SPY/QQQ).</li>
+      <li><b>Valuation &amp; fundamentals</b>: PE, forward PE, PB, PS, EV/EBITDA, revenue &amp; growth, margins and more.</li>
+      <li><b>Agent-first</b>: every feature is reachable from an MCP server and a JSON CLI, not only the UI.</li>
+      <li>Local-first on your Mac, free data to start, with a <b>pluggable data-provider layer</b>.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Non-goals (for now)</h3>
+    <ul>
+      <li>Placing real brokerage orders.</li>
+      <li>Non-US markets, options, crypto, FX and bonds. The schema leaves room for them; v1 doesn't implement them.</li>
+      <li>Multi-user accounts, auth and hosting.</li>
+      <li>Notifications (macOS or push), paid or premium data (analyst ratings, price targets, smart scores), and non-English UI.</li>
+      <li>Rebuilding your complex research routines in the app. The app <b>serves data</b> to them through MCP, and Claude does the reasoning.</li>
+      <li>Tick-level, exchange-grade real-time data. Free feeds give you "live enough".</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="decisions">2. Decisions so far</h2>
+<div class="tbl"><table>
+  <tr><th>Topic</th><th>Decision</th><th>Why</th></tr>
+  <tr><td>Markets</td><td>US stocks &amp; ETFs</td><td>Your answer. Free US data is plentiful.</td></tr>
+  <tr><td>Deployment</td><td>Local-first on your Mac, one process on <code>localhost</code>, SQLite</td><td>Your answer. Zero ops, private, and easy for local Claude to reach.</td></tr>
+  <tr><td>Data budget</td><td>Free sources behind a <code>Provider</code> interface</td><td>Your answer. A paid feed can drop in later without app changes.</td></tr>
+  <tr><td>Holdings input</td><td>Manual <b>trade log</b> is the source of truth; positions are derived from it</td><td>Your answer. This gives correct cost basis, realized P&amp;L and history.</td></tr>
+  <tr><td>Stack</td><td><b>Python 3.12</b> (FastAPI, SQLAlchemy, APScheduler, pandas, managed with uv) + <b>React/Vite/TS</b> + TradingView Lightweight Charts</td><td>You had no preference. Python has the best finance libraries (yfinance, pandas, market calendars) and an official MCP SDK. Lightweight Charts is a free, open-source candlestick chart library.</td></tr>
+  <tr><td>MCP scope</td><td>Read + edit portfolio data. No real orders.</td><td>Your answer. Writes support <code>dry_run</code> and are recorded in an audit log.</td></tr>
+  <tr><td>MVP extras</td><td>Multiple portfolios, watchlist, benchmark compare</td><td>Your answer. Extended-hours quotes are deferred.</td></tr>
+  <tr><td>Routines</td><td>Monitor first. Brief, earnings, alerts and rebalancing come later as MCP data tools.</td><td>Your answer. The complex routines stay in Claude.</td></tr>
+  <tr><td>Live data</td><td><b>Finnhub free key</b> (WebSocket + quote/metrics/earnings/news), yfinance for history and as fallback. Key lives in <code>.env</code> (gitignored).</td><td>Q2. Free: 60 requests/min, about 50 streamed symbols.</td></tr>
+  <tr><td>Cost basis</td><td><b>FIFO</b> for realized P&amp;L; average cost shown for display only</td><td>Q3. Matches the default at most US brokers and on the 1099-B.</td></tr>
+  <tr><td>Cash</td><td><b>Positions only</b>, no cash balances. Buys count as money in; sell proceeds and dividends count as money out.</td><td>Q4. Simpler bookkeeping. Returns are still time-weighted.</td></tr>
+  <tr><td>Migration</td><td>Import current <b>Investing.com</b> holdings as one <b>opening lot per symbol at average cost</b>. Trades after that are FIFO lots.</td><td>Q5. No need to reconstruct old trades. Performance history starts on the import date.</td></tr>
+  <tr><td>Instruments</td><td>Long-only US stocks and ETFs. No options or shorts.</td><td>Q6</td></tr>
+  <tr><td>UI</td><td>English only, green for up</td><td>Q7</td></tr>
+  <tr><td>Notifications</td><td>None for now. P2 alerts show only in the UI and in MCP responses.</td><td>Q8</td></tr>
+  <tr><td>Premium data</td><td>Skipped (analyst targets, insider trades, scores)</td><td>Q9. Only free sources.</td></tr>
+  <tr><td>Your scheduled chats</td><td><b>Separate from this app.</b> Your claude.ai scheduled chats keep running as they do today and don't call this app. No tunnel, no hosting.</td><td>Your answer (Q1). They show how you use AI for stock analysis, so they shape which features come first, not how the app integrates.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="arch">3. Architecture</h2>
+<p>There is <b>one core library with three front ends</b>. The web UI, the MCP server and the CLI all call the same service layer, so they can never disagree about what a position or P&amp;L number is.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph EXT["External data (free)"]
+    YF["yfinance<br/>quotes · history · fundamentals"]
+    FH["Finnhub free key<br/>WebSocket trades · earnings · news"]
+    SEC["SEC EDGAR XBRL<br/>official financials"]
+  end
+  subgraph CORE["pm core (Python)"]
+    PR["Provider layer<br/>adapters + fallback + rate limit"]
+    MD["Market service<br/>quotes · bars · fundamentals · calendar"]
+    PF["Portfolio service<br/>trades → lots → positions · cash"]
+    AN["Analytics<br/>P&amp;L · NAV · TWR · indicators · valuation"]
+    SCH["Scheduler<br/>market-session aware"]
+    DB[("SQLite (WAL)<br/>data/pm.sqlite")]
+  end
+  subgraph FACES["Interfaces"]
+    API["REST + SSE<br/>FastAPI :8765"]
+    MCP["MCP server<br/>stdio + streamable HTTP /mcp"]
+    CLI["pm CLI<br/>--json output"]
+  end
+  subgraph CLIENTS["Clients"]
+    UI["Browser UI<br/>React"]
+    CD["Claude Desktop / Code"]
+  end
+  YF --> PR
+  FH --> PR
+  SEC --> PR
+  PR --> MD
+  MD <--> DB
+  PF <--> DB
+  MD --> AN
+  PF --> AN
+  SCH --> MD
+  AN --> API
+  AN --> MCP
+  AN --> CLI
+  PF --> API
+  PF --> MCP
+  PF --> CLI
+  API --> UI
+  MCP --> CD
+  CLI --> CD
+</pre>
+<div class="cap">Everything runs on your Mac. SQLite in WAL mode lets the web server and a separately spawned MCP stdio process share one database safely.</div>
+</div>
+
+<div class="decision"><b>How the MCP server runs.</b> <code>pm serve</code> starts the API, the UI, the scheduler and an HTTP MCP endpoint at <code>/mcp</code>. <code>pm mcp</code> is a stdio entry point for Claude Desktop that imports the same core and reads and writes the same database. If the live server isn't running, it fetches quotes on demand and caches them. So agents keep working whether or not the app is open.</div>
+
+<!-- ============================================================ -->
+<h2 id="data">4. Market data (free tier, pluggable)</h2>
+<div class="tbl"><table>
+  <tr><th>Need</th><th>Primary</th><th>Fallback</th><th>Notes</th></tr>
+  <tr><td>Live quote (trading hours)</td><td>Finnhub WebSocket (free key)</td><td>yfinance batch poll every 15s</td><td>Finnhub's free tier streams US trade prints in real time. yfinance is unofficial and can be throttled or break.</td></tr>
+  <tr><td>Daily and intraday bars</td><td>yfinance</td><td>none (Finnhub candles are paid-only)</td><td>1d back to IPO. 1m data only covers about the last 7 days, 5m/15m about the last 60 days. Stored locally, so later fetches only pull new bars.</td></tr>
+  <tr><td>Valuation snapshot (PE, PB, PS, EV/EBITDA, beta, dividend yield, market cap)</td><td>yfinance <code>info</code></td><td>Finnhub basic financials</td><td>Refreshed nightly, marked stale after 24h.</td></tr>
+  <tr><td>Financial statements (revenue, EPS, margins, FCF, quarterly)</td><td>SEC EDGAR <code>companyfacts</code></td><td>yfinance financials</td><td>Official and free. Needs a User-Agent header with your email, and has a limit of 10 requests/s.</td></tr>
+  <tr><td>Earnings calendar, news</td><td>Finnhub</td><td>yfinance calendar</td><td>Used from P2 on.</td></tr>
+  <tr><td>Trading calendar (holidays, half-days)</td><td><code>exchange_calendars</code> (local library)</td><td>n/a</td><td>No network calls. Drives the scheduler.</td></tr>
+</table></div>
+<p>Every quote and metric the app returns carries <code>as_of</code>, <code>source</code> and <code>delayed: bool</code>, so you and agents can see how fresh a number is.</p>
+
+<!-- ============================================================ -->
+<h2 id="realtime">5. Trade-day refresh loop</h2>
+<div class="grid2">
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Closed
+  Closed --> PreOpen: 09:00 ET on a trading day
+  PreOpen --> Regular: 09:30 open
+  Regular --> PostClose: 16:00 close (13:00 on half-days)
+  PostClose --> Closed: EOD jobs done
+  Closed --> Closed: weekend / holiday
+  note right of Regular
+    stream or poll every 15s for held and watched symbols
+    push updates to the UI over SSE
+  end note
+  note right of PostClose
+    16:10 final closes + daily bars
+    NAV snapshot per portfolio
+    stale fundamentals refresh
+  end note
+</pre>
+<div class="cap">Session state comes from the trading calendar. Nothing polls while the market is closed; the app serves cached data.</div>
+</div>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  participant S as Scheduler
+  participant P as Provider
+  participant C as Quote cache
+  participant A as Analytics
+  participant U as UI (SSE)
+  S->>P: subscribe(held ∪ watched)
+  loop each tick / 15s
+    P-->>C: price, ts, source
+    C->>A: recompute affected positions
+    A-->>U: {symbol, price, day%, pos P&L, portfolio totals}
+  end
+  Note over U: throttled to 1 UI frame/s
+</pre>
+<div class="cap">P&amp;L is recomputed only for positions whose price changed.</div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="model">6. Data model</h2>
+<p><b>Transactions are the source of truth.</b> Lots, positions and the NAV history are derived from them and cached, and the cache is rebuilt on every write. That's why a trade you back-date still produces correct performance history.</p>
+<div class="diagram">
+<pre class="mermaid">
+erDiagram
+  PORTFOLIO ||--o{ TRANSACTION : records
+  PORTFOLIO ||--o{ LOT : "derived"
+  PORTFOLIO ||--o{ NAV_DAILY : "derived"
+  INSTRUMENT ||--o{ TRANSACTION : "traded"
+  INSTRUMENT ||--o{ PRICE_BAR : has
+  INSTRUMENT ||--o| QUOTE : "latest"
+  INSTRUMENT ||--o{ FUNDAMENTAL : has
+  WATCHLIST ||--o{ WATCHLIST_ITEM : contains
+  INSTRUMENT ||--o{ WATCHLIST_ITEM : "watched"
+  PORTFOLIO {
+    int id PK
+    text name
+    text base_ccy
+    text benchmark
+    text cost_method
+  }
+  TRANSACTION {
+    int id PK
+    int portfolio_id FK
+    text type
+    text symbol FK
+    real qty
+    real price
+    real fee
+    datetime ts
+    text note
+    text source
+    text idempotency_key
+    bool deleted
+  }
+  LOT {
+    int id PK
+    text symbol
+    real qty_open
+    real cost
+    date opened
+  }
+  INSTRUMENT {
+    text symbol PK
+    text name
+    text exchange
+    text sector
+    text industry
+    text type
+  }
+  PRICE_BAR {
+    text symbol FK
+    text interval
+    datetime ts
+    real o
+    real h
+    real l
+    real c
+    real v
+  }
+  QUOTE {
+    text symbol PK
+    real price
+    real prev_close
+    datetime as_of
+    text source
+    bool delayed
+  }
+  FUNDAMENTAL {
+    text symbol FK
+    date as_of
+    json metrics
+    text source
+  }
+  NAV_DAILY {
+    int portfolio_id FK
+    date d
+    real market_value
+    real net_flow
+    real income
+  }
+  WATCHLIST {
+    int id PK
+    text name
+  }
+  WATCHLIST_ITEM {
+    int watchlist_id FK
+    text symbol FK
+    text note
+  }
+</pre>
+<div class="cap">Transaction types are <code>OPENING</code> (a migrated position at average cost), <code>BUY</code>, <code>SELL</code>, <code>DIVIDEND</code>, <code>SPLIT</code> and <code>FEE</code>. There are no cash transactions. Every write also appends a row to <code>AUDIT_LOG</code> (actor = ui/mcp/cli, before, after), which isn't drawn here.</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="analytics">7. Metrics &amp; analytics</h2>
+<div class="grid3">
+  <div class="card"><h3 style="margin-top:0">Position / portfolio</h3>
+    <ul><li>Market value, weight</li><li>Unrealized P&amp;L ($/%)</li><li>Day P&amp;L ($/%)</li><li>Realized P&amp;L (FIFO)</li><li>Dividends received</li><li>Allocation by sector and by position</li></ul></div>
+  <div class="card"><h3 style="margin-top:0">Valuation / fundamentals</h3>
+    <ul><li>PE (TTM), forward PE, PEG</li><li>PB, PS, EV/EBITDA</li><li>Market cap, dividend yield, beta</li><li>Revenue TTM, YoY growth</li><li>Gross, operating and net margin</li><li>EPS, FCF, ROE, debt/equity</li><li>52-week range and position within it</li></ul></div>
+  <div class="card"><h3 style="margin-top:0">Technical (computed locally)</h3>
+    <ul><li>SMA/EMA 20, 50, 200</li><li>RSI(14), MACD(12,26,9)</li><li>Bollinger(20,2), ATR(14)</li><li>Average volume, relative volume</li><li>Drawdown from high</li></ul>
+    <p class="meta">A small numpy/pandas module. It avoids a dependency on unmaintained technical-analysis libraries.</p></div>
+</div>
+<div class="card">
+  <h3 style="margin-top:0">Performance vs benchmark</h3>
+  <p>Portfolios hold positions only, with no cash. Market value V<sub>t</sub> = Σ qty<sub>t</sub> · close<sub>t</sub> is rebuilt from the trade log and daily bars. The daily return is r<sub>t</sub> = (V<sub>t</sub> + D<sub>t</sub> − F<sub>t</sub>) / V<sub>t−1</sub> − 1, where F<sub>t</sub> is buy cost minus sell proceeds that day, and D<sub>t</sub> is dividends. Chaining these daily returns gives the <b>time-weighted return</b> (TWR), so adding money doesn't count as performance. History starts at the import date. The benchmark (SPY by default, set per portfolio) is normalized to the same start date. Also reported: total return, CAGR, max drawdown, volatility and Sharpe (risk-free rate from the 3-month T-bill).</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="ui">8. UI: pages &amp; wireframe</h2>
+<div class="tbl"><table>
+  <tr><th>Page</th><th>Contents</th></tr>
+  <tr><td>Dashboard</td><td>Portfolio switcher (or "All"), KPI tiles, live holdings table, allocation donut, performance vs benchmark chart</td></tr>
+  <tr><td>Ticker detail</td><td>Candlesticks (1D/5D/1M/6M/1Y/5Y/Max) with indicator toggles, key stats, valuation panel, quarterly financial bars, your lots &amp; trades</td></tr>
+  <tr><td>Watchlist</td><td>Same columns as holdings plus valuation columns, sortable, inline notes</td></tr>
+  <tr><td>Transactions</td><td>Trade log with add, edit and delete (soft delete), filters, and the source of each entry (UI or agent)</td></tr>
+  <tr><td>Compare</td><td>Side-by-side metrics for 2–6 symbols (the kind of question you often ask agents)</td></tr>
+</table></div>
+
+<div class="wf" aria-label="Dashboard wireframe">
+  <div class="wf-top">
+    <div class="wf-tabs"><span class="on">All</span><span>Long-term</span><span>Trading</span><span>+ New</span></div>
+    <div class="wf-live">● Market open · live · 3s ago</div>
+  </div>
+  <div class="wf-kpis">
+    <div class="wf-kpi"><div class="l">Total value</div><div class="v">$184,320</div></div>
+    <div class="wf-kpi"><div class="l">Day P&amp;L</div><div class="v up">+$1,242 · +0.68%</div></div>
+    <div class="wf-kpi"><div class="l">Unrealized</div><div class="v up">+$23,910</div></div>
+    <div class="wf-kpi"><div class="l">YTD vs SPY</div><div class="v">+14.2% / +11.8%</div></div>
+  </div>
+  <div class="wf-body">
+    <div class="wf-box">
+      <table>
+        <tr><th>Symbol</th><th>Price</th><th>Day</th><th>Weight</th><th>P&amp;L</th><th>PE</th></tr>
+        <tr><td>NVDA</td><td>—</td><td class="up">+1.9%</td><td>22%</td><td class="up">+61%</td><td>—</td></tr>
+        <tr><td>MSFT</td><td>—</td><td class="down">−0.4%</td><td>18%</td><td class="up">+12%</td><td>—</td></tr>
+        <tr><td>VOO</td><td>—</td><td class="up">+0.5%</td><td>30%</td><td class="up">+9%</td><td>—</td></tr>
+      </table>
+      <div class="meta" style="margin-top:6px">Illustrative placeholders only. Click a row to open ticker detail.</div>
+    </div>
+    <div class="wf-box">Allocation donut<br><span class="meta">sector / position toggle</span></div>
+    <div class="wf-box" style="grid-column: 1 / -1; min-height: 0">
+      <svg class="spark" viewBox="0 0 600 110" preserveAspectRatio="none" aria-label="Portfolio vs benchmark line sketch">
+        <polyline fill="none" stroke="var(--accent)" stroke-width="2" points="0,90 60,82 120,85 180,70 240,64 300,68 360,50 420,44 480,38 540,30 600,24"/>
+        <polyline fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3" points="0,90 60,86 120,84 180,78 240,74 300,72 360,64 420,60 480,56 540,50 600,46"/>
+      </svg>
+      <span class="meta">Portfolio (solid) vs SPY (dashed): 1M / 3M / YTD / 1Y / All</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="agent">9. Agent / MCP design</h2>
+<p>Design rules that make this easy for agents to operate:</p>
+<ul>
+  <li><b>Few, coarse tools that accept lists</b>, e.g. <code>get_quotes(["NVDA","MSFT"])</code>, so a question needs one call, not N.</li>
+  <li><b>A <code>fields</code> parameter</b> to return only the metrics asked for, which keeps responses small.</li>
+  <li><b>Freshness on every value</b>: <code>as_of</code>, <code>source</code>, <code>delayed</code>, <code>market_session</code>.</li>
+  <li><b>Safe writes</b>: <code>dry_run</code> by default in the tool description, <code>idempotency_key</code> so a retry can't double-book a trade, soft delete, and an audit log entry with actor=mcp.</li>
+  <li><b>Clear errors</b>, e.g. <code>{code:"UNKNOWN_SYMBOL", hint:"did you mean GOOGL?"}</code>.</li>
+  <li><b>The CLI mirrors the MCP tools</b> (<code>pm quotes NVDA MSFT --json</code>), so Claude Code can use either.</li>
+</ul>
+
+<div class="tbl"><table>
+  <tr><th>Tool</th><th>Kind</th><th>Phase</th><th>Purpose</th></tr>
+  <tr><td><code>market_status</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Session (pre/regular/post/closed), next open/close, holiday</td></tr>
+  <tr><td><code>list_portfolios</code> · <code>get_portfolio</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Summary, positions, allocation, day and total P&amp;L. <code>portfolio="all"</code> aggregates</td></tr>
+  <tr><td><code>get_quotes</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Batch live quotes</td></tr>
+  <tr><td><code>get_price_history</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>OHLCV by range and interval, optionally with indicators</td></tr>
+  <tr><td><code>get_fundamentals</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Valuation and financials. <code>fields</code> filter, <code>period=ttm|quarterly|annual</code></td></tr>
+  <tr><td><code>compare_symbols</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Metrics table across symbols</td></tr>
+  <tr><td><code>get_performance</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>TWR, drawdown, vs benchmark over a range</td></tr>
+  <tr><td><code>list_transactions</code> · <code>search_symbol</code> · <code>get_watchlist</code></td><td class="t-r">read</td><td><span class="tag t-p1">P1</span></td><td>Lookups</td></tr>
+  <tr><td><code>add_transaction</code> · <code>edit_transaction</code> · <code>delete_transaction</code></td><td class="t-w">write</td><td><span class="tag t-p1">P1</span></td><td>Trade log. <code>dry_run</code> returns the position before and after</td></tr>
+  <tr><td><code>import_positions</code></td><td class="t-w">write</td><td><span class="tag t-p0">P0</span></td><td>Bulk import of opening lots (symbol, shares, avg cost, optional date) from a CSV or rows Claude reads from an Investing.com screenshot. <code>dry_run</code> shows the parsed table first.</td></tr>
+  <tr><td><code>create_portfolio</code> · <code>watchlist_add</code> · <code>watchlist_remove</code></td><td class="t-w">write</td><td><span class="tag t-p1">P1</span></td><td>Portfolio and watchlist management</td></tr>
+  <tr><td><code>get_daily_brief_data</code></td><td class="t-r">read</td><td><span class="tag t-p2">P2</span></td><td>Structured facts for a brief: movers, P&amp;L, events today and this week, alerts fired, news headlines</td></tr>
+  <tr><td><code>get_events</code></td><td class="t-r">read</td><td><span class="tag t-p2">P2</span></td><td>Earnings, dividends and splits for holdings and watchlist</td></tr>
+  <tr><td><code>set_alert</code> · <code>list_alerts</code> · <code>add_thesis_note</code></td><td class="t-w">write</td><td><span class="tag t-p2">P2</span></td><td>Alerts and investment thesis notes with review dates</td></tr>
+  <tr><td><code>get_drift</code> · <code>simulate_trades</code></td><td class="t-r">read</td><td><span class="tag t-p3">P3</span></td><td>Drift from target weights, what-if trades</td></tr>
+</table></div>
+<p>The server also exposes <b>MCP resources</b> (<code>portfolio://{id}/summary</code>, <code>ticker://{symbol}</code>) and <b>prompts</b> (<code>daily_brief</code>, <code>position_review</code>) so you can run a standard routine with one command.</p>
+
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  actor You
+  participant C as Claude
+  participant M as MCP server
+  participant S as Portfolio service
+  You->>C: "bought 20 NVDA at 121.5 this morning in Trading"
+  C->>M: add_transaction(dry_run=true, ...)
+  M->>S: validate symbol, portfolio, cash
+  S-->>M: position before → after, cash impact
+  M-->>C: preview
+  C->>You: "Adds 20 NVDA (40 → 60 sh, avg $98.2 → $105.9). Confirm?"
+  You->>C: yes
+  C->>M: add_transaction(dry_run=false, idempotency_key=k)
+  M->>S: commit + rebuild lots/NAV + audit(actor=mcp)
+  M-->>C: ok, txn_id=312
+</pre>
+<div class="cap">Agent write path: preview first, then commit with an idempotency key.</div>
+</div>
+
+<pre><code># register with Claude Code (stdio)
+claude mcp add portfolio -- uv run --directory ~/Documents/github/project-hatching/portfolio-monitor pm mcp
+
+# or over HTTP while `pm serve` is running
+claude mcp add --transport http portfolio http://localhost:8765/mcp</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="habits">10. Features inspired by your routines</h2>
+<p>Your scheduled claude.ai chats stay <b>separate</b> from this app. What they tell us is the kind of analysis you want from AI: daily briefs, earnings and events, alerts and thesis checks, and rebalancing. So those are the P2 and P3 data tools, available to Claude Desktop and Claude Code on this Mac <b>when you ask</b>. The app provides reliable numbers from your own positions, and Claude does the reasoning and the writing.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph Routines["On-demand asks in Claude Desktop / Code"]
+    R1["Daily brief<br/>pre-market / post-close"]
+    R2["Earnings &amp; events"]
+    R3["Alerts &amp; thesis check"]
+    R4["Rebalance / analysis"]
+  end
+  subgraph App["Portfolio Monitor (MCP)"]
+    T1["get_daily_brief_data"]
+    T2["get_events"]
+    T3["list_alerts · thesis notes"]
+    T4["get_drift · simulate_trades"]
+    T0["get_portfolio · get_quotes · get_fundamentals"]
+  end
+  R1 --> T1
+  R1 --> T0
+  R2 --> T2
+  R3 --> T3
+  R3 --> T0
+  R4 --> T4
+  R4 --> T0
+  AL["Alert engine (P2)"] -- "shown in UI + MCP, no push" --> You(("You"))
+</pre>
+<div class="cap">Local Claude gets one consistent MCP call against your own positions instead of ad-hoc web lookups.</div>
+</div>
+<div class="decision"><b>Scope boundary (Q1, resolved).</b> The MCP server is reachable only from this Mac. claude.ai web, mobile and scheduled chats can't reach it, and that's intended. If you ever want them connected, the options are a Cloudflare Tunnel with a login, or a small hosted read-only snapshot. Both are out of scope for now.</div>
+
+<!-- ============================================================ -->
+<h2 id="roadmap">11. Roadmap</h2>
+<div class="tbl"><table>
+  <tr><th>Phase</th><th>Deliverable</th><th>Done when</th></tr>
+  <tr><td><span class="tag t-p0">P0</span> Foundation</td><td>Repo scaffold, database schema and migrations, provider interface with yfinance + Finnhub + EDGAR adapters, trading calendar, trade log → lots/positions, <code>pm</code> CLI, <b>Investing.com migration</b> (<code>pm import</code> + <code>import_positions</code>)</td><td>Your Investing.com holdings are imported, and <code>pm portfolio --json</code> matches the Investing.com totals for share count and cost</td></tr>
+  <tr><td><span class="tag t-p1">P1</span> Monitor MVP</td><td>Scheduler and live quote loop with SSE; dashboard, ticker detail, watchlist, transactions and compare pages; multiple portfolios; benchmark compare; <b>MCP server with P1 tools</b></td><td>During market hours the UI updates within about 15s; Claude can answer "how's my portfolio today" and log a trade through MCP</td></tr>
+  <tr><td><span class="tag t-p2">P2</span> Routines</td><td>Events calendar, brief data tool, alerts (price, %, valuation, 52-week, earnings T-1) shown in the UI and MCP, thesis notes, MCP prompts</td><td>Asking Claude Desktop "give me today's brief" produces a brief using only this app's MCP data</td></tr>
+  <tr><td><span class="tag t-p3">P3</span> Analysis</td><td>Target weights, drift and what-if trades, exposure analysis, broker CSV import, paid-provider adapters, optional extended hours, notifications, options</td><td>As needed</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="layout">12. Repo layout</h2>
+<pre><code>portfolio-monitor/
+├─ pyproject.toml            # uv; entry point `pm`
+├─ backend/pm/
+│  ├─ core/                  # db.py, models.py, services/{portfolio,market,analytics}.py
+│  ├─ providers/             # base.py (Provider protocol), yfinance_p.py, finnhub_p.py, sec_edgar.py
+│  ├─ indicators.py
+│  ├─ scheduler.py           # session-aware jobs (APScheduler + exchange_calendars)
+│  ├─ api/                   # FastAPI routers, SSE stream, serves built UI
+│  ├─ mcp/server.py          # FastMCP tools/resources/prompts → core services
+│  └─ cli.py                 # Typer; --json everywhere
+├─ frontend/                 # Vite + React + TS + TanStack Query + lightweight-charts
+├─ tests/                    # P&amp;L/lot fixtures, provider contract tests (recorded)
+├─ data/pm.sqlite            # gitignored
+├─ .env                      # FINNHUB_API_KEY, SEC_USER_AGENT (gitignored)
+└─ docs/design.html          # this doc</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="risks">13. Risks &amp; mitigations</h2>
+<div class="tbl"><table>
+  <tr><th>Risk</th><th>Mitigation</th></tr>
+  <tr><td>yfinance breaks or gets rate-limited (it's unofficial)</td><td>Fallback order per data type, cache everything, batch requests, back off on errors, and show "stale" in the UI instead of failing. A paid adapter can replace it later.</td></tr>
+  <tr><td>Different sources give different fundamentals (e.g. PE definitions differ)</td><td>Store <code>source</code> with each metric, document definitions in the UI tooltip, and prefer EDGAR for statement data.</td></tr>
+  <tr><td>Migrated average cost differs from real FIFO lots (tax numbers won't match your broker for pre-import shares)</td><td>Opening lots are labelled "migrated · avg cost". You can later replace one with real dated lots, and the history rebuilds.</td></tr>
+  <tr><td>Corporate actions (splits, ticker changes) corrupt cost basis</td><td>A <code>SPLIT</code> transaction type plus split detection from provider data that prompts you to confirm.</td></tr>
+  <tr><td>An agent books a wrong trade</td><td>Dry-run preview, idempotency keys, soft delete and an audit log. The UI shows a badge on agent-entered trades.</td></tr>
+  <tr><td>Free-tier limits with a large watchlist</td><td>Only stream held and watched symbols (fine up to about 50 for Finnhub free). Everything else is fetched on demand.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="questions">14. Open questions ❓ (please answer)</h2>
+<p>Each question has a proposed default. If you don't change it, I'll go with the default.</p>
+
+<div class="q" style="opacity:.7"><b class="n">Q1 ✓</b><b>Where do your recurring portfolio tasks run?</b> In claude.ai scheduled chats.
+  <div class="def">Resolved: they stay separate from this app. They only inform feature priorities. No tunnel or hosting.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q2 ✓</b><b>Finnhub API key?</b> Signed up.
+  <div class="def">Resolved: Finnhub primary for live data, yfinance fallback and history. Key goes in <code>.env</code>.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q3 ✓</b><b>Cost basis method?</b> FIFO.
+  <div class="def">Resolved: a sale is matched against the oldest open shares first. Average cost is display only.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q4 ✓</b><b>Track cash?</b>
+  <div class="def">Resolved: positions only. Buys count as money in; sells and dividends count as money out.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q5 ✓</b><b>Starting data?</b>
+  <div class="def">Resolved: migrate from Investing.com as one opening lot per symbol at average cost.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q6 ✓</b><b>Shorts and options?</b>
+  <div class="def">Resolved: skipped for now.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q7 ✓</b><b>UI language?</b>
+  <div class="def">Resolved: English only, green for up.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q8 ✓</b><b>Alert delivery?</b>
+  <div class="def">Resolved: no notifications for now. Alerts appear in the UI and MCP only.</div></div>
+<div class="q" style="opacity:.7"><b class="n">Q9 ✓</b><b>Premium data?</b>
+  <div class="def">Resolved: skipped. Only free sources.</div></div>
+<div class="q"><b class="n">Q10</b><b>Investing.com export format.</b> Can you export your portfolio(s) from Investing.com as CSV? If so, share one file (just the header row plus a fake row is enough) and I'll build the importer to match it exactly. If not, send a screenshot of the holdings table, and Claude reads it and calls <code>import_positions</code>.
+  <div class="def">Default: a generic CSV importer with column mapping (symbol, shares, avg cost, optional open date and portfolio name). Watchlists are imported the same way.</div></div>
+
+<footer>Portfolio Monitor · design v0.2 · diagrams rendered with Mermaid.</footer>
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral", securityLevel: "strict",
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" });
+</script>
+</body>
+</html>
