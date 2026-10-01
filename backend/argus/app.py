@@ -30,7 +30,8 @@ from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
 from argus.services.market import MarketService
 from argus.services.notes import NoteService
-from argus.services.portfolio import PortfolioService, TxnInput, position_to_dict
+from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
+from argus.services.snapshot import SnapshotService
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import normalize_symbol
 
@@ -41,11 +42,12 @@ class Argus:
         self.settings = settings or load_settings()
         self.engine = make_engine(self.settings.db_path)
         self.portfolios = PortfolioService(self.engine)
-        self.watchlists = WatchlistService(self.engine)
+        self.watchlists = WatchlistService(self.engine, resolve=lambda syms: self.market.get_quotes(syms)[1])
         self.market = (market_factory or self._default_market)(self.engine, self.settings)
         self.events = EventsService(self.engine, self.market.directory, self.market.profile_provider)
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
+        self.snapshots = SnapshotService(self.engine)
 
     @staticmethod
     def _default_market(engine: Engine, s: Settings) -> MarketService:
@@ -163,6 +165,10 @@ class Argus:
                     a[0] += pos.qty
                     a[1] += pos.cost_basis
         return {s: (q, c / q) for s, (q, c) in agg.items() if q}
+
+    def search(self, query: str, limit: int = 10) -> list[dict]:
+        """Symbol search that ranks your holdings and watchlist first."""
+        return self.market.search(query, limit, prefer=set(self.tracked_symbols()))
 
     def tracked_symbols(self) -> list[str]:
         watched = [i["symbol"] for w in self.watchlists.list_watchlists() for i in self.watchlists.items(w["name"])]
@@ -400,8 +406,8 @@ class Argus:
         """Daily value and TWR vs the portfolio's benchmark; `range_` slices and rebases the series."""
         if range_ not in self.PERF_RANGES:
             raise ArgusError("INVALID_ARG", f"Unknown range '{range_}'.", hint=f"Use one of {', '.join(self.PERF_RANGES)}.")
-        p = self.portfolios.get_portfolio(ref)
-        txns = self.portfolios.active_transactions(p.id)
+        p = self.portfolios.view(ref)
+        txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
         if not txns:
             return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "series": []}
         start = min(t.ts for t in txns).astimezone(NY).date()
@@ -445,8 +451,9 @@ class Argus:
 
     # -- import ---------------------------------------------------------------
     def import_investing(self, path: Path, portfolio: str | None = None, opening_through: date | None = None,
-                         dry_run: bool = True, validate_symbols: bool = True) -> dict:
-        parsed = investing.parse_investing_csv(path)
+                         dry_run: bool = True, validate_symbols: bool = True, text: str | None = None) -> dict:
+        """Import an Investing.com export from `path`, or from `text` (an upload; `path` then only names it)."""
+        parsed = investing.parse_investing_text(text, path.name) if text is not None else investing.parse_investing_csv(path)
         name = portfolio or parsed.portfolio_name
         if not name:
             raise ArgusError("INVALID_ARG", "Can't infer the portfolio name from the file name.",

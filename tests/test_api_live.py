@@ -76,3 +76,49 @@ def test_watchlist_endpoints(client):
 def test_rejects_foreign_host_header(client):
     assert client.get("/api/portfolios", headers={"host": "evil.example"}).status_code == 400
     assert client.get("/api/portfolios", headers={"host": "localhost:8787"}).status_code == 200
+
+
+def test_edit_transaction_endpoint_and_all_view_listing(client):
+    r = client.post("/api/portfolios/growth/transactions",
+                    json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
+    txn_id = r.json()["inserted_ids"][0]
+    preview = client.patch(f"/api/transactions/{txn_id}", json={"price": 80, "dry_run": True}).json()
+    assert preview["position"]["after"]["avg_cost"] == 80 and "after" not in preview
+    saved = client.patch(f"/api/transactions/{txn_id}", json={"qty": 12, "date": "2026-09-02"}).json()
+    assert saved["after"]["qty"] == 12 and saved["after"]["ts"].startswith("2026-09-02")
+    rows = client.get("/api/portfolios/all/transactions?symbol=aaa").json()
+    assert [(r["qty"], r["portfolio"]) for r in rows] == [(12, "growth")]
+    assert client.patch(f"/api/transactions/{txn_id}", json={"qty": 1}).status_code == 404  # replaced row
+
+
+def test_snapshot_download_and_restore(client):
+    client.post("/api/portfolios/growth/transactions",
+                json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
+    r = client.get("/api/snapshot")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    doc = r.json()
+    preview = client.post("/api/snapshot/restore", json=doc).json()  # dry run by default
+    assert preview["dry_run"] and preview["will_remove"] == {"portfolio": 1, "txn": 1}
+    assert client.post("/api/snapshot/restore?dry_run=false", json=doc).status_code == 409
+    done = client.post("/api/snapshot/restore?dry_run=false&replace=true", json=doc).json()
+    assert done["backup"].endswith(".json")
+    assert client.get("/api/portfolios/growth").json()["totals"]["position_count"] == 1
+    assert client.post("/api/snapshot/restore", json={"nope": 1}).status_code == 400
+
+
+def test_import_investing_upload(make_argus):
+    from tests.conftest import FIXTURES
+
+    a = make_argus([FakeQuotes("fake", {"AAPL": (200, 198), "KO": (62, 61), "SPY": (510, 505)})])
+    body = {"filename": "C:\\Users\\me\\sample_Holdings_01152026.csv",
+            "content": (FIXTURES / "sample_Holdings_01152026.csv").read_text(encoding="utf-8-sig"),
+            "opening_through": "2026-01-02"}
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        dry = c.post("/api/import/investing", json=body).json()
+        assert dry["portfolio"] == "sample" and dry["status"] == "ok" and dry["dry_run"]
+        assert a.portfolios.list_portfolios() == []
+        assert c.post("/api/import/investing", json=body | {"dry_run": False}).json()["inserted"] == 5
+        again = c.post("/api/import/investing", json=body | {"dry_run": False, "portfolio": "sample"}).json()
+        assert again["skipped_existing"] == 5
+        bad = c.post("/api/import/investing", json=body | {"opening_through": "Jan 2"})
+        assert bad.status_code == 400

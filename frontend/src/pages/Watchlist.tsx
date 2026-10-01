@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, type StreamUpdate, type WatchItem } from "../api";
+import { TickerInput } from "../components/TickerInput";
 import { big, pct, price, ratio, tone } from "../format";
 
 const pctCell = (v: number | null | undefined) => (v == null ? "–" : `${v.toFixed(1)}%`);
@@ -44,8 +45,8 @@ export function Watchlist({ live }: { live: StreamUpdate | null }) {
       <section className="card">
         <h2>Add to watchlist</h2>
         <form className="row" onSubmit={add}>
-          <input className="input" placeholder="Tickers, e.g. TSLA, COST" value={input} onChange={(e) => setInput(e.target.value)}
-                 aria-label="Tickers" />
+          <TickerInput placeholder="Tickers or company, e.g. TSLA, COST" value={input} onChange={setInput}
+                       aria-label="Tickers" />
           <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)}
                  aria-label="Note" style={{ flex: 2 }} />
           <button className="btn primary" disabled={busy}>{busy ? "Adding…" : "Add"}</button>

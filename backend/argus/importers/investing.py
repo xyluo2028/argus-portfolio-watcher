@@ -73,7 +73,12 @@ def parse_investing_csv(path: Path) -> ParsedExport:
         text = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError as e:
         raise ArgusError("NOT_FOUND", f"No such file: {path}") from e
-    rows = list(csv.reader(text.splitlines()))
+    return parse_investing_text(text, path.name)
+
+
+def parse_investing_text(text: str, filename: str) -> ParsedExport:
+    """Parse export contents; `filename` (e.g. growth_Holdings_09272026.csv) supplies the portfolio name."""
+    rows = list(csv.reader(text.lstrip("\ufeff").splitlines()))
 
     lots_sec = _section(rows, LOTS_SECTION)
     if lots_sec is None:
@@ -114,7 +119,7 @@ def parse_investing_csv(path: Path) -> ParsedExport:
             except ValueError:
                 pass
 
-    m = FILENAME_RE.match(path.stem)
+    m = FILENAME_RE.match(Path(filename).stem)
     return ParsedExport(m.group("name") if m else None, lots, summary, totals)
 
 

@@ -91,3 +91,45 @@ def test_weekend_quote_counts_friday_buys_against_cost(argus):
     q = {"X": Quote("X", 177.71, 172.16, None, None, None, sunday, "yahoo")}
     row = argus.portfolios.summary("growth", q)["positions"][0]
     assert row["day_pnl"] == pytest.approx(6 * (177.71 - 172.16) + 3 * (177.71 - 176))  # 38.43, as Investing.com
+
+
+def test_all_view_merges_positions_across_portfolios(argus):
+    argus.portfolios.create_portfolio("income")
+    argus.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 10, 50),
+                                                 TxnInput("BUY", "Y", at(2026, 9, 1), 5, 20)])
+    argus.portfolios.add_transactions("income", [TxnInput("BUY", "X", at(2026, 9, 2), 10, 70),
+                                                 TxnInput("SELL", "X", at(2026, 9, 3), 4, 80)])
+    now = at(2026, 9, 25, 20)
+    q = {"X": Quote("X", 100.0, 100.0, None, None, None, now, "fake"),
+         "Y": Quote("Y", 40.0, 40.0, None, None, None, now, "fake")}
+    s = argus.portfolios.summary("all", q)
+    x = next(r for r in s["positions"] if r["symbol"] == "X")
+    assert s["portfolio"]["name"] == "all" and s["totals"]["position_count"] == 2
+    assert x["qty"] == 16 and x["cost_basis"] == pytest.approx(500 + 6 * 70)  # FIFO stayed within "income"
+    assert x["realized_pnl"] == pytest.approx(4 * (80 - 70))
+    assert x["weight_pct"] == pytest.approx(1600 / (1600 + 200) * 100)
+
+
+def test_all_view_is_read_only_and_reserved(argus):
+    with pytest.raises(ArgusError) as e:
+        argus.portfolios.add_transactions("all", [TxnInput("BUY", "X", at(2026, 9, 1), 1, 1)])
+    assert e.value.code == "INVALID_ARG"
+    with pytest.raises(ArgusError):
+        argus.portfolios.create_portfolio("All")
+
+
+def test_edit_transaction_replaces_row_and_keeps_history_valid(argus):
+    ids = argus.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 10, 50)])["inserted_ids"]
+    argus.portfolios.add_transactions("growth", [TxnInput("SELL", "X", at(2026, 9, 5), 8, 60)])
+
+    preview = argus.portfolios.edit_transaction(ids[0], price=40, dry_run=True)
+    assert preview["position"]["after"]["realized_pnl"] == pytest.approx(8 * (60 - 40))
+    assert argus.portfolios.list_transactions("growth")[0]["price"] == 50  # dry run wrote nothing
+
+    with pytest.raises(ArgusError):
+        argus.portfolios.edit_transaction(ids[0], qty=5)  # the later SELL of 8 needs at least 8
+    out = argus.portfolios.edit_transaction(ids[0], qty=12, price=40)
+    rows = argus.portfolios.list_transactions("growth", include_deleted=True)
+    assert [(r["qty"], r["deleted"]) for r in rows if r["type"] == "BUY"] == [(10, True), (12, False)]
+    assert out["after"]["ts"] == out["before"]["ts"]  # untouched fields carry over
+    assert argus.portfolios.positions("growth")["X"].qty == 4

@@ -76,14 +76,16 @@ class FinnhubProvider:
                  per_minute: int = 55):
         self._key = api_key
         self._client = client or httpx.Client(base_url=BASE_URL, timeout=10.0)
+        self._directory: tuple[float, dict[str, SymbolInfo]] | None = None
         self._cache_dir = cache_dir
         self._limiter = _RateLimiter(per_minute)
 
-    def _get(self, path: str, **params) -> dict | list:
+    def _get(self, path: str, timeout: float | None = None, **params) -> dict | list:
         for attempt in range(3):
             self._limiter.wait()
             try:
-                r = self._client.get(path, params=params, headers={"X-Finnhub-Token": self._key})
+                r = self._client.get(path, params=params, headers={"X-Finnhub-Token": self._key},
+                                     follow_redirects=True, **({"timeout": timeout} if timeout else {}))
             except httpx.HTTPError as e:
                 raise ProviderError(f"finnhub {path}: {e}") from e
             if r.status_code == 429:
@@ -149,21 +151,26 @@ class FinnhubProvider:
 
     # -- symbol directory ---------------------------------------------------
     def symbol_directory(self) -> dict[str, SymbolInfo]:
-        """All US symbols (one call, cached on disk for a week)."""
+        """All US symbols (one call, cached on disk for a week and in memory)."""
+        if self._directory and time.time() - self._directory[0] < DIRECTORY_MAX_AGE_S:
+            return self._directory[1]
         cache = self._cache_dir / "finnhub_us_symbols.json" if self._cache_dir else None
-        rows = None
+        rows, fetched_at = None, time.time()
         if cache and cache.exists() and time.time() - cache.stat().st_mtime < DIRECTORY_MAX_AGE_S:
-            rows = json.loads(cache.read_text())
+            rows, fetched_at = json.loads(cache.read_text()), cache.stat().st_mtime
         if rows is None:
-            rows = self._get("/stock/symbol", exchange="US")
+            # Finnhub answers with a redirect to a multi-MB file download.
+            rows = self._get("/stock/symbol", timeout=60.0, exchange="US")
             if cache:
                 cache.parent.mkdir(parents=True, exist_ok=True)
                 cache.write_text(json.dumps(rows))
-        return {
+        directory = {
             r["symbol"]: SymbolInfo(r["symbol"], r.get("description"), r.get("type"), r.get("mic"))
             for r in rows
             if r.get("symbol")
         }
+        self._directory = (fetched_at, directory)
+        return directory
 
 
 def _num(v) -> float | None:

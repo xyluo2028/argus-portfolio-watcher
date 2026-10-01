@@ -1,5 +1,10 @@
 // Typed client for the Argus JSON API (backend/argus/api/server.py).
 
+// Read-only combined view of every portfolio, served by the backend under this name.
+export const ALL = "all";
+
+export interface SearchHit { symbol: string; name: string | null; type: string | null }
+
 export type Session = "pre" | "regular" | "post" | "closed";
 
 export interface MarketStatus {
@@ -161,6 +166,25 @@ const send = <T>(method: string, path: string, body?: unknown) =>
 export interface Txn {
   id: number; type: string; symbol: string; qty: number; price: number; fee: number; amount: number;
   ts: string; note: string | null; source: string; external_id: string | null; deleted: boolean;
+  portfolio?: string | null;
+}
+
+export interface ImportReport {
+  portfolio: string | null; dry_run: boolean; lots: number; symbols: number;
+  by_type: { OPENING: number; BUY: number }; opening_through: string | null;
+  checks: { check: string; ok: boolean; detail: string }[];
+  lot_preview: { symbol: string; type: string; date: string; qty: number; price: number }[];
+  status: "ok" | "blocked"; creates_portfolio?: boolean; inserted?: number; skipped_existing?: number;
+}
+
+export interface RestoreReport {
+  created_at: string | null; dry_run: boolean; replace: boolean;
+  will_remove: Record<string, number>; counts: Record<string, number>; backup?: string;
+}
+
+export interface TxnEdit { qty?: number; price?: number; fee?: number; date?: string; note?: string; dry_run: boolean }
+export interface TxnEditResult {
+  dry_run: boolean; before: Txn; after?: Txn; position: { before: PositionPreview; after: PositionPreview };
 }
 
 export interface TxnDraft {
@@ -231,8 +255,19 @@ export const api = {
     get<Financials>(`/api/financials/${enc(symbol)}?period=${period}&limit=8`),
   performance: (name: string, range: string) =>
     get<Performance>(`/api/portfolios/${enc(name)}/performance?range=${range}`),
-  transactions: (name: string, includeDeleted = false) =>
-    get<Txn[]>(`/api/portfolios/${enc(name)}/transactions${includeDeleted ? "?include_deleted=true" : ""}`),
+  transactions: (name: string, includeDeleted = false, symbol?: string) => {
+    const qs = new URLSearchParams();
+    if (includeDeleted) qs.set("include_deleted", "true");
+    if (symbol) qs.set("symbol", symbol);
+    const q = qs.toString();
+    return get<Txn[]>(`/api/portfolios/${enc(name)}/transactions${q ? `?${q}` : ""}`);
+  },
+  importInvesting: (body: { filename: string; content: string; portfolio?: string; opening_through?: string; dry_run: boolean }) =>
+    send<ImportReport>("POST", "/api/import/investing", body),
+  snapshotUrl: "/api/snapshot",
+  restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>
+    send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),
+  editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
   deleteTransaction: (id: number, dryRun: boolean) =>
@@ -242,7 +277,7 @@ export const api = {
     send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
-  search: (q: string) => get<{ symbol: string; name: string | null; type: string | null }[]>(`/api/search?q=${enc(q)}&limit=8`),
+  search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7) =>
     get<{ as_of: string; upcoming: CalEvent[]; recent: CalEvent[] }>(`/api/events?days_ahead=${daysAhead}&days_back=${daysBack}`),
   alerts: (includeInactive = false) =>

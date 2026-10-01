@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -12,6 +12,7 @@ import {
 } from "../api";
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
 import { EventsCard } from "../components/EventsCard";
+import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
 import { big, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
@@ -81,12 +82,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
     return () => { stale = true; };
   }, [symbol, range, indicators]);
 
+  const loadPosition = useCallback(() => {
+    api.portfolio(portfolio).then(
+      (s) => setPosition(s.positions.find((p) => p.symbol === symbol) ?? null), () => setPosition(null));
+  }, [symbol, portfolio]);
+
   useEffect(() => {
     setFund(null);
     api.fundamentals(symbol).then(setFund, () => setFund(null));
-    api.portfolio(portfolio, true).then(
-      (s) => setPosition(s.positions.find((p) => p.symbol === symbol) ?? null), () => setPosition(null));
-  }, [symbol, portfolio]);
+  }, [symbol]);
+  useEffect(loadPosition, [loadPosition]);
 
   useEffect(() => {
     setFinErr(null);
@@ -175,31 +180,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
           ) : <p className="muted">Loading…</p>}
         </div>
 
-        <div className="card">
-          <h2>Your position</h2>
-          {position ? (
-            <>
-              <div className="stats" style={{ marginBottom: 12 }}>
-                <div className="stat"><div className="k">Shares</div><div className="v">{position.qty}</div></div>
-                <div className="stat"><div className="k">Avg cost</div><div className="v">{price(position.avg_cost)}</div></div>
-                <div className="stat"><div className="k">Value</div><div className="v">{money(position.market_value)}</div></div>
-                <div className="stat"><div className="k">Unrealized</div>
-                  <div className={`v ${tone(position.unrealized_pnl)}`}>{money(position.unrealized_pnl, { signed: true })} ({pct(position.unrealized_pct, 1)})</div></div>
-              </div>
-              <table>
-                <thead><tr><th>Opened</th><th>Type</th><th>Shares</th><th>Cost/share</th></tr></thead>
-                <tbody>
-                  {(position.lots ?? []).map((l) => (
-                    <tr key={l.txn_id} style={{ cursor: "default" }}>
-                      <td>{l.opened}</td><td>{l.kind === "OPENING" ? "Opening" : "Buy"}</td>
-                      <td>{l.qty}</td><td>{price(l.cost_per_share)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : <p className="muted">Not held in {portfolio}.</p>}
-        </div>
+        <PositionCard symbol={symbol} portfolio={portfolio} position={position} lastPrice={quote?.price}
+                      onChanged={loadPosition} />
       </section>
 
       <SymbolNotes symbol={symbol} />

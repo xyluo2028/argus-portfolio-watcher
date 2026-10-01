@@ -15,6 +15,9 @@ from argus.providers.base import Quote
 from argus.services.lots import EPS, PositionState, build_positions
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
+# Read-only view that combines every portfolio (positions, summary, performance, exposure).
+ALL = "all"
+
 CASH_TYPES = {TxnType.DIVIDEND, TxnType.FEE}
 
 
@@ -62,6 +65,8 @@ class PortfolioService:
         name = name.strip()
         if not name:
             raise ArgusError("INVALID_ARG", "Portfolio name is empty.")
+        if name.lower() == ALL:
+            raise ArgusError("INVALID_ARG", f"'{ALL}' is reserved for the combined view.")
         with session_scope(self.engine) as s:
             if s.scalar(select(Portfolio).where(Portfolio.name == name)):
                 raise ArgusError("ALREADY_EXISTS", f"Portfolio '{name}' already exists.")
@@ -84,11 +89,20 @@ class PortfolioService:
                 p = s.get(Portfolio, int(ref))
             if p is None:
                 p = s.scalar(select(Portfolio).where(Portfolio.name == str(ref)))
+            if p is None and str(ref).lower() == ALL:
+                raise ArgusError("INVALID_ARG", f"'{ALL}' is a read-only combined view.",
+                                 hint="Pick a single portfolio for transactions, targets and what-if trades.")
             if p is None:
                 names = [x.name for x in s.scalars(select(Portfolio))]
                 raise ArgusError("NOT_FOUND", f"No portfolio '{ref}'.",
                                  hint=f"Existing: {', '.join(names)}" if names else "Create one with `argus portfolio create`.")
             return p
+
+    def view(self, ref: str | int) -> Portfolio:
+        """Like get_portfolio, but also accepts ALL (an unsaved Portfolio with id None)."""
+        if str(ref).lower() == ALL:
+            return Portfolio(id=None, name=ALL, benchmark="SPY")
+        return self.get_portfolio(ref)
 
     # -- transactions ---------------------------------------------------------
     def _active_txns(self, s, portfolio_id: int) -> list[Transaction]:
@@ -169,33 +183,86 @@ class PortfolioService:
                                before=txn_to_dict(t) | {"deleted": False}))
             return out
 
+    def edit_transaction(self, txn_id: int, qty: float | None = None, price: float | None = None,
+                         fee: float | None = None, ts: datetime | None = None, note: str | None = None,
+                         source: str = "cli", dry_run: bool = False) -> dict:
+        """Correct a transaction: soft-delete it and insert the fixed copy, after replaying the history.
+
+        Only qty, price, fee, time and note change; the type, symbol and portfolio stay as they were.
+        """
+        with session_scope(self.engine) as s:
+            t = s.get(Transaction, txn_id)
+            if t is None or t.deleted:
+                raise ArgusError("NOT_FOUND", f"No active transaction {txn_id}.")
+            fixed = TxnInput(type=t.type, symbol=t.symbol, ts=_aware(ts).astimezone(UTC) if ts else t.ts,
+                             qty=t.qty if qty is None else qty, price=t.price if price is None else price,
+                             fee=t.fee if fee is None else fee, amount=t.amount,
+                             note=t.note if note is None else note)
+            if TxnType(t.type) not in CASH_TYPES and (fixed.qty <= 0 or fixed.price < 0 or fixed.fee < 0):
+                raise ArgusError("INVALID_TXN", "Shares must be positive; price and fee can't be negative.")
+            others = [x for x in self._active_txns(s, t.portfolio_id) if x.id != txn_id]
+            before = build_positions([*others, t]).get(t.symbol)
+            after = build_positions([*others, fixed]).get(t.symbol)  # e.g. shrinking a BUY a later SELL needs
+            out = {"before": txn_to_dict(t), "dry_run": dry_run,
+                   "position": {"before": position_to_dict(before, t.symbol), "after": position_to_dict(after, t.symbol)}}
+            if dry_run:
+                return out
+            t.deleted = True
+            new = Transaction(portfolio_id=t.portfolio_id, type=fixed.type, symbol=fixed.symbol, qty=fixed.qty,
+                              price=fixed.price, fee=fixed.fee, amount=fixed.amount, ts=fixed.ts, note=fixed.note,
+                              source=source)
+            s.add(new)
+            s.flush()
+            out["after"] = txn_to_dict(new)
+            s.add(AuditLog(actor=source, action="edit", entity="txn", entity_id=str(new.id),
+                           before=out["before"], after=out["after"]))
+            return out
+
     def list_transactions(self, portfolio: str | int, symbol: str | None = None,
                           include_deleted: bool = False) -> list[dict]:
-        p = self.get_portfolio(portfolio)
+        p = self.view(portfolio)
         with session_scope(self.engine) as s:
-            q = select(Transaction).where(Transaction.portfolio_id == p.id)
+            names = {x.id: x.name for x in s.scalars(select(Portfolio))}
+            q = select(Transaction)
+            if p.id is not None:
+                q = q.where(Transaction.portfolio_id == p.id)
             if symbol:
                 q = q.where(Transaction.symbol == normalize_symbol(symbol))
             if not include_deleted:
                 q = q.where(Transaction.deleted.is_(False))
-            return [txn_to_dict(t) for t in s.scalars(q.order_by(Transaction.ts, Transaction.id))]
+            return [txn_to_dict(t) | {"portfolio": names.get(t.portfolio_id)}
+                    for t in s.scalars(q.order_by(Transaction.ts, Transaction.id))]
 
     def active_transactions(self, portfolio: str | int) -> list[Transaction]:
-        p = self.get_portfolio(portfolio)
+        """Active transactions; ALL returns every portfolio's (fine for value series, not for FIFO)."""
+        p = self.view(portfolio)
         with session_scope(self.engine) as s:
+            if p.id is None:
+                return list(s.scalars(select(Transaction).where(Transaction.deleted.is_(False))))
             return self._active_txns(s, p.id)
 
     # -- positions ------------------------------------------------------------
     def positions(self, portfolio: str | int) -> dict[str, PositionState]:
-        p = self.get_portfolio(portfolio)
+        p = self.view(portfolio)
         with session_scope(self.engine) as s:
-            return build_positions(self._active_txns(s, p.id))
+            if p.id is not None:
+                return build_positions(self._active_txns(s, p.id))
+            # FIFO runs per portfolio; the combined view merges the resulting lots by symbol.
+            merged: dict[str, PositionState] = {}
+            for pid in s.scalars(select(Portfolio.id)):
+                for sym, pos in build_positions(self._active_txns(s, pid)).items():
+                    m = merged.setdefault(sym, PositionState(sym))
+                    m.lots += pos.lots
+                    m.realized += pos.realized
+                    m.dividends += pos.dividends
+                    m.fees += pos.fees
+            return merged
 
     def summary(self, portfolio: str | int, quotes: dict[str, Quote] | None = None,
                 now: datetime | None = None, include_lots: bool = False) -> dict:
         """Positions with market value and P&L. Without quotes, only cost-side fields are filled."""
-        p = self.get_portfolio(portfolio)
-        state = self.positions(p.id)
+        p = self.view(portfolio)
+        state = self.positions(p.id if p.id is not None else ALL)
         quotes = quotes or {}
         now = now or datetime.now(UTC)
 

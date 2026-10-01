@@ -26,11 +26,14 @@ txn_app = typer.Typer(help="Record and inspect transactions.", no_args_is_help=T
 import_app = typer.Typer(help="Import holdings from other tools.", no_args_is_help=True)
 alert_app = typer.Typer(help="Price, move, valuation, cost and earnings alerts.", no_args_is_help=True)
 note_app = typer.Typer(help="Thesis and notes per symbol, with review dates.", no_args_is_help=True)
+snapshot_app = typer.Typer(help="Back up your records to a file, or restore them on another machine.",
+                           no_args_is_help=True)
 app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(txn_app, name="txn")
 app.add_typer(import_app, name="import")
 app.add_typer(alert_app, name="alert")
 app.add_typer(note_app, name="note")
+app.add_typer(snapshot_app, name="snapshot")
 
 console = Console()
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
@@ -197,7 +200,7 @@ def search(query: str, limit: int = 10, as_json: JsonOpt = False):
         for r in rows:
             t.add_row(r["symbol"], r["name"] or "", r["type"] or "")
         console.print(t)
-    _run(as_json, lambda: _argus().market.search(query, limit), render)
+    _run(as_json, lambda: _argus().search(query, limit), render)
 
 
 # -- portfolios -------------------------------------------------------------------
@@ -444,11 +447,72 @@ def txn_list(portfolio: str, symbol: str | None = None,
     _run(as_json, lambda: _argus().portfolios.list_transactions(portfolio, symbol, all_), render)
 
 
+@txn_app.command("edit")
+def txn_edit(txn_id: int,
+             qty: Annotated[float | None, typer.Option(help="New share count")] = None,
+             price: Annotated[float | None, typer.Option(help="New per-share price")] = None,
+             fee: float | None = None,
+             when: Annotated[str | None, typer.Option("--date", help="YYYY-MM-DD[THH:MM] New York time")] = None,
+             note: str | None = None,
+             dry_run: DryRunOpt = False,
+             as_json: JsonOpt = False):
+    """Correct a transaction (the old row is soft-deleted and a fixed copy saved)."""
+    def go():
+        return _argus().portfolios.edit_transaction(txn_id, qty, price, fee, parse_ny_datetime(when) if when else None,
+                                                    note, source="cli", dry_run=dry_run)
+
+    def render(d):
+        b, a = d["position"]["before"], d["position"]["after"]
+        console.print(f"{a['symbol']}: {b['qty']:g} → {a['qty']:g} sh, avg cost {_money(b['avg_cost'])} → "
+                      f"{_money(a['avg_cost'])}")
+        console.print("[cyan]Dry run: nothing written.[/cyan]" if d["dry_run"]
+                      else f"[green]Replaced txn {txn_id} with {d['after']['id']}[/green]")
+    _run(as_json, go, render)
+
+
 @txn_app.command("delete")
 def txn_delete(txn_id: int, dry_run: DryRunOpt = False, as_json: JsonOpt = False):
     """Soft-delete a transaction (kept in the audit log)."""
     _run(as_json, lambda: _argus().portfolios.delete_transaction(txn_id, dry_run=dry_run),
          lambda d: console.print(("Would delete" if d["dry_run"] else "Deleted") + f" txn {d['deleted']['id']}"))
+
+
+# -- snapshot -----------------------------------------------------------------------
+def _counts_line(counts: dict[str, int]) -> str:
+    return ", ".join(f"{n} {t}" for t, n in counts.items() if n) or "no records"
+
+
+@snapshot_app.command("dump")
+def snapshot_dump(file: Annotated[Path | None, typer.Argument(
+                      help="Default: data/snapshots/argus-snapshot-YYYYMMDD-HHMMSS.json")] = None,
+                  as_json: JsonOpt = False):
+    """Write portfolios, transactions, watchlists, notes, alerts and targets to one JSON file."""
+    def go():
+        a = _argus()
+        path = file or a.settings.data_dir / "snapshots" / f"argus-snapshot-{datetime.now():%Y%m%d-%H%M%S}.json"
+        return a.snapshots.dump(path)
+    _run(as_json, go, lambda d: console.print(f"[green]Saved {d['file']}[/green]\n{_counts_line(d['counts'])}"))
+
+
+@snapshot_app.command("load")
+def snapshot_load(file: Path,
+                  replace: Annotated[bool, typer.Option("--replace", help="Wipe existing records first")] = False,
+                  dry_run: DryRunOpt = False,
+                  as_json: JsonOpt = False):
+    """Restore a snapshot into this instance (empty, or with --replace)."""
+    def go():
+        a = _argus()
+        return a.snapshots.load(file, replace=replace, dry_run=dry_run, backup_dir=a.settings.data_dir / "snapshots")
+
+    def render(d):
+        console.print(f"{d['file']} (taken {d['created_at']}): {_counts_line(d['counts'])}")
+        if d["will_remove"]:
+            verb = "Replaces" if d["replace"] else "Blocked by existing records (use --replace):"
+            console.print(f"[yellow]{verb} {_counts_line(d['will_remove'])}[/yellow]")
+        if d.get("backup"):
+            console.print(f"Previous records saved to {d['backup']}")
+        console.print("[cyan]Dry run: nothing written.[/cyan]" if d["dry_run"] else "[green]Loaded.[/green]")
+    _run(as_json, go, render)
 
 
 # -- import -------------------------------------------------------------------------
