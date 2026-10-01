@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from sqlalchemy import Engine, select
 
 from argus.db import session_scope
@@ -13,8 +15,10 @@ DEFAULT = "Watchlist"
 
 
 class WatchlistService:
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, resolve: Callable[[list[str]], dict[str, str]] | None = None):
+        """`resolve` maps symbols to {symbol: reason} for those no provider knows; None skips the check."""
         self.engine = engine
+        self.resolve = resolve
 
     def _get(self, s, name: str, create: bool) -> Watchlist:
         w = s.scalar(select(Watchlist).where(Watchlist.name == name))
@@ -52,6 +56,14 @@ class WatchlistService:
         bad = [x for x in syms if not is_plausible_symbol(x)]
         if bad:
             raise ArgusError("INVALID_SYMBOL", f"Not a US ticker: {', '.join(bad)}")
+        if self.resolve:
+            with session_scope(self.engine) as s:
+                w = s.scalar(select(Watchlist).where(Watchlist.name == name))
+                new = [x for x in dict.fromkeys(syms) if w is None or s.get(WatchlistItem, (w.id, x)) is None]
+            unknown = self.resolve(new) if new else {}
+            if unknown:
+                raise ArgusError("UNKNOWN_SYMBOL", f"No quote found for: {', '.join(sorted(unknown))}",
+                                 hint="Check the ticker; only US-listed stocks and ETFs are supported.")
         added, existing = [], []
         with session_scope(self.engine) as s:
             w = self._get(s, name, create=True)

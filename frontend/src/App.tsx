@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
-import { api, type PortfolioRef } from "./api";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { ALL, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Alerts } from "./pages/Alerts";
 import { Analysis } from "./pages/Analysis";
 import { Compare } from "./pages/Compare";
 import { Dashboard } from "./pages/Dashboard";
+import { Data } from "./pages/Data";
 import { Ticker } from "./pages/Ticker";
 import { Transactions } from "./pages/Transactions";
 import { Watchlist } from "./pages/Watchlist";
@@ -27,7 +28,7 @@ export function App() {
   useEffect(() => {
     api.portfolios().then((ps) => {
       setPortfolios(ps);
-      setCurrent((c) => (ps.some((p) => p.name === c) ? c : ps[0]?.name ?? ""));
+      setCurrent((c) => (ps.some((p) => p.name === c) || (c === ALL && ps.length > 1) ? c : ps[0]?.name ?? ""));
     }, () => setPortfolios([]));
   }, []);
 
@@ -52,10 +53,12 @@ export function App() {
           <NavLink to="/analysis">Analysis</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
+          <NavLink to="/data">Data</NavLink>
         </nav>
         {portfolios && portfolios.length > 0 && (
           <select value={current} onChange={(e) => setCurrent(e.target.value)} aria-label="Portfolio">
             {portfolios.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+            {portfolios.length > 1 && <option value={ALL}>All portfolios</option>}
           </select>
         )}
         <div className="spacer" />
@@ -65,11 +68,16 @@ export function App() {
       <main>
         {portfolios === null ? <p className="muted">Loading…</p>
           : portfolios.length === 0 ? (
-            <div className="card">
-              <h2>No portfolios yet</h2>
-              <p>Import one from Investing.com:</p>
-              <pre>uv run argus import investing data/&lt;name&gt;_Holdings_MMDDYYYY.csv --opening-through YYYY-MM-DD</pre>
-            </div>
+            <Routes>
+              <Route path="/data" element={<Data />} />
+              <Route path="*" element={
+                <div className="card">
+                  <h2>No portfolios yet</h2>
+                  <p><Link to="/data">Import an Investing.com CSV</Link>, or restore a snapshot from another machine on the same page.</p>
+                  <p className="small muted">From the terminal: <code>uv run argus import investing data/&lt;name&gt;_Holdings_MMDDYYYY.csv --opening-through YYYY-MM-DD</code></p>
+                </div>
+              } />
+            </Routes>
           ) : (
             <Routes>
               <Route path="/" element={<Dashboard portfolio={current} live={live} />} />
@@ -79,6 +87,7 @@ export function App() {
               <Route path="/compare" element={<Compare portfolio={current} />} />
               <Route path="/analysis" element={<Analysis portfolio={current} />} />
               <Route path="/alerts" element={<Alerts live={live} />} />
+              <Route path="/data" element={<Data />} />
             </Routes>
           )}
       </main>

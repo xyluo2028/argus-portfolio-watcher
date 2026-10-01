@@ -208,15 +208,35 @@ class MarketService:
             raise ArgusError("PROVIDER_ERROR", str(e)) from e
 
     # -- symbols --------------------------------------------------------------
-    def search(self, query: str, limit: int = 10) -> list[dict]:
+    def search(self, query: str, limit: int = 10, prefer: set[str] | frozenset[str] = frozenset()) -> list[dict]:
+        """Rank: exact ticker, then `prefer` (e.g. held/watched), listed before OTC, ticker prefix before a
+        company-name word (closest word length first), stocks before funds, preferred shares last."""
         if self.directory is None:
             raise ArgusError("NOT_CONFIGURED", "Symbol search needs FINNHUB_API_KEY.")
         q = query.strip().upper()
-        entries = self.directory.symbol_directory().values()
-        exact = [e for e in entries if e.symbol == q]
-        prefix = sorted((e for e in entries if e.symbol.startswith(q) and e.symbol != q), key=lambda e: len(e.symbol))
-        named = [e for e in entries if q in (e.name or "").upper() and not e.symbol.startswith(q)]
-        return [{"symbol": e.symbol, "name": e.name, "type": e.type} for e in (exact + prefix + named)[:limit]]
+        if not q:
+            return []
+        try:
+            entries = self.directory.symbol_directory().values()
+        except ProviderError as e:
+            raise ArgusError("PROVIDER_ERROR", f"Symbol directory unavailable: {e}") from e
+        scored = []
+        for e in entries:
+            name = (e.name or "").upper()
+            word_len = 0
+            if e.symbol.startswith(q):
+                tier = 0
+            elif words := [w for w in name.split() if w.startswith(q)]:
+                tier, word_len = 1, min(map(len, words))
+            elif len(q) >= 4 and q in name:
+                tier = 2
+            else:
+                continue
+            stock_first = 0 if tier == 0 or e.type in ("Common Stock", "ADR") else 1 if e.type == "ETP" else 2
+            scored.append(((e.symbol != q, e.symbol not in prefer, ".PR" in e.symbol, e.exchange == "OOTC",
+                            tier, word_len, stock_first, len(e.symbol.split(".")[0]), e.symbol), e))
+        scored.sort(key=lambda x: x[0])
+        return [{"symbol": e.symbol, "name": e.name, "type": e.type} for _, e in scored[:limit]]
 
     def refresh_instruments(self, symbols: list[str]) -> None:
         """Fill instrument type and sector/industry from the symbol directory and Yahoo profile."""

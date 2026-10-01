@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from argus.providers.base import Bar
+from argus.providers.base import Bar, SymbolInfo
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import build_financials
 from tests.conftest import FakeHistory, FakeQuotes
@@ -123,3 +123,47 @@ def test_price_currency_fields_prefer_yahoo_ratios_keep_order(make_argus):
     assert out["metrics"]["pe_ttm"] == 9.0 and out["sources"]["pe_ttm"] == "finnhub"
     assert out["metrics"]["high_52w"] == 81.4 and out["sources"]["market_cap"] == "yahoo"
     assert out["metrics"]["pe_forward"] == 7.0 and "_version" not in out["sources"]
+
+
+def test_finnhub_symbol_directory_follows_redirect_to_file(tmp_path):
+    rows = [{"symbol": "AAPL", "description": "APPLE INC", "type": "Common Stock", "mic": "XNAS"}]
+
+    def handler(request):
+        if request.url.path == "/stock/symbol":
+            return httpx.Response(302, headers={"location": "https://static.finnhub.test/USf.json"})
+        return httpx.Response(200, json=rows)
+
+    client = httpx.Client(base_url="https://finnhub.test", transport=httpx.MockTransport(handler))
+    d = FinnhubProvider("k", cache_dir=tmp_path, client=client).symbol_directory()
+    assert d["AAPL"].name == "APPLE INC" and d["AAPL"].exchange == "XNAS"
+
+
+class FakeDirectory:
+    def __init__(self, rows):
+        self.rows = {r[0]: SymbolInfo(*r) for r in rows}
+
+    def symbol_directory(self):
+        return self.rows
+
+
+def test_search_ranking(settings):
+    from argus.db import make_engine
+    from argus.services.market import MarketService
+
+    m = MarketService(make_engine(settings.db_path), settings, [], None, [], directory=FakeDirectory([
+        ("APPLF", "ALPHAPOLIS CO LTD", "Common Stock", "OOTC"),
+        ("AIT", "APPLIED INDUSTRIAL TECH", "Common Stock", "XNYS"),
+        ("AAPL", "APPLE INC", "Common Stock", "XNAS"),
+        ("AAPX", "T-REX 2X LONG APPLE", "ETP", "BATS"),
+        ("BRKU", "DIREXION DAILY BRKB BULL", "ETP", "XNAS"),
+        ("BRK.B", "BERKSHIRE HATHAWAY INC-CL B", "Common Stock", "XNYS"),
+        ("SB.PRC", "SAFE BULKERS PFD C", "Common Stock", "XNYS"),
+        ("S", "SENTINELONE INC", "Common Stock", "XNYS"),
+        ("SOFI", "SOFI TECHNOLOGIES", "Common Stock", "XNAS"),
+    ]))
+    syms = lambda q, **kw: [r["symbol"] for r in m.search(q, 5, **kw)]  # noqa: E731
+    assert syms("appl") == ["AAPL", "AAPX", "AIT", "APPLF"]  # closest name word, stock before ETP, OTC last
+    assert syms("brk")[0] == "BRK.B"                           # share class counts as a 3-letter ticker
+    assert syms("s") == ["S", "SOFI", "SB.PRC"]                 # exact first, preferreds last
+    assert syms("s", prefer={"SOFI"})[:2] == ["S", "SOFI"] and syms("so", prefer={"SOFI"})[0] == "SOFI"
+    assert syms("  ") == []

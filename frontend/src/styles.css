@@ -112,9 +112,27 @@ select, .btn {
 .input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
   color: var(--text); font: inherit; flex: 1; min-width: 90px; }
 .input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* trade & edit forms */
+.trade { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 110px; font-size: 12px; color: var(--muted); }
+.field .input { width: 100%; box-sizing: border-box; }
+
+/* ticker autocomplete */
+.combo { position: relative; flex: 1; min-width: 90px; display: flex; }
+.combo-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; margin: 0; padding: 4px;
+  list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); }
+.combo-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.combo-list li.active { background: var(--accent-wash); }
+.combo-list strong { min-width: 56px; }
+.combo-name { flex: 1; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .btn.ghost { background: none; border-color: transparent; color: var(--muted); padding: 2px 8px; }
 .btn.ghost:hover { color: var(--text); background: var(--surface-2); }
+.btn.danger { background: var(--down); border-color: var(--down); color: #fff; font-weight: 600; }
+a.btn { text-decoration: none; display: inline-block; }
+.warn-box { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .preview { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); }
 .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); }

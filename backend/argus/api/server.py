@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path, PureWindowsPath
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Body, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -31,6 +32,23 @@ STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
 
 _STATUS = {"NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
+
+
+class ImportBody(BaseModel):
+    filename: str
+    content: str
+    portfolio: str | None = None
+    opening_through: str | None = None  # YYYY-MM-DD
+    dry_run: bool = True
+
+
+class TxnEditBody(BaseModel):
+    qty: float | None = None
+    price: float | None = None
+    fee: float | None = None
+    date: str | None = None  # YYYY-MM-DD[THH:MM] New York time; default unchanged
+    note: str | None = None
+    dry_run: bool = False
 
 
 class TxnBody(BaseModel):
@@ -143,7 +161,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
     @app.get("/api/search")
     async def search(q: str, limit: int = 10):
-        return await run(argus.market.search, q, limit)
+        return await run(argus.search, q, limit)
 
     # -- portfolios ------------------------------------------------------------
     @app.get("/api/portfolios")
@@ -172,6 +190,11 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                         price=body.price, fee=body.fee, amount=body.amount, note=body.note,
                         external_id=body.idempotency_key)
         return await run(argus.portfolios.add_transactions, ref, [item], "ui", body.dry_run)
+
+    @app.patch("/api/transactions/{txn_id}")
+    async def edit_transaction(txn_id: int, body: TxnEditBody):
+        return await run(argus.portfolios.edit_transaction, txn_id, body.qty, body.price, body.fee,
+                         parse_ny_datetime(body.date) if body.date else None, body.note, "ui", body.dry_run)
 
     @app.delete("/api/transactions/{txn_id}")
     async def delete_transaction(txn_id: int, dry_run: bool = False):
@@ -277,6 +300,27 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # -- import --------------------------------------------------------------------
+    @app.post("/api/import/investing")
+    async def import_investing(body: ImportBody):
+        try:
+            cutoff = date.fromisoformat(body.opening_through) if body.opening_through else None
+        except ValueError as e:
+            raise ArgusError("INVALID_ARG", "opening_through must be YYYY-MM-DD.") from e
+        name = Path(PureWindowsPath(body.filename).name)  # drop any folders (/ or \\); the name may hold the portfolio
+        return await run(argus.import_investing, name, body.portfolio or None, cutoff, body.dry_run, True, body.content)
+
+    # -- snapshot ------------------------------------------------------------------
+    @app.get("/api/snapshot")
+    async def snapshot_download():
+        doc = await run(argus.snapshots.export)
+        name = f"argus-snapshot-{datetime.now():%Y%m%d-%H%M%S}.json"
+        return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/api/snapshot/restore")
+    async def snapshot_restore(doc: dict = Body(...), replace: bool = False, dry_run: bool = True):
+        return await run(argus.snapshots.restore, doc, replace, dry_run, argus.settings.data_dir / "snapshots")
 
     @app.get("/api/health")
     async def health():

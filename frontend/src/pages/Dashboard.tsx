@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, api, type StreamUpdate, type Summary } from "../api";
+import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
@@ -45,7 +45,7 @@ export function Dashboard({ portfolio, live }: Props) {
   return (
     <div className="stack">
       <section className="card">
-        <div className="hero-label">{summary.portfolio.name} · total value</div>
+        <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
         <div className="hero-value">{money(t.market_value)}</div>
         <div className={`hero-delta ${tone(t.day_pnl)}`}>
           {money(t.day_pnl, { signed: true })} ({pct(t.day_pnl_pct)}) {summary.market.session === "closed" ? "last session" : "today"}

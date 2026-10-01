@@ -181,7 +181,7 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @_tool
     def search_symbol(query: str, limit: int = 10) -> list[dict]:
         """Find US tickers by symbol or company name."""
-        return argus.market.search(query, limit)
+        return argus.search(query, limit)
 
     @mcp.tool(annotations=READ)
     @_tool
@@ -260,6 +260,17 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         item = TxnInput(type=type, symbol=symbol, ts=parse_ny_datetime(date), qty=qty, price=price, fee=fee,
                         amount=amount, note=note, external_id=idempotency_key)
         return argus.portfolios.add_transactions(portfolio, [item], source="mcp", dry_run=dry_run)
+
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def edit_transaction(txn_id: int, qty: float | None = None, price: float | None = None,
+                         fee: float | None = None, date: str | None = None, note: str | None = None,
+                         dry_run: bool = True) -> dict:
+        """Correct a recorded transaction's shares, price, fee, date (YYYY-MM-DD[THH:MM] New York time)
+        or note; omitted fields stay. The old row is soft-deleted and a fixed copy inserted, so the
+        audit log keeps both. Refused if the change breaks later trades. dry_run defaults to True."""
+        return argus.portfolios.edit_transaction(txn_id, qty, price, fee, parse_ny_datetime(date) if date else None,
+                                                 note, source="mcp", dry_run=dry_run)
 
     @mcp.tool(annotations=DELETE)
     @_tool
