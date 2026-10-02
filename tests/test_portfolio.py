@@ -133,3 +133,38 @@ def test_edit_transaction_replaces_row_and_keeps_history_valid(argus):
     assert [(r["qty"], r["deleted"]) for r in rows if r["type"] == "BUY"] == [(10, True), (12, False)]
     assert out["after"]["ts"] == out["before"]["ts"]  # untouched fields carry over
     assert argus.portfolios.positions("growth")["X"].qty == 4
+
+
+class FakeProfiles:
+    def __init__(self):
+        self.calls = []
+
+    def get_info(self, symbol):
+        self.calls.append(symbol)
+        return {"quoteType": "ETF"} if symbol == "BSV" else {"sector": "Technology"}
+
+
+def test_trades_fill_instrument_metadata_so_funds_are_not_stocks(make_argus):
+    from argus.services.analysis import is_fund
+
+    a = make_argus()
+    a.market.profile_provider = prof = FakeProfiles()
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "BSV", at(2026, 10, 1), 20, 76.11)])
+    row = a.portfolio("growth", with_quotes=False)["positions"][0]
+    assert row["sector"] == "ETF" and is_fund(row, {})
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "BSV", at(2026, 10, 2), 1, 76)])
+    a.portfolio("growth", with_quotes=False)
+    assert prof.calls == ["BSV"]  # known sector: no further lookups
+
+
+def test_metadata_failure_never_blocks_a_trade(make_argus):
+    class Broken:
+        def get_info(self, symbol):
+            raise RuntimeError("yahoo down")
+
+    a = make_argus()
+    a.market.profile_provider = Broken()
+    a.portfolios.create_portfolio("growth")
+    assert a.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 1, 10)])["inserted_ids"]
+    assert a.portfolio("growth", with_quotes=False)["positions"][0]["symbol"] == "X"

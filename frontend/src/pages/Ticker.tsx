@@ -11,7 +11,9 @@ import {
   type StreamUpdate,
 } from "../api";
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
+import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
+import { PeersCard } from "../components/PeersCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
@@ -165,6 +167,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
           : <div className="chart-box muted">Loading chart…</div>}
       </section>
 
+      <CompanyCard symbol={symbol} />
+
       <section className="grid-2">
         <div className="card">
           <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)}</span>}</h2>
@@ -183,6 +187,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         <PositionCard symbol={symbol} portfolio={portfolio} position={position} lastPrice={quote?.price}
                       onChanged={loadPosition} />
       </section>
+
+      <PeersCard symbol={symbol} />
 
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />

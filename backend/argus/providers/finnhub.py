@@ -134,6 +134,11 @@ class FinnhubProvider:
         d = self._get("/stock/profile2", symbol=symbol)
         return d if isinstance(d, dict) else {}
 
+    def get_peers(self, symbol: str) -> list[str]:
+        """Same-sub-industry companies (Finnhub's grouping); may include the symbol itself."""
+        d = self._get("/stock/peers", symbol=symbol)
+        return [x for x in d if isinstance(x, str)] if isinstance(d, list) else []
+
     # -- events & news --------------------------------------------------------
     def earnings_calendar(self, symbol: str, start: date, end: date) -> list[dict]:
         """Scheduled/reported earnings: date, hour (bmo/amc/dmh), EPS and revenue estimate/actual."""

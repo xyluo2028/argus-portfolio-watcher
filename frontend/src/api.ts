@@ -242,6 +242,14 @@ export interface SimResult {
 
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
 
+export interface CompanyProfile {
+  symbol: string; as_of: string; name?: string; summary?: string; quote_type?: string;
+  sector?: string; industry?: string; country?: string; city?: string; state?: string; address?: string; zip?: string;
+  website?: string; employees?: number; officers?: { name: string | null; title: string | null }[];
+  ipo?: string; logo?: string; fund_family?: string; category?: string; suggested_peers: string[];
+}
+export interface Peers extends CompareResult { symbol: string; peers: string[]; custom: boolean }
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -276,6 +284,9 @@ export const api = {
   watchAdd: (symbols: string[], note?: string, name = "Watchlist") =>
     send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
+  profile: (symbol: string) => get<CompanyProfile>(`/api/profile/${enc(symbol)}`),
+  peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7) =>

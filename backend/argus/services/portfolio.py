@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -56,9 +58,21 @@ def position_to_dict(p: PositionState | None, symbol: str) -> dict:
             "realized_pnl": p.realized_pnl}
 
 
+log = logging.getLogger("argus.portfolio")
+
+
 class PortfolioService:
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, on_new_symbols: Callable[[list[str]], None] | None = None):
+        """`on_new_symbols` gets the symbols of each saved batch, to fill missing type/sector (best effort)."""
         self.engine = engine
+        self.on_new_symbols = on_new_symbols
+
+    def _describe(self, symbols: list[str]) -> None:
+        if self.on_new_symbols and symbols:
+            try:
+                self.on_new_symbols(symbols)
+            except Exception as e:  # metadata is cosmetic; never fail a saved trade over it
+                log.warning("instrument metadata for %s: %s", ", ".join(symbols), e)
 
     # -- portfolios -----------------------------------------------------------
     def create_portfolio(self, name: str, benchmark: str = "SPY", actor: str = "cli") -> dict:
@@ -111,6 +125,14 @@ class PortfolioService:
 
     def add_transactions(self, portfolio: str | int, items: list[TxnInput], source: str = "cli",
                          dry_run: bool = False) -> dict:
+        result = self._add_transactions(portfolio, items, source, dry_run)
+        if result["inserted_ids"]:
+            self._describe(result.pop("_new_symbols"))
+        result.pop("_new_symbols", None)
+        return result
+
+    def _add_transactions(self, portfolio: str | int, items: list[TxnInput], source: str,
+                          dry_run: bool) -> dict:
         """Validate a batch against the full history, then insert it atomically.
 
         Items whose external_id already exists are skipped (idempotent retries/re-imports).
@@ -154,7 +176,7 @@ class PortfolioService:
                 result["inserted_ids"] = []
                 return result
 
-            rows = []
+            rows, result["_new_symbols"] = [], symbols
             for it in new:
                 t = Transaction(portfolio_id=p.id, type=it.type, symbol=it.symbol, qty=it.qty, price=it.price,
                                 fee=it.fee, amount=it.amount, ts=it.ts, note=it.note, source=source,

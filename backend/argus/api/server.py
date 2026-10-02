@@ -34,6 +34,10 @@ KEEPALIVE_S = 15.0
 _STATUS = {"NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
 
 
+class PeersBody(BaseModel):
+    peers: list[str] | None  # None resets to the suggested peers
+
+
 class ImportBody(BaseModel):
     filename: str
     content: str
@@ -149,6 +153,19 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def history(symbol: str, period: str = "1y", interval: str = "1d", indicators: str | None = None):
         specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
         return await run(argus.history, symbol, period, interval, specs)
+
+    @app.get("/api/profile/{symbol}")
+    async def company_profile(symbol: str, refresh: bool = False):
+        return await run(argus.company_profile, symbol, refresh)
+
+    @app.get("/api/peers/{symbol}")
+    async def peers(symbol: str):
+        return await run(argus.peers, symbol)
+
+    @app.put("/api/peers/{symbol}")
+    async def set_peers(symbol: str, body: PeersBody):
+        await run(argus.set_peers, symbol, body.peers, "ui")
+        return await run(argus.peers, symbol)
 
     @app.get("/api/fundamentals/{symbol}")
     async def fundamentals(symbol: str, fields: str | None = None, refresh: bool = False):

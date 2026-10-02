@@ -5,6 +5,7 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -18,8 +19,8 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import AuditLog, FundProfile, Instrument, Target
-from argus.providers.base import Quote
+from argus.models import AuditLog, CompanyProfile, FundProfile, Instrument, PeerList, Target
+from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
@@ -33,7 +34,10 @@ from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import SnapshotService
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
-from argus.symbols import normalize_symbol
+from argus.symbols import is_plausible_symbol, normalize_symbol
+
+
+log = logging.getLogger("argus.app")
 
 
 class Argus:
@@ -41,7 +45,7 @@ class Argus:
                  market_factory: Callable[[Engine, Settings], MarketService] | None = None):
         self.settings = settings or load_settings()
         self.engine = make_engine(self.settings.db_path)
-        self.portfolios = PortfolioService(self.engine)
+        self.portfolios = PortfolioService(self.engine, on_new_symbols=self.describe_instruments)
         self.watchlists = WatchlistService(self.engine, resolve=lambda syms: self.market.get_quotes(syms)[1])
         self.market = (market_factory or self._default_market)(self.engine, self.settings)
         self.events = EventsService(self.engine, self.market.directory, self.market.profile_provider)
@@ -73,11 +77,24 @@ class Argus:
         return {"quotes": [quotes[s].to_dict() for s in syms if s in quotes], "errors": errors,
                 "market": market_status()}
 
+    def describe_instruments(self, symbols: list[str]) -> None:
+        """Fill type/sector for symbols that lack a sector (e.g. first recorded from the UI), so funds
+        aren't mistaken for stocks. Symbols that already have one cost nothing."""
+        with session_scope(self.engine) as s:
+            known = {i.symbol: i for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(symbols)))}
+            missing = [x for x in symbols if x not in known or not known[x].sector]
+        if missing:
+            self.market.refresh_instruments(missing)
+
     def portfolio(self, ref: str, with_quotes: bool = True, include_lots: bool = False,
                   live_quotes: dict[str, Quote] | None = None) -> dict:
         """Portfolio summary. `live_quotes` (from the web server's hub) are preferred over the cache."""
         state = self.portfolios.positions(ref)
         open_syms = [s for s, p in state.items() if p.is_open]
+        try:
+            self.describe_instruments(open_syms)
+        except Exception as e:  # never block the summary on metadata
+            log.warning("instrument metadata: %s", e)
         quotes = {s: live_quotes[s] for s in open_syms if live_quotes and s in live_quotes}
         missing = [s for s in open_syms if s not in quotes]
         errors: dict[str, str] = {}
@@ -155,6 +172,104 @@ class Argus:
         return {"fields": wanted, "rows": rows, "errors": errors}
 
     # -- tracked symbols, events, alerts, brief ----------------------------------
+    # -- company profile & peers ---------------------------------------------------
+    PROFILE_MAX_AGE = timedelta(days=7)
+    MAX_PEERS = 9  # plus the symbol itself = compare()'s limit of 10
+
+    def company_profile(self, symbol: str, refresh: bool = False) -> dict:
+        """What the company does and where it is (Yahoo), IPO date and suggested peers (Finnhub).
+        Cached a week; missing providers just leave fields empty."""
+        sym = normalize_symbol(symbol)
+        now = datetime.now(UTC)
+        with session_scope(self.engine) as s:
+            row = s.get(CompanyProfile, sym)
+            if row and not refresh and now - row.as_of < self.PROFILE_MAX_AGE:
+                return {"symbol": sym, "as_of": row.as_of.isoformat(), **row.data}
+
+        data: dict = {}
+        if self.market.profile_provider is not None:
+            try:
+                info = self.market.profile_provider.get_info(sym)
+            except ProviderError:
+                info = {}
+            officers = [{"name": o.get("name"), "title": o.get("title")} for o in (info.get("companyOfficers") or [])[:3]]
+            data |= {
+                "name": info.get("longName") or info.get("shortName"),
+                "summary": info.get("longBusinessSummary"),
+                "quote_type": info.get("quoteType"),
+                "sector": info.get("sector"), "industry": info.get("industry"),
+                "country": info.get("country"), "city": info.get("city"), "state": info.get("state"),
+                "address": info.get("address1"), "zip": info.get("zip"),
+                "website": info.get("website"), "employees": info.get("fullTimeEmployees"),
+                "officers": officers,
+                "fund_family": info.get("fundFamily"), "category": info.get("category"),
+            }
+        if self.market.directory is not None:
+            try:
+                fh = self.market.directory.get_profile(sym)
+                data |= {"ipo": fh.get("ipo"), "logo": fh.get("logo") or None,
+                         "website": data.get("website") or fh.get("weburl"), "name": data.get("name") or fh.get("name"),
+                         "country": data.get("country") or fh.get("country")}
+                data["suggested_peers"] = self._us_listed([p for p in self.market.directory.get_peers(sym) if p != sym])
+            except ProviderError:
+                data.setdefault("suggested_peers", [])
+        data = {k: v for k, v in data.items() if v not in (None, "", [])} | {"suggested_peers": data.get("suggested_peers", [])}
+        with session_scope(self.engine) as s:
+            s.merge(CompanyProfile(symbol=sym, as_of=now, data=data))
+        return {"symbol": sym, "as_of": now.isoformat(), **data}
+
+    def _us_listed(self, symbols: list[str]) -> list[str]:
+        """Keep symbols listed on a US exchange (not OTC); Finnhub suggests home-market peers for
+        foreign companies (e.g. IGM.TO for BN), which have no US quotes."""
+        try:
+            directory = self.market.directory.symbol_directory() if self.market.directory else {}
+        except ProviderError:
+            directory = {}
+        if not directory:
+            return [x for x in symbols if "." not in x][:self.MAX_PEERS]
+        return [x for x in symbols if x in directory and directory[x].exchange != "OOTC"][:self.MAX_PEERS]
+
+    def peers(self, symbol: str, with_metrics: bool = True) -> dict:
+        """Your peer list for `symbol` (or the suggested one) with a side-by-side comparison."""
+        sym = normalize_symbol(symbol)
+        with session_scope(self.engine) as s:
+            row = s.get(PeerList, sym)
+            custom = list(row.peers) if row else None
+        # Re-filter suggestions: profiles cached before the US-only rule may still hold foreign tickers.
+        peers = custom if custom is not None else self._us_listed(self.company_profile(sym).get("suggested_peers", []))
+        out = {"symbol": sym, "peers": peers, "custom": custom is not None}
+        if with_metrics:
+            out |= self.compare([sym, *peers][:self.MAX_PEERS + 1])
+        return out
+
+    def set_peers(self, symbol: str, peers: list[str] | None, actor: str = "cli") -> dict:
+        """Save your peer list (unknown tickers are refused); None goes back to the suggestions."""
+        sym = normalize_symbol(symbol)
+        with session_scope(self.engine) as s:
+            before = s.get(PeerList, sym)
+            before_peers = list(before.peers) if before else None
+        if peers is None:
+            with session_scope(self.engine) as s:
+                if (row := s.get(PeerList, sym)) is not None:
+                    s.delete(row)
+                    s.add(AuditLog(actor=actor, action="reset_peers", entity="peers", entity_id=sym,
+                                   before={"peers": before_peers}))
+            return self.peers(sym, with_metrics=False)
+        clean = [p for p in dict.fromkeys(normalize_symbol(x) for x in peers if x.strip()) if p != sym]
+        if len(clean) > self.MAX_PEERS:
+            raise ArgusError("INVALID_ARG", f"At most {self.MAX_PEERS} peers.")
+        new = [p for p in clean if p not in (before_peers or []) and is_plausible_symbol(p)]
+        bad = [p for p in clean if not is_plausible_symbol(p)]
+        unknown = self.market.get_quotes(new)[1] if new else {}
+        if bad or unknown:
+            raise ArgusError("UNKNOWN_SYMBOL", f"No quote found for: {', '.join(sorted({*bad, *unknown}))}",
+                             hint="Check the ticker; only US-listed stocks and ETFs are supported.")
+        with session_scope(self.engine) as s:
+            s.merge(PeerList(symbol=sym, peers=clean))
+            s.add(AuditLog(actor=actor, action="set_peers", entity="peers", entity_id=sym,
+                           before={"peers": before_peers}, after={"peers": clean}))
+        return self.peers(sym, with_metrics=False)
+
     def held_positions(self) -> dict[str, tuple[float, float]]:
         """symbol -> (total shares, weighted average cost) across all portfolios."""
         agg: dict[str, list[float]] = {}

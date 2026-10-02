@@ -257,6 +257,26 @@ class FundProfile(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)  # {"sectors": {...}, "top_holdings": [...]}
 
 
+class CompanyProfile(Base):
+    """Company facts (Yahoo + Finnhub) and suggested peers, cached for a week."""
+
+    __tablename__ = "company_profile"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(default=utcnow)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class PeerList(Base):
+    """Your own peer list for a symbol; without one, the suggested peers are shown."""
+
+    __tablename__ = "peer_list"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    peers: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
 class NavDaily(Base):
     """Filled in P1 by the performance engine."""
 
@@ -273,6 +293,7 @@ __all__ = [
     "Alert",
     "AlertEvent",
     "AuditLog",
+    "CompanyProfile",
     "Event",
     "Note",
     "Base",
@@ -280,6 +301,7 @@ __all__ = [
     "Fundamental",
     "Instrument",
     "NavDaily",
+    "PeerList",
     "Portfolio",
     "PriceBar",
     "RefreshLog",

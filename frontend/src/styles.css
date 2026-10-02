@@ -112,6 +112,10 @@ select, .btn {
 .input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
   color: var(--text); font: inherit; flex: 1; min-width: 90px; }
 .input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* company & peers */
+.clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+tr.self td { background: var(--accent-wash); }
+
 /* trade & edit forms */
 .trade { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
