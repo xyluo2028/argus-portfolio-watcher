@@ -25,21 +25,21 @@ METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
     "revenue_ttm", "revenue_growth_yoy_pct", "gross_margin_pct", "operating_margin_pct", "net_margin_pct",
     "roe_pct", "fcf_ttm", "debt_to_equity", "dividend_yield_pct", "beta", "high_52w", "low_52w",
-    "expense_ratio_pct",
+    "expense_ratio_pct", "net_assets", "ytd_return_pct", "return_3y_pct", "return_5y_pct",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
 # (VIST in MXN, CNQ in CAD) while Yahoo reports the US listing in USD, so these prefer Yahoo.
 # Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
 PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm"}
-FUNDAMENTALS_VERSION = 2  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 3  # bump to invalidate cached rows when merge rules change
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
 
 class MarketService:
     def __init__(self, engine: Engine, settings: Settings, quote_providers: list, history_provider,
-                 fundamentals_providers: list, sec=None, directory=None, profile_provider=None):
+                 fundamentals_providers: list, sec=None, directory=None, profile_provider=None, figi=None):
         self.engine = engine
         self.settings = settings
         self.quote_providers = quote_providers
@@ -48,6 +48,7 @@ class MarketService:
         self.sec = sec
         self.directory = directory  # FinnhubProvider (symbol_directory) or None
         self.profile_provider = profile_provider  # YahooProvider (get_info) or None
+        self.figi = figi  # OpenFigiProvider (ISIN/CUSIP -> ticker) or None
 
     # -- quotes ---------------------------------------------------------------
     def get_quotes(self, symbols: list[str], max_age_s: int | None = None) -> tuple[dict[str, Quote], dict[str, str]]:
@@ -86,6 +87,14 @@ class MarketService:
         for sym in quotes:
             errors.pop(sym, None)
         return quotes, errors
+
+    def cached_quotes(self, symbols: list[str], max_age_s: int) -> dict[str, Quote]:
+        """Quotes already in the cache and younger than `max_age_s`; never calls a provider."""
+        now = datetime.now(UTC)
+        with session_scope(self.engine) as s:
+            return {r.symbol: Quote(r.symbol, r.price, r.prev_close, r.open, r.high, r.low, r.as_of, r.source, r.delayed)
+                    for r in s.scalars(select(QuoteCache).where(QuoteCache.symbol.in_(symbols)))
+                    if (now - r.fetched_at).total_seconds() <= max_age_s}
 
     def store_quotes(self, quotes) -> None:
         rows = [dict(symbol=q.symbol, price=q.price, prev_close=q.prev_close, open=q.open, high=q.high, low=q.low,

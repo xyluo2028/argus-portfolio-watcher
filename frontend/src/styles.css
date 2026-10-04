@@ -22,6 +22,9 @@
   --warn: #fab219;
   --flash-up: rgba(12, 163, 12, 0.16);
   --flash-down: rgba(208, 59, 59, 0.16);
+  --heat-up: #138a36;
+  --heat-down: #c93636;
+  --heat-mid: #d9d8d2;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -43,6 +46,9 @@
     --series-3: #199e70;
     --up: #0ca30c;
     --down: #e66767;
+    --heat-up: #12a14a;
+    --heat-down: #d94343;
+    --heat-mid: #3a3a37;
   }
 }
 :root[data-theme="dark"] {
@@ -63,6 +69,9 @@
   --series-3: #199e70;
   --up: #0ca30c;
   --down: #e66767;
+  --heat-up: #12a14a;
+  --heat-down: #d94343;
+  --heat-mid: #3a3a37;
 }
 
 * { box-sizing: border-box; }
@@ -112,6 +121,10 @@ select, .btn {
 .input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
   color: var(--text); font: inherit; flex: 1; min-width: 90px; }
 .input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* company & peers */
+.clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+tr.self td { background: var(--accent-wash); }
+
 /* trade & edit forms */
 .trade { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
@@ -160,7 +173,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
-th:first-child, td:first-child { text-align: left; }
+th:first-child, td:first-child, th.left, td.left { text-align: left; }
 th { font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
 th[aria-sort] { color: var(--text); }
 tbody tr { cursor: pointer; }
@@ -196,3 +209,15 @@ td .name { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .alert-strip { border-color: var(--warn); }
 .alert-strip ul { margin: 6px 0; padding-left: 18px; }
 textarea.input { resize: vertical; font: inherit; }
+
+.treemap { position: relative; width: 100%; }
+.treemap .tile { position: absolute; border-radius: 4px; padding: 6px 8px; overflow: hidden; color: var(--text);
+  display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; line-height: 1.25; }
+.treemap .tile.strong { color: #fff; }
+.treemap .tile.link { cursor: pointer; }
+.treemap .tile:hover { outline: 2px solid var(--text); outline-offset: -2px; }
+.treemap .sym { font-weight: 600; white-space: nowrap; }
+.treemap .chg, .treemap .wt { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.treemap .wt { opacity: 0.8; }
+.heat-scale { display: inline-block; width: 120px; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--heat-down), var(--heat-mid), var(--heat-up)); }

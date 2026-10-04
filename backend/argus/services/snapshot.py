@@ -21,7 +21,7 @@ FORMAT = "argus-snapshot"
 VERSION = 1
 # Insert order respects foreign keys; deletes run in reverse.
 TABLES = ["portfolio", "instrument", "txn", "target", "watchlist", "watchlist_item",
-          "alert", "alert_event", "note", "audit_log"]
+          "alert", "alert_event", "note", "peer_list", "audit_log"]
 # Already holding any of these means the instance has records a load would clash with.
 USER_TABLES = ["portfolio", "txn", "watchlist_item", "alert", "note"]
 

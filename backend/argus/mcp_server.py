@@ -132,6 +132,26 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
 
     @mcp.tool(annotations=READ)
     @_tool
+    def get_company_profile(symbol: str) -> dict:
+        """What a company does and where: business summary, sector/industry, HQ (address, city,
+        state, country), website, employees, top officers, IPO date; for ETFs the fund family and
+        category. Plus `peers`: the user's peer list for it, or suggestions (`custom`=false): Finnhub's
+        same-sub-industry companies, or for ETFs the largest funds in the same category, most
+        top-holdings overlap first. Cached a week. Compare the peers with `compare`."""
+        p = argus.company_profile(symbol)
+        return p | {k: v for k, v in argus.peers(symbol, with_metrics=False).items() if k in ("peers", "custom")}
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_fund_holdings(symbol: str, limit: int = 25) -> dict:
+        """An ETF's holdings, largest first (weight %, value, country; the largest stocks with price and
+        today's change %): every holding from its latest SEC N-PORT filing (2-5 months old, see
+        `as_of`, `count`), else Yahoo's current top 10 (`source`). Plus sector, country, asset-mix
+        and bond-rating weights in %. `limit` caps the holdings returned. `fund` is false for a stock."""
+        return argus.fund_holdings(symbol, limit)
+
+    @mcp.tool(annotations=READ)
+    @_tool
     def get_fundamentals(symbol: str, fields: list[str] | None = None) -> dict:
         """Valuation & profitability: pe_ttm, pe_forward, peg, pb, ps_ttm, ev_ebitda, eps_ttm,
         market_cap, revenue_ttm, revenue_growth_yoy_pct, gross/operating/net_margin_pct, roe_pct,

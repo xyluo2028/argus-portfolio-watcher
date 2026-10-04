@@ -242,6 +242,28 @@ export interface SimResult {
 
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
 
+export interface CompanyProfile {
+  symbol: string; as_of: string; name?: string; summary?: string; quote_type?: string;
+  sector?: string; industry?: string; country?: string; city?: string; state?: string; address?: string; zip?: string;
+  website?: string; employees?: number; officers?: { name: string | null; title: string | null }[];
+  ipo?: string; logo?: string; fund_family?: string; category?: string; suggested_peers: string[];
+}
+export interface Peers extends CompareResult {
+  symbol: string; peers: string[]; custom: boolean; kind: "stock" | "fund"; category: string | null;
+}
+
+export interface FundHolding {
+  symbol: string | null; name: string | null; weight_pct: number; us_listed: boolean;
+  value_usd: number | null; country: string | null; kind: "stock" | "bond" | "other";
+  maturity?: string | null; coupon_pct?: number | null; price: number | null; change_pct: number | null;
+}
+export interface FundHoldings {
+  symbol: string; fund: boolean; source: "sec" | "yahoo" | null; as_of: string | null; filed: string | null;
+  count: number; holdings: FundHolding[]; sectors: { sector: string; weight_pct: number }[];
+  countries: { country: string; weight_pct: number }[]; asset_classes: Record<string, number>;
+  bond_ratings: Record<string, number>; notes: string[]; errors: Record<string, string>;
+}
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -276,6 +298,10 @@ export const api = {
   watchAdd: (symbols: string[], note?: string, name = "Watchlist") =>
     send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
+  profile: (symbol: string) => get<CompanyProfile>(`/api/profile/${enc(symbol)}`),
+  holdings: (symbol: string) => get<FundHoldings>(`/api/holdings/${enc(symbol)}`),
+  peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7) =>

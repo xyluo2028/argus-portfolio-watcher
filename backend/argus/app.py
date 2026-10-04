@@ -5,6 +5,7 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -18,9 +19,10 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import AuditLog, FundProfile, Instrument, Target
-from argus.providers.base import Quote
+from argus.models import AuditLog, CompanyProfile, FundProfile, Instrument, PeerList, SecurityMap, Target
+from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
+from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
@@ -33,7 +35,10 @@ from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import SnapshotService
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
-from argus.symbols import normalize_symbol
+from argus.symbols import is_plausible_symbol, normalize_symbol
+
+
+log = logging.getLogger("argus.app")
 
 
 class Argus:
@@ -41,7 +46,7 @@ class Argus:
                  market_factory: Callable[[Engine, Settings], MarketService] | None = None):
         self.settings = settings or load_settings()
         self.engine = make_engine(self.settings.db_path)
-        self.portfolios = PortfolioService(self.engine)
+        self.portfolios = PortfolioService(self.engine, on_new_symbols=self.describe_instruments)
         self.watchlists = WatchlistService(self.engine, resolve=lambda syms: self.market.get_quotes(syms)[1])
         self.market = (market_factory or self._default_market)(self.engine, self.settings)
         self.events = EventsService(self.engine, self.market.directory, self.market.profile_provider)
@@ -61,6 +66,7 @@ class Argus:
             sec=SecEdgarProvider(s.sec_user_agent, cache_dir=s.cache_dir),
             directory=finnhub,
             profile_provider=yahoo,
+            figi=OpenFigiProvider(s.openfigi_api_key),
         )
 
     # -- read -----------------------------------------------------------------
@@ -73,11 +79,24 @@ class Argus:
         return {"quotes": [quotes[s].to_dict() for s in syms if s in quotes], "errors": errors,
                 "market": market_status()}
 
+    def describe_instruments(self, symbols: list[str]) -> None:
+        """Fill type/sector for symbols that lack a sector (e.g. first recorded from the UI), so funds
+        aren't mistaken for stocks. Symbols that already have one cost nothing."""
+        with session_scope(self.engine) as s:
+            known = {i.symbol: i for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(symbols)))}
+            missing = [x for x in symbols if x not in known or not known[x].sector]
+        if missing:
+            self.market.refresh_instruments(missing)
+
     def portfolio(self, ref: str, with_quotes: bool = True, include_lots: bool = False,
                   live_quotes: dict[str, Quote] | None = None) -> dict:
         """Portfolio summary. `live_quotes` (from the web server's hub) are preferred over the cache."""
         state = self.portfolios.positions(ref)
         open_syms = [s for s, p in state.items() if p.is_open]
+        try:
+            self.describe_instruments(open_syms)
+        except Exception as e:  # never block the summary on metadata
+            log.warning("instrument metadata: %s", e)
         quotes = {s: live_quotes[s] for s in open_syms if live_quotes and s in live_quotes}
         missing = [s for s in open_syms if s not in quotes]
         errors: dict[str, str] = {}
@@ -155,6 +174,340 @@ class Argus:
         return {"fields": wanted, "rows": rows, "errors": errors}
 
     # -- tracked symbols, events, alerts, brief ----------------------------------
+    # -- company profile & peers ---------------------------------------------------
+    PROFILE_MAX_AGE = timedelta(days=7)
+    PROFILE_VERSION = 2  # bump to refetch cached profiles (2: fund peers from the same category)
+    MAX_PEERS = 9  # plus the symbol itself = compare()'s limit of 10
+    FUND_TYPES = ("ETF", "MUTUALFUND")
+    FUND_COMPARE_FIELDS = ("net_assets", "expense_ratio_pct", "dividend_yield_pct", "ytd_return_pct", "return_3y_pct")
+
+    def company_profile(self, symbol: str, refresh: bool = False) -> dict:
+        """What the company does and where it is (Yahoo), IPO date and suggested peers (Finnhub).
+        Cached a week; missing providers just leave fields empty."""
+        sym = normalize_symbol(symbol)
+        now = datetime.now(UTC)
+        with session_scope(self.engine) as s:
+            row = s.get(CompanyProfile, sym)
+            if row and not refresh and now - row.as_of < self.PROFILE_MAX_AGE and row.data.get("v") == self.PROFILE_VERSION:
+                return {"symbol": sym, "as_of": row.as_of.isoformat(), **{k: v for k, v in row.data.items() if k != "v"}}
+
+        data: dict = {}
+        if self.market.profile_provider is not None:
+            try:
+                info = self.market.profile_provider.get_info(sym)
+            except ProviderError:
+                info = {}
+            officers = [{"name": o.get("name"), "title": o.get("title")} for o in (info.get("companyOfficers") or [])[:3]]
+            data |= {
+                "name": info.get("longName") or info.get("shortName"),
+                "summary": info.get("longBusinessSummary"),
+                "quote_type": info.get("quoteType"),
+                "sector": info.get("sector"), "industry": info.get("industry"),
+                "country": info.get("country"), "city": info.get("city"), "state": info.get("state"),
+                "address": info.get("address1"), "zip": info.get("zip"),
+                "website": info.get("website"), "employees": info.get("fullTimeEmployees"),
+                "officers": officers,
+                "fund_family": info.get("fundFamily"), "category": info.get("category"),
+            }
+        fund = data.get("quote_type") in self.FUND_TYPES
+        if self.market.directory is not None:
+            try:
+                fh = self.market.directory.get_profile(sym)
+                data |= {"ipo": fh.get("ipo"), "logo": fh.get("logo") or None,
+                         "website": data.get("website") or fh.get("weburl"), "name": data.get("name") or fh.get("name"),
+                         "country": data.get("country") or fh.get("country")}
+                if not fund:
+                    data["suggested_peers"] = self._us_listed([p for p in self.market.directory.get_peers(sym) if p != sym])
+            except ProviderError:
+                pass
+        if fund:  # Finnhub has no fund peers; use the same Morningstar category instead
+            data["suggested_peers"] = self._similar_funds(sym, data.get("category"))
+        data = {k: v for k, v in data.items() if v not in (None, "", [])} | {"suggested_peers": data.get("suggested_peers", [])}
+        with session_scope(self.engine) as s:
+            s.merge(CompanyProfile(symbol=sym, as_of=now, data=data | {"v": self.PROFILE_VERSION}))
+        return {"symbol": sym, "as_of": now.isoformat(), **data}
+
+    @staticmethod
+    def holdings_overlap(a: dict, b: dict) -> float | None:
+        """Percent of weight two funds share among their listed top holdings (sum of the smaller weight
+        per common holding). None when either lists no holdings, e.g. bond funds."""
+        wa = {normalize_symbol(h["symbol"]): h["weight"] for h in a.get("top_holdings", [])}
+        wb = {normalize_symbol(h["symbol"]): h["weight"] for h in b.get("top_holdings", [])}
+        if not wa or not wb:
+            return None
+        return round(sum(min(w, wb[k]) for k, w in wa.items() if k in wb) * 100, 1)
+
+    def _similar_funds(self, sym: str, category: str | None) -> list[str]:
+        """The biggest US ETFs in the same category, those sharing the most top holdings first."""
+        yahoo = self.market.profile_provider
+        if not category or yahoo is None:
+            return []
+        try:
+            found = [normalize_symbol(x) for x in yahoo.similar_etfs(category, 2 * self.MAX_PEERS + 2)]
+        except ProviderError as e:
+            log.warning("similar funds for %s: %s", sym, e)
+            return []
+        candidates = self._us_listed([x for x in dict.fromkeys(found) if x != sym], limit=None)
+        profiles = self.fund_profiles([sym, *candidates])
+        own = profiles.get(sym, {})
+        size_rank = {x: i for i, x in enumerate(candidates)}
+        overlap = {x: self.holdings_overlap(own, profiles.get(x, {})) or 0.0 for x in candidates}
+        return sorted(candidates, key=lambda x: (-overlap[x], size_rank[x]))[:self.MAX_PEERS]
+
+    def _us_listed(self, symbols: list[str], limit: int | None = MAX_PEERS) -> list[str]:
+        """Keep symbols listed on a US exchange (not OTC); Finnhub suggests home-market peers for
+        foreign companies (e.g. IGM.TO for BN), which have no US quotes."""
+        try:
+            directory = self.market.directory.symbol_directory() if self.market.directory else {}
+        except ProviderError:
+            directory = {}
+        if not directory:
+            return [x for x in symbols if "." not in x][:limit]
+        return [x for x in symbols if x in directory and directory[x].exchange != "OOTC"][:limit]
+
+    def peers(self, symbol: str, with_metrics: bool = True) -> dict:
+        """Your peer list for `symbol` (or the suggested one) with a side-by-side comparison."""
+        sym = normalize_symbol(symbol)
+        with session_scope(self.engine) as s:
+            row = s.get(PeerList, sym)
+            custom = list(row.peers) if row else None
+        profile = self.company_profile(sym)
+        fund = profile.get("quote_type") in self.FUND_TYPES
+        peers = custom if custom is not None else profile.get("suggested_peers", [])
+        out = {"symbol": sym, "peers": peers, "custom": custom is not None,
+               "kind": "fund" if fund else "stock", "category": profile.get("category") if fund else None}
+        if with_metrics:
+            syms = [sym, *peers][:self.MAX_PEERS + 1]
+            out |= self.compare(syms, list(self.FUND_COMPARE_FIELDS) if fund else None)
+            if fund:
+                profiles = self.fund_profiles(syms)
+                own = profiles.get(sym, {})
+                for row in out["rows"]:
+                    row["overlap_pct"] = None if row["symbol"] == sym else \
+                        self.holdings_overlap(own, profiles.get(row["symbol"], {}))
+        return out
+
+    HOLDINGS_NAMED = 100  # largest stock holdings given tickers (OpenFIGI, cached for good)
+    HOLDINGS_QUOTED = 50  # of those, quoted for the heatmap
+    SECURITY_MAP_RETRY = timedelta(days=30)  # retry ids OpenFIGI couldn't map
+
+    def fund_holdings(self, symbol: str, limit: int | None = None) -> dict:
+        """A fund's holdings, largest first: every one from its latest SEC N-PORT filing (months old;
+        `as_of` says when), else Yahoo's current top 10. The largest stock holdings carry today's move.
+        Plus sector weights, countries, asset mix and bond ratings (all percent). `fund` is false (and
+        the rest empty) for anything that isn't a fund. `limit` caps the holdings returned."""
+        sym = normalize_symbol(symbol)
+        out: dict = {"symbol": sym, "fund": self.company_profile(sym).get("quote_type") in self.FUND_TYPES,
+                     "source": None, "as_of": None, "filed": None, "count": 0, "holdings": [], "sectors": [],
+                     "countries": [], "asset_classes": {}, "bond_ratings": {}, "notes": [], "errors": {}}
+        if not out["fund"]:
+            return out
+        prof = self.fund_profiles([sym]).get(sym, {})
+        nport = None
+        if self.market.sec is not None:
+            try:
+                nport = self.market.sec.fund_holdings(sym)
+            except ProviderError as e:
+                log.warning("N-PORT %s: %s", sym, e)
+                out["notes"].append("SEC_USER_AGENT" in str(e) and "Set SEC_USER_AGENT in .env to see every holding "
+                                    "(from SEC filings); showing Yahoo's top 10." or f"SEC filing unavailable: {e}")
+        if nport and nport["holdings"]:
+            rows = [{"symbol": None, "us_listed": False, "name": h["name"] or h["title"],
+                     "weight_pct": round(h["weight_pct"], 3), "value_usd": h["value_usd"], "country": h["country"],
+                     "kind": "stock" if h["asset_cat"] in ("EC", "EP")
+                     else "bond" if h["asset_cat"] in ("DBT", "ABS-MBS", "ABS-O", "ABS-CBDO", "ABS-APCP") else "other",
+                     "maturity": h.get("maturity"), "coupon_pct": h.get("coupon_pct"),
+                     "_ids": (h["isin"], h["cusip"], h["ticker"], h["currency"])} for h in nport["holdings"]]
+            self._name_holdings(rows, out["notes"])
+            rows = self._merge_lines(rows)
+            countries = list(nport["countries"].items())
+            out |= {"source": "sec", "as_of": nport["as_of"], "filed": nport["filed"], "count": nport["count"],
+                    "countries": [{"country": c, "weight_pct": round(w, 2)} for c, w in countries[:12]]
+                    + ([{"country": "Other", "weight_pct": round(sum(w for _, w in countries[12:]), 2)}]
+                       if len(countries) > 12 else [])}
+        else:
+            # US listings go through the normal symbol form; foreign ones (2330.TW) stay in Yahoo's.
+            try:
+                directory = self.market.directory.symbol_directory() if self.market.directory else {}
+            except ProviderError:
+                directory = {}
+            rows = []
+            for h in prof.get("top_holdings", []):
+                n = normalize_symbol(h["symbol"])
+                us = n in directory if directory else "." not in n
+                rows.append({"symbol": n if us else h["symbol"], "us_listed": us, "name": h.get("name"),
+                             "weight_pct": round(h["weight"] * 100, 3), "value_usd": None, "country": None,
+                             "kind": "stock"})
+            out |= {"source": "yahoo" if rows else None, "count": len(rows)}
+        quoted = [r for r in rows if r["symbol"]][:self.HOLDINGS_QUOTED]
+        quotes = self._holding_quotes([r["symbol"] for r in quoted if r["us_listed"]],
+                                      [r["symbol"] for r in quoted if not r["us_listed"]])
+        for r in rows:
+            r.pop("_ids", None)
+            q = quotes.get(r["symbol"]) if r["symbol"] else None
+            r["price"], r["change_pct"] = (q.price, q.change_pct) if q else (None, None)
+        out["errors"] = {r["symbol"]: "no quote" for r in quoted if r["symbol"] not in quotes}
+        out["holdings"] = rows[:limit] if limit else rows
+        out["sectors"] = [{"sector": k, "weight_pct": round(v * 100, 2)}
+                          for k, v in sorted(prof.get("sectors", {}).items(), key=lambda kv: -kv[1])]
+        for key in ("asset_classes", "bond_ratings"):
+            out[key] = {k: round(v * 100, 2) for k, v in prof.get(key, {}).items()}
+        return out
+
+    def _name_holdings(self, rows: list[dict], notes: list[str]) -> None:
+        """Give the largest stock holdings a quotable symbol: the filing's own ticker for US lines,
+        else OpenFIGI's listing in the currency the fund holds (cached, so each id is asked once)."""
+        todo = [r for r in rows if r["kind"] == "stock"][:self.HOLDINGS_NAMED]
+        keyed: dict[str, tuple[list[dict], dict]] = {}  # id -> (rows holding it, OpenFIGI job)
+        for r in todo:
+            isin, cusip, ticker, currency = r["_ids"]
+            country = r["country"]
+            if ticker and currency == "USD" and is_plausible_symbol(normalize_symbol(ticker)):
+                r["symbol"], r["us_listed"] = normalize_symbol(ticker), True
+                continue
+            # A USD line with a CUSIP is a US listing (incl. ADRs); without one (e.g. a GDR) prefer home.
+            us_line = currency == "USD" and bool(cusip)
+            key = cusip if us_line else isin or cusip
+            if key in keyed:  # e.g. local shares and a GDR of the same company: the first (largest) decides
+                keyed[key][0].append(r)
+            elif key:
+                id_type = "ID_ISIN" if key == isin else "ID_CINS" if key[0].isalpha() else "ID_CUSIP"
+                keyed[key] = ([r], {"id_type": id_type, "id": key, "isin": isin, "country": country,
+                                    "currency": currency if us_line or currency != "USD" else None})
+        if not keyed:
+            return
+        now = datetime.now(UTC)
+        with session_scope(self.engine) as s:
+            known = {m.id: (m.symbol, m.exchange) for m in s.scalars(select(SecurityMap).where(SecurityMap.id.in_(keyed)))
+                     if m.symbol or now - m.as_of < self.SECURITY_MAP_RETRY}
+        missing = [k for k in keyed if k not in known]
+        figi = self.market.figi
+        if missing and figi is not None:
+            for i in range(0, len(missing), figi.batch):
+                chunk = missing[i:i + figi.batch]
+                try:
+                    got = figi.map([keyed[k][1] for k in chunk])
+                except ProviderError as e:  # rate limited: the rest get names on a later load
+                    log.warning("holdings tickers: %s", e)
+                    notes.append("Some holdings are still being matched to tickers; reload in a minute.")
+                    break
+                with session_scope(self.engine) as s:
+                    for k in chunk:
+                        listing = got.get(k)
+                        ys = yahoo_symbol(*listing) if listing else None
+                        if ys and listing[1] == "US":
+                            ys = normalize_symbol(ys)
+                        s.merge(SecurityMap(id=k, ticker=listing[0] if listing else None,
+                                            exchange=listing[1] if listing else None, symbol=ys, as_of=now))
+                        known[k] = (ys, listing[1] if listing else None)
+        for k, (rs, _) in keyed.items():
+            ys, exch = known.get(k, (None, None))
+            for r in rs if ys else []:
+                r["symbol"], r["us_listed"] = ys, exch == "US"
+
+    @staticmethod
+    def _merge_lines(rows: list[dict]) -> list[dict]:
+        """One row per symbol: funds can hold a company twice (local shares and a GDR, e.g. Samsung)."""
+        merged: dict[str, dict] = {}
+        out = []
+        for r in rows:
+            if r["symbol"] and r["symbol"] in merged:
+                m = merged[r["symbol"]]
+                m["weight_pct"] = round(m["weight_pct"] + r["weight_pct"], 3)
+                m["value_usd"] = (m["value_usd"] or 0) + (r["value_usd"] or 0) or None
+                if not m["us_listed"] and r["country"] not in (None, "US"):  # a GDR may be filed as US
+                    m["country"] = r["country"]
+                continue
+            if r["symbol"]:
+                merged[r["symbol"]] = r
+            out.append(r)
+        return sorted(out, key=lambda r: -r["weight_pct"])
+
+    def _holding_quotes(self, us: list[str], foreign: list[str]) -> dict[str, Quote]:
+        """Quotes for fund holdings from the cache or Yahoo (in parallel), keeping Finnhub's per-minute
+        budget for the portfolio. Foreign symbols are Yahoo's own (7203.T)."""
+        quotes = self.market.cached_quotes(us + foreign, max_age_s=60)
+        yahoo = self.market.profile_provider
+        need = [(s, s in foreign) for s in us + foreign if s not in quotes]
+        if yahoo is None or not need:
+            return quotes
+        chunks = [need[i::8] for i in range(8)]
+
+        def fetch(chunk):
+            got = {}
+            for native in (False, True):
+                syms = [s for s, n in chunk if n == native]
+                if syms:
+                    try:
+                        got |= yahoo.get_quotes(syms, native=native)
+                    except ProviderError:
+                        pass
+            return got
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for got in pool.map(fetch, [c for c in chunks if c]):
+                quotes |= got
+                self.market.store_quotes(got.values())
+        return quotes
+        prof = self.fund_profiles([sym]).get(sym, {})
+        raw = prof.get("top_holdings", [])
+        # US listings go through the normal quote path (cache, live providers); foreign ones (2330.TW,
+        # ASML.AS) only Yahoo knows, under its own symbol.
+        try:
+            directory = self.market.directory.symbol_directory() if self.market.directory else {}
+        except ProviderError:
+            directory = {}
+        us = {h["symbol"]: normalize_symbol(h["symbol"]) for h in raw
+              if (normalize_symbol(h["symbol"]) in directory if directory else "." not in normalize_symbol(h["symbol"]))}
+        quotes, errors = self.market.get_quotes(list(us.values())) if us else ({}, {})
+        foreign = [h["symbol"] for h in raw if h["symbol"] not in us]
+        native: dict[str, Quote] = {}
+        if foreign and self.market.profile_provider is not None:
+            try:
+                native = self.market.profile_provider.get_quotes(foreign, native=True)
+            except ProviderError:
+                pass
+        for h in raw:
+            q = quotes.get(us[h["symbol"]]) if h["symbol"] in us else native.get(h["symbol"])
+            out["holdings"].append({"symbol": us.get(h["symbol"], h["symbol"]), "name": h.get("name"),
+                                    "weight_pct": round(h["weight"] * 100, 2), "us_listed": h["symbol"] in us,
+                                    "price": q.price if q else None, "change_pct": q.change_pct if q else None})
+            if not q:
+                out["errors"][h["symbol"]] = errors.get(us.get(h["symbol"], ""), "no quote")
+        out["sectors"] = [{"sector": k, "weight_pct": round(v * 100, 2)}
+                          for k, v in sorted(prof.get("sectors", {}).items(), key=lambda kv: -kv[1])]
+        for key in ("asset_classes", "bond_ratings"):
+            out[key] = {k: round(v * 100, 2) for k, v in prof.get(key, {}).items()}
+        return out
+
+    def set_peers(self, symbol: str, peers: list[str] | None, actor: str = "cli") -> dict:
+        """Save your peer list (unknown tickers are refused); None goes back to the suggestions."""
+        sym = normalize_symbol(symbol)
+        with session_scope(self.engine) as s:
+            before = s.get(PeerList, sym)
+            before_peers = list(before.peers) if before else None
+        if peers is None:
+            with session_scope(self.engine) as s:
+                if (row := s.get(PeerList, sym)) is not None:
+                    s.delete(row)
+                    s.add(AuditLog(actor=actor, action="reset_peers", entity="peers", entity_id=sym,
+                                   before={"peers": before_peers}))
+            return self.peers(sym, with_metrics=False)
+        clean = [p for p in dict.fromkeys(normalize_symbol(x) for x in peers if x.strip()) if p != sym]
+        if len(clean) > self.MAX_PEERS:
+            raise ArgusError("INVALID_ARG", f"At most {self.MAX_PEERS} peers.")
+        new = [p for p in clean if p not in (before_peers or []) and is_plausible_symbol(p)]
+        bad = [p for p in clean if not is_plausible_symbol(p)]
+        unknown = self.market.get_quotes(new)[1] if new else {}
+        if bad or unknown:
+            raise ArgusError("UNKNOWN_SYMBOL", f"No quote found for: {', '.join(sorted({*bad, *unknown}))}",
+                             hint="Check the ticker; only US-listed stocks and ETFs are supported.")
+        with session_scope(self.engine) as s:
+            s.merge(PeerList(symbol=sym, peers=clean))
+            s.add(AuditLog(actor=actor, action="set_peers", entity="peers", entity_id=sym,
+                           before={"peers": before_peers}, after={"peers": clean}))
+        return self.peers(sym, with_metrics=False)
+
     def held_positions(self) -> dict[str, tuple[float, float]]:
         """symbol -> (total shares, weighted average cost) across all portfolios."""
         agg: dict[str, list[float]] = {}
@@ -282,7 +635,8 @@ class Argus:
         out: dict[str, dict] = {}
         with session_scope(self.engine) as s:
             for fp in s.scalars(select(FundProfile).where(FundProfile.symbol.in_(symbols))):
-                if now - fp.as_of < self.FUND_PROFILE_MAX_AGE:
+                # Fund rows cached before asset classes were collected are refetched.
+                if now - fp.as_of < self.FUND_PROFILE_MAX_AGE and (not fp.data or "asset_classes" in fp.data):
                     out[fp.symbol] = fp.data
         yahoo = self.market.profile_provider
         todo = [x for x in symbols if x not in out]

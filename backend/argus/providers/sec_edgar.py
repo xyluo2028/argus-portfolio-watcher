@@ -1,14 +1,20 @@
-"""SEC EDGAR XBRL "companyfacts" adapter: official reported financials, free.
+"""SEC EDGAR adapter: XBRL "companyfacts" (official reported financials) and N-PORT
+(a fund's complete holdings), both free.
 
 EDGAR requires a descriptive User-Agent with contact info and allows 10 req/s.
 10-Q cash-flow facts are year-to-date, and Q4 is rarely filed as a 3-month
 value, so single quarters are derived by differencing cumulative periods.
+
+N-PORT is filed monthly but only each quarter's last month is public, about 60 days
+later, so holdings are 2-5 months old. Unit investment trusts (e.g. SPY, DIA) don't file it.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -21,6 +27,10 @@ TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 TICKERS_MAX_AGE_S = 7 * 24 * 3600
 FACTS_MAX_AGE_S = 24 * 3600
+FUND_TICKERS_URL = "https://www.sec.gov/files/company_tickers_mf.json"
+FILINGS_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
+NPORT_LATEST_MAX_AGE_S = 24 * 3600
+NPORT_KEEP = 500  # holdings kept per fund (by weight); the rest only count toward totals
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,55 @@ class SecEdgarProvider:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(json.dumps(data))
         return data
+
+    def _fetch_text(self, url: str, params: dict | None = None) -> str:
+        if not self._ua:
+            raise ProviderError("SEC EDGAR needs SEC_USER_AGENT in .env, e.g. 'argus you@example.com'.")
+        try:
+            r = self._client.get(url, params=params, timeout=60.0,
+                                 headers={"User-Agent": self._ua, "Accept-Encoding": "gzip"})
+        except httpx.HTTPError as e:
+            raise ProviderError(f"sec {url}: {e}") from e
+        if r.status_code != 200:
+            raise ProviderError(f"sec {url}: HTTP {r.status_code}")
+        return r.text
+
+    def fund_series(self, symbol: str) -> str | None:
+        """The fund series (e.g. S000006416) an ETF or mutual fund ticker belongs to."""
+        doc = self._fetch_json(FUND_TICKERS_URL, "company_tickers_mf.json", TICKERS_MAX_AGE_S)
+        want = symbol.upper().replace(".", "-")
+        i, s = doc["fields"].index("symbol"), doc["fields"].index("seriesId")
+        return next((row[s] for row in doc["data"] if str(row[i]).upper() == want), None)
+
+    def fund_holdings(self, symbol: str) -> dict | None:
+        """Complete holdings from the latest public N-PORT filing, or None if the fund files none.
+        Parsed filings are cached for good (they never change); the latest-filing lookup for a day."""
+        series = self.fund_series(symbol)
+        if series is None:
+            return None
+        latest = self._cache_dir / "sec" / f"nport-latest-{series}.json" if self._cache_dir else None
+        if latest and latest.exists() and time.time() - latest.stat().st_mtime < NPORT_LATEST_MAX_AGE_S:
+            filing = json.loads(latest.read_text())
+        else:
+            atom = self._fetch_text(FILINGS_URL, {"action": "getcompany", "CIK": series, "type": "NPORT-P",
+                                                  "dateb": "", "owner": "include", "count": "1", "output": "atom"})
+            href = re.search(r"<filing-href>(.*?)</filing-href>", atom)
+            filed = re.search(r"<filing-date>(.*?)</filing-date>", atom)
+            filing = {"index": href.group(1), "filed": filed.group(1) if filed else None} if href else None
+            if latest:
+                latest.parent.mkdir(parents=True, exist_ok=True)
+                latest.write_text(json.dumps(filing))
+        if filing is None:
+            return None
+        folder = filing["index"].rsplit("/", 1)[0]
+        parsed = self._cache_dir / "sec" / f"nport-{folder.rsplit('/', 1)[1]}.json" if self._cache_dir else None
+        if parsed and parsed.exists():
+            data = json.loads(parsed.read_text())
+        else:
+            data = parse_nport(self._fetch_text(f"{folder}/primary_doc.xml"))
+            if parsed:
+                parsed.write_text(json.dumps(data))
+        return {"series_id": series, "filed": filing["filed"], **data}
 
     def cik_for(self, symbol: str) -> int | None:
         rows = self._fetch_json(TICKERS_URL, "company_tickers.json", TICKERS_MAX_AGE_S)
@@ -175,3 +234,44 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
                 if p.get(f) is not None:
                     p[out] = p[f] / p["revenue"] * 100
     return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods}
+
+
+def _num_or_none(v: str | None) -> float | None:
+    try:
+        return float(v) if v not in (None, "", "N/A") else None
+    except ValueError:
+        return None
+
+
+def parse_nport(xml: str, keep: int = NPORT_KEEP) -> dict:
+    """N-PORT primary_doc.xml -> report date, totals and holdings sorted by weight (percent of net
+    assets; negative for shorts). Country and asset-category weights cover every holding."""
+    root = ET.fromstring(xml.encode())
+    text = lambda el, path: (el.findtext(path) or "").strip() or None  # noqa: E731
+    holdings, countries, categories = [], {}, {}
+    for inv in root.iterfind(".//{*}invstOrSec"):
+        weight = _num_or_none(text(inv, "{*}pctVal")) or 0.0
+        ids = inv.find("{*}identifiers")
+        ident = lambda tag: (ids.find(f"{{*}}{tag}").get("value") if ids is not None and ids.find(f"{{*}}{tag}") is not None else None)  # noqa: E731
+        h = {"name": text(inv, "{*}name"), "title": text(inv, "{*}title"), "cusip": text(inv, "{*}cusip"),
+             "isin": ident("isin"), "ticker": ident("ticker"), "weight_pct": weight,
+             "value_usd": _num_or_none(text(inv, "{*}valUSD")),
+             "currency": text(inv, "{*}curCd") or (cc.get("curCd") if (cc := inv.find("{*}currencyConditional")) is not None else None),
+             "asset_cat": text(inv, "{*}assetCat"), "issuer_cat": text(inv, "{*}issuerCat"),
+             "country": text(inv, "{*}invCountry") if text(inv, "{*}invCountry") != "N/A" else None}
+        if h["cusip"] in ("000000000", "N/A"):
+            h["cusip"] = None
+        debt = inv.find("{*}debtSec")
+        if debt is not None:
+            h["maturity"] = text(debt, "{*}maturityDt")
+            h["coupon_pct"] = _num_or_none(text(debt, "{*}annualizedRt"))
+        holdings.append(h)
+        if h["country"]:
+            countries[h["country"]] = countries.get(h["country"], 0.0) + weight
+        if h["asset_cat"]:
+            categories[h["asset_cat"]] = categories.get(h["asset_cat"], 0.0) + weight
+    holdings.sort(key=lambda h: -h["weight_pct"])
+    return {"as_of": text(root, ".//{*}repPdDate"), "net_assets": _num_or_none(text(root, ".//{*}netAssets")),
+            "count": len(holdings), "holdings": holdings[:keep],
+            "countries": dict(sorted(countries.items(), key=lambda kv: -kv[1])),
+            "asset_categories": dict(sorted(categories.items(), key=lambda kv: -kv[1]))}

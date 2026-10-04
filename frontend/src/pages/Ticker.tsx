@@ -11,7 +11,10 @@ import {
   type StreamUpdate,
 } from "../api";
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
+import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
+import { HoldingsCard } from "../components/HoldingsCard";
+import { PeersCard } from "../components/PeersCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
@@ -56,6 +59,10 @@ const STATS: { key: string; label: string; fmt: (v: number | null | undefined) =
   { key: "dividend_yield_pct", label: "Dividend yield", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
   { key: "beta", label: "Beta", fmt: ratio },
   { key: "expense_ratio_pct", label: "Expense ratio", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
+  { key: "net_assets", label: "Net assets", fmt: big },
+  { key: "ytd_return_pct", label: "YTD return", fmt: (v) => pct(v, 1) },
+  { key: "return_3y_pct", label: "3-year avg return", fmt: (v) => pct(v, 1) },
+  { key: "return_5y_pct", label: "5-year avg return", fmt: (v) => pct(v, 1) },
 ];
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
@@ -165,6 +172,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
           : <div className="chart-box muted">Loading chart…</div>}
       </section>
 
+      <CompanyCard symbol={symbol} />
+      <HoldingsCard symbol={symbol} />
+
       <section className="grid-2">
         <div className="card">
           <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)}</span>}</h2>
@@ -183,6 +193,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         <PositionCard symbol={symbol} portfolio={portfolio} position={position} lastPrice={quote?.price}
                       onChanged={loadPosition} />
       </section>
+
+      <PeersCard symbol={symbol} />
 
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />
