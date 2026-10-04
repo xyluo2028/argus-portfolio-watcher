@@ -13,6 +13,7 @@ import {
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
 import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
+import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
@@ -58,6 +59,10 @@ const STATS: { key: string; label: string; fmt: (v: number | null | undefined) =
   { key: "dividend_yield_pct", label: "Dividend yield", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
   { key: "beta", label: "Beta", fmt: ratio },
   { key: "expense_ratio_pct", label: "Expense ratio", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
+  { key: "net_assets", label: "Net assets", fmt: big },
+  { key: "ytd_return_pct", label: "YTD return", fmt: (v) => pct(v, 1) },
+  { key: "return_3y_pct", label: "3-year avg return", fmt: (v) => pct(v, 1) },
+  { key: "return_5y_pct", label: "5-year avg return", fmt: (v) => pct(v, 1) },
 ];
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
@@ -168,6 +173,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       </section>
 
       <CompanyCard symbol={symbol} />
+      <HoldingsCard symbol={symbol} />
 
       <section className="grid-2">
         <div className="card">

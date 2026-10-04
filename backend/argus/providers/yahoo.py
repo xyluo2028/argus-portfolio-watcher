@@ -52,13 +52,14 @@ YAHOO_FUND_SECTORS = {
 class YahooProvider:
     name = "yahoo"
 
-    def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
+    def get_quotes(self, symbols: list[str], native: bool = False) -> dict[str, Quote]:
+        """`native` takes Yahoo's own symbols as given (e.g. foreign listings like 2330.TW)."""
         yf = _yf()
         out: dict[str, Quote] = {}
         now = datetime.now(UTC)
         for s in symbols:
             try:
-                fi = yf.Ticker(to_yahoo(s)).fast_info
+                fi = yf.Ticker(s if native else to_yahoo(s)).fast_info
                 price = _px(fi.get("lastPrice"))
                 if not price:
                     continue
@@ -109,8 +110,8 @@ class YahooProvider:
         return cal if isinstance(cal, dict) else {}
 
     def get_fund_profile(self, symbol: str) -> dict:
-        """ETF sector weights (Yahoo sector names, fractions summing to ~1) and top holdings.
-        Empty for anything that isn't a fund."""
+        """ETF sector weights (Yahoo sector names, fractions summing to ~1), top holdings (Yahoo
+        symbols), asset classes and bond ratings (fractions). Empty for anything that isn't a fund."""
         try:
             fd = _yf().Ticker(to_yahoo(symbol)).funds_data
             sectors = fd.sector_weightings or {}
@@ -121,8 +122,25 @@ class YahooProvider:
         if th is not None and not th.empty:
             for sym, row in th.iterrows():
                 holdings.append({"symbol": str(sym), "name": row.get("Name"), "weight": float(row.get("Holding Percent") or 0)})
-        return {"sectors": {YAHOO_FUND_SECTORS.get(k, k): float(v) for k, v in sectors.items() if v},
-                "top_holdings": holdings}
+        out = {"sectors": {YAHOO_FUND_SECTORS.get(k, k): float(v) for k, v in sectors.items() if v},
+               "top_holdings": holdings}
+        for key in ("asset_classes", "bond_ratings"):
+            try:
+                out[key] = {k: float(v) for k, v in (getattr(fd, key) or {}).items() if _num(v)}
+            except Exception:  # noqa: BLE001 - optional extras
+                out[key] = {}
+        return out
+
+    def similar_etfs(self, category: str, limit: int = 20) -> list[str]:
+        """US-listed ETFs in a Morningstar category (e.g. "Large Growth"), largest first."""
+        yf = _yf()
+        q = yf.ETFQuery
+        try:
+            r = yf.screen(q("and", [q("eq", ["categoryname", category]), q("eq", ["region", "us"])]),
+                          size=limit, sortField="fundnetassets", sortAsc=False)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"yahoo screen {category}: {e}") from e
+        return [x["symbol"] for x in (r or {}).get("quotes", []) if x.get("symbol")]
 
     def get_metrics(self, symbol: str) -> dict[str, float | None]:
         return metrics_from_info(self.get_info(symbol))
@@ -156,4 +174,9 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "high_52w": _num(i.get("fiftyTwoWeekHigh")),
         "low_52w": _num(i.get("fiftyTwoWeekLow")),
         "expense_ratio_pct": _num(i.get("netExpenseRatio")),
+        # Funds: assets under management; Yahoo gives ytdReturn in percent, multi-year averages as fractions.
+        "net_assets": _num(i.get("totalAssets")),
+        "ytd_return_pct": _num(i.get("ytdReturn")),
+        "return_3y_pct": _pct(i.get("threeYearAverageReturn")),
+        "return_5y_pct": _pct(i.get("fiveYearAverageReturn")),
     }

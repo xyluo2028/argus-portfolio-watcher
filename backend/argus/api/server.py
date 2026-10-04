@@ -158,6 +158,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def company_profile(symbol: str, refresh: bool = False):
         return await run(argus.company_profile, symbol, refresh)
 
+    @app.get("/api/holdings/{symbol}")
+    async def fund_holdings(symbol: str):
+        return await run(argus.fund_holdings, symbol)
+
     @app.get("/api/peers/{symbol}")
     async def peers(symbol: str):
         return await run(argus.peers, symbol)

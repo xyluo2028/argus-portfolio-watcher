@@ -2,15 +2,15 @@ import { money } from "../format";
 
 export interface BarItem { label: string; value: number; other?: boolean }
 
-/** Single-series horizontal bars (slot-1 hue), value labeled at the tip. */
-export function BarList({ items, total }: { items: BarItem[]; total: number }) {
+/** Single-series horizontal bars (slot-1 hue), value labeled at the tip. `format` renders a value in the hover title. */
+export function BarList({ items, total, format = money }: { items: BarItem[]; total: number; format?: (v: number) => string }) {
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
     <div className="bars" role="table" aria-label="Allocation">
       {items.map((i) => {
         const share = total ? (i.value / total) * 100 : 0;
         return (
-          <div className="bar-row" role="row" key={i.label} title={`${i.label}: ${money(i.value)} (${share.toFixed(1)}%)`}>
+          <div className="bar-row" role="row" key={i.label} title={`${i.label}: ${format(i.value)}${format === money ? ` (${share.toFixed(1)}%)` : ""}`}>
             <span className="lbl" role="cell">{i.label}</span>
             <span className="track" role="cell">
               <span className={`fill ${i.other ? "other" : ""}`} style={{ width: `${(i.value / max) * 100}%`, display: "block" }} />

@@ -267,6 +267,18 @@ class CompanyProfile(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class SecurityMap(Base):
+    """ISIN/CUSIP -> exchange ticker (OpenFIGI), for N-PORT holdings. symbol None = no usable listing."""
+
+    __tablename__ = "security_map"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    ticker: Mapped[str | None] = mapped_column(String(32))
+    exchange: Mapped[str | None] = mapped_column(String(8))
+    symbol: Mapped[str | None] = mapped_column(String(32))  # Yahoo form; US listings in canonical form
+    as_of: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class PeerList(Base):
     """Your own peer list for a symbol; without one, the suggested peers are shown."""
 
@@ -305,6 +317,7 @@ __all__ = [
     "Portfolio",
     "PriceBar",
     "RefreshLog",
+    "SecurityMap",
     "Target",
     "QuoteCache",
     "Transaction",
