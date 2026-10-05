@@ -168,3 +168,32 @@ def test_metadata_failure_never_blocks_a_trade(make_argus):
     a.portfolios.create_portfolio("growth")
     assert a.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 1, 10)])["inserted_ids"]
     assert a.portfolio("growth", with_quotes=False)["positions"][0]["symbol"] == "X"
+
+
+def test_events_follow_the_selected_portfolio(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event
+
+    a = make_argus([FakeQuotesAll()])
+    for name, sym in (("growth", "MU"), ("fixed-income", "BND")):
+        a.portfolios.create_portfolio(name)
+        a.portfolios.add_transactions(name, [TxnInput("BUY", sym, at(2026, 9, 1), 1, 10)])
+    a.watchlists.add(["BNS"])
+    soon = datetime.now(NY).date() + timedelta(days=3)
+    with session_scope(a.engine) as s:
+        for sym in ("MU", "BND", "BNS"):
+            s.add(Event(symbol=sym, kind="ex_dividend", d=soon, data={}, source="test"))
+
+    syms = lambda **kw: [e["symbol"] for e in a.upcoming_events(refresh=False, **kw)["upcoming"]]  # noqa: E731
+    assert syms(portfolio="fixed-income") == ["BND"]
+    assert syms(portfolio="growth") == ["MU"]
+    assert syms(portfolio="all") == syms() == ["BND", "BNS", "MU"]
+    assert syms(symbols=["mu"]) == ["MU"]
+
+
+class FakeQuotesAll:
+    name = "fake"
+
+    def get_quotes(self, symbols):
+        return {s: Quote(s, 10.0, 10.0, None, None, None, datetime.now(UTC), "fake") for s in symbols}

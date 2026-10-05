@@ -216,10 +216,12 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
 
     @mcp.tool(annotations=READ)
     @_tool
-    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None) -> dict:
+    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None,
+                   portfolio: str | None = None) -> dict:
         """Earnings (with hour, EPS/revenue estimates, and actuals once reported) and ex-dividend /
-        payment dates for held + watchlist symbols (or `symbols`). `held` marks current holdings."""
-        return argus.upcoming_events(days_ahead, days_back, symbols=symbols)
+        payment dates for `symbols`, else one `portfolio`'s holdings, else all held + watchlist
+        symbols. `held` marks current holdings."""
+        return argus.upcoming_events(days_ahead, days_back, symbols=symbols, portfolio=portfolio)
 
     @mcp.tool(annotations=READ)
     @_tool

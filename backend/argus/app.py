@@ -528,8 +528,14 @@ class Argus:
         return sorted(set(self.held_positions()) | set(watched))
 
     def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
-                        symbols: list[str] | None = None) -> dict:
-        syms = [normalize_symbol(x) for x in symbols] if symbols else self.tracked_symbols()
+                        symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
+        """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
+        if symbols:
+            syms = [normalize_symbol(x) for x in symbols]
+        elif portfolio and str(portfolio).lower() != ALL:
+            syms = sorted(s for s, p in self.portfolios.positions(portfolio).items() if p.is_open)
+        else:
+            syms = self.tracked_symbols()
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
         today = datetime.now(NY).date()
         held = set(self.held_positions())

@@ -321,8 +321,12 @@ export const api = {
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
-  events: (daysAhead = 14, daysBack = 7) =>
-    get<{ as_of: string; upcoming: CalEvent[]; recent: CalEvent[] }>(`/api/events?days_ahead=${daysAhead}&days_back=${daysBack}`),
+  events: (daysAhead = 14, daysBack = 7, scope: { portfolio?: string; symbol?: string } = {}) => {
+    const qs = new URLSearchParams({ days_ahead: String(daysAhead), days_back: String(daysBack) });
+    if (scope.portfolio) qs.set("portfolio", scope.portfolio);
+    if (scope.symbol) qs.set("symbol", scope.symbol);
+    return get<{ as_of: string; upcoming: CalEvent[]; recent: CalEvent[] }>(`/api/events?${qs}`);
+  },
   alerts: (includeInactive = false) =>
     get<{ alerts: AlertRule[]; fired: FiredAlert[]; kinds: Record<string, { label: string; unit: string }> }>(
       `/api/alerts${includeInactive ? "?include_inactive=true" : ""}`),

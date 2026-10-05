@@ -64,8 +64,9 @@ def test_extended_prices_are_cached_and_dropped_in_the_regular_session(a):
 def test_hub_routes_pre_market_prints_to_extended_fields(make_argus):
     hub = LiveHub(make_argus())
     hub.status = PRE
-    hub.quotes["AAA"] = Quote("AAA", 100, 98, 99, 101, 97, datetime.now(UTC), "yahoo")  # fallback: fetch-time stamp
     t = LAST_CLOSE + timedelta(hours=60)
+    # Fallback quote stamped with its fetch time, after the close (a fixed time, so the test can't age out).
+    hub.quotes["AAA"] = Quote("AAA", 100, 98, 99, 101, 97, t - timedelta(minutes=5), "yahoo")
     hub.apply_trade("AAA", 101.5, t)
     q = hub.quotes["AAA"]
     assert (q.price, q.high, q.ext_price, q.ext_session, q.ext_as_of) == (100, 101, 101.5, "pre", t)

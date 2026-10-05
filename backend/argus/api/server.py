@@ -249,8 +249,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.daily_brief, ref, dict(hub.quotes), news)
 
     @app.get("/api/events")
-    async def events(days_ahead: int = 14, days_back: int = 7):
-        return await run(argus.upcoming_events, days_ahead, days_back)
+    async def events(days_ahead: int = 14, days_back: int = 7, portfolio: str | None = None, symbol: str | None = None):
+        return await run(argus.upcoming_events, days_ahead, days_back, True, [symbol] if symbol else None, portfolio)
 
     @app.get("/api/alerts")
     async def alerts(include_inactive: bool = False):

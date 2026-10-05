@@ -108,7 +108,7 @@ export function Dashboard({ portfolio, live }: Props) {
         <HoldingsTable positions={summary.positions} />
       </section>
 
-      <EventsCard />
+      <EventsCard portfolio={portfolio} />
 
       <section className="grid-2">
         <div className="card">
