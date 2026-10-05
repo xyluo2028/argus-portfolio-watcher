@@ -7,7 +7,7 @@ surfaces as ProviderError and callers fall back or serve cache.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from argus.providers.base import Bar, ProviderError, Quote
 from argus.symbols import to_yahoo
@@ -120,6 +120,17 @@ class YahooProvider:
             bars.append(Bar(ts.to_pydatetime().astimezone(UTC), float(row["Open"]), float(row["High"]),
                             float(row["Low"]), float(row["Close"]), float(row.get("Volume") or 0)))
         return bars
+
+    def get_dividends(self, symbol: str, years: int = 3) -> list[tuple[str, float]]:
+        """Cash dividends per share by ex-date (ISO date), oldest first, for the last `years`."""
+        try:
+            s = _yf().Ticker(to_yahoo(symbol)).dividends
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"yahoo dividends {symbol}: {e}") from e
+        if s is None or s.empty:
+            return []
+        cutoff = datetime.now(UTC).date() - timedelta(days=366 * years)
+        return [(ts.date().isoformat(), float(v)) for ts, v in s.items() if ts.date() >= cutoff and v > 0]
 
     def get_info(self, symbol: str) -> dict:
         try:

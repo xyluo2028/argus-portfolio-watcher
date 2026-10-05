@@ -19,13 +19,15 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import AuditLog, CompanyProfile, FundProfile, Instrument, PeerList, SecurityMap, Target
+from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
+                          Target)
 from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
+from argus.services import dividends as dividends_mod
 from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
@@ -654,6 +656,52 @@ class Argus:
                     s.merge(FundProfile(symbol=sym, as_of=now, data=data))
             out |= fetched
         return {k: v for k, v in out.items() if v}
+
+    DIVIDEND_MAX_AGE = timedelta(hours=24)
+
+    def dividend_histories(self, symbols: list[str]) -> dict[str, list[tuple[str, float]]]:
+        """Ex-date dividend history per symbol (Yahoo), cached a day; a failed fetch keeps the old copy."""
+        now = datetime.now(UTC)
+        fresh: dict[str, list] = {}
+        stale: dict[str, list] = {}
+        with session_scope(self.engine) as s:
+            for row in s.scalars(select(DividendHistory).where(DividendHistory.symbol.in_(symbols))):
+                (fresh if now - row.as_of < self.DIVIDEND_MAX_AGE else stale)[row.symbol] = [tuple(x) for x in row.data]
+        yahoo = self.market.profile_provider
+        todo = [x for x in symbols if x not in fresh]
+        if yahoo is not None and todo:
+            def fetch(sym):
+                try:
+                    return yahoo.get_dividends(sym)
+                except ProviderError:
+                    return None
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                fetched = dict(zip(todo, pool.map(fetch, todo)))
+            with session_scope(self.engine) as s:
+                for sym, rows in fetched.items():
+                    if rows is not None:
+                        s.merge(DividendHistory(symbol=sym, as_of=now, data=[list(x) for x in rows]))
+                        fresh[sym] = rows
+        return {sym: fresh.get(sym) or stale.get(sym, []) for sym in symbols}
+
+    def dividends(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Forward dividend income and yield per holding, plus this year's dividends: estimated
+        received so far (shares held at each ex-date) and projected for the rest of the year."""
+        summ = self.portfolio(ref, True, False, live_quotes)
+        rows = summ["positions"]
+        p = self.portfolios.view(ref)
+        by_sym: dict[str, list] = {}
+        for t in self.portfolios.active_transactions(p.id if p.id is not None else ALL):
+            by_sym.setdefault(t.symbol, []).append(t)
+
+        def qty_at(sym: str, d: date) -> float:
+            cutoff = datetime.combine(d, datetime.min.time(), NY)
+            pos = build_positions([t for t in by_sym.get(sym, []) if t.ts < cutoff]).get(sym)
+            return pos.qty if pos else 0.0
+
+        histories = self.dividend_histories([r["symbol"] for r in rows])
+        return {"portfolio": summ["portfolio"]["name"],
+                **dividends_mod.analyze(rows, histories, qty_at, datetime.now(NY).date())}
 
     def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
         summ = self.portfolio(ref, True, False, live_quotes)

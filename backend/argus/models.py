@@ -291,6 +291,16 @@ class SecurityMap(Base):
     as_of: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class DividendHistory(Base):
+    """Cash dividends per share by ex-date (Yahoo), cached a day: [[YYYY-MM-DD, amount], ...]."""
+
+    __tablename__ = "dividend_history"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(default=utcnow)
+    data: Mapped[list] = mapped_column(JSON, default=list)
+
+
 class PeerList(Base):
     """Your own peer list for a symbol; without one, the suggested peers are shown."""
 
@@ -318,6 +328,7 @@ __all__ = [
     "AlertEvent",
     "AuditLog",
     "CompanyProfile",
+    "DividendHistory",
     "Event",
     "ExtQuote",
     "Note",

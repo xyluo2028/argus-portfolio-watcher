@@ -281,6 +281,20 @@ export interface FundHoldings {
   bond_ratings: Record<string, number>; notes: string[]; errors: Record<string, string>;
 }
 
+export interface DividendHolding {
+  symbol: string; name: string | null; qty: number; pays: boolean; frequency: string | null; rate: number;
+  trailing_12m: number; last_ex_date: string | null; last_amount: number | null; irregular: boolean;
+  next_ex_date_est: string | null; annual_income: number; yield_pct: number | null; yield_on_cost_pct: number | null;
+  received_ytd: number; projected_rest_of_year: number;
+}
+export interface Dividends {
+  portfolio: string; year: number; as_of: string;
+  totals: { annual_income: number; received: number; projected: number; year_total: number;
+            yield_pct: number | null; yield_on_cost_pct: number | null; payers: number; positions: number };
+  by_month: { month: number; received: number; projected: number }[];
+  holdings: DividendHolding[];
+}
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -338,6 +352,7 @@ export const api = {
     send<NoteItem>("POST", "/api/notes", body),
   updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
     send<NoteItem>("PATCH", `/api/notes/${id}`, body),
+  dividends: (name: string) => get<Dividends>(`/api/portfolios/${enc(name)}/dividends`),
   exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),
   drift: (name: string, level: string) => get<Drift>(`/api/portfolios/${enc(name)}/drift?level=${level}`),
   setTargets: (name: string, level: string, weights: Record<string, number>, dryRun: boolean) =>

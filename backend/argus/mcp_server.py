@@ -244,6 +244,16 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
 
     @mcp.tool(annotations=READ)
     @_tool
+    def get_dividends(portfolio: str) -> dict:
+        """Dividend income for a portfolio ("all" = every portfolio): per holding the frequency,
+        forward annual rate per share (latest payment x payments/year), yield, yield on cost and
+        expected annual income; and this calendar year's dividends by ex-date: estimated received so
+        far (shares held at each ex-date) plus projected for the rest of the year, also by month.
+        Before tax; payments usually follow the ex-date by 1-4 weeks."""
+        return argus.dividends(portfolio, quotes_now())
+
+    @mcp.tool(annotations=READ)
+    @_tool
     def get_exposure(portfolio: str) -> dict:
         """Where the money is: stock vs ETF split, sector weights direct and looked through ETFs,
         concentration (top-1/5/10 weight, HHI, effective number of positions), and single-stock
