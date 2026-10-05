@@ -129,10 +129,16 @@ def _ny(iso: str) -> str:
 def quotes(symbols: Annotated[list[str], typer.Argument(help="Tickers, e.g. NVDA MSFT")], as_json: JsonOpt = False):
     """Latest quotes (cached for 15s; settled closes are reused while the market is closed)."""
     def render(d):
-        t = Table("Symbol", "Price", "Chg", "Chg %", "As of (ET)", "Source")
+        ext = any(q.get("ext_price") is not None for q in d["quotes"])
+        t = Table("Symbol", "Price", "Chg", "Chg %", *(["Pre/After", "Ext %"] if ext else []), "As of (ET)", "Source")
         for q in d["quotes"]:
+            extra = []
+            if ext:
+                tag = {"pre": "pre", "post": "after"}.get(q.get("ext_session") or "", "")
+                extra = [f"{_money(q['ext_price'])} {tag}" if q.get("ext_price") is not None else "",
+                         _cell(q.get("ext_change_pct"), _pct(q.get("ext_change_pct"))) if q.get("ext_price") is not None else ""]
             t.add_row(q["symbol"], _money(q["price"]), _cell(q["change"], _money(q["change"], True)),
-                      _cell(q["change_pct"], _pct(q["change_pct"])), _ny(q["as_of"]), q["source"])
+                      _cell(q["change_pct"], _pct(q["change_pct"])), *extra, _ny(q["as_of"]), q["source"])
         console.print(t)
         for sym, err in d["errors"].items():
             console.print(f"[yellow]{sym}: {err}[/yellow]")

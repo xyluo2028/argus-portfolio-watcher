@@ -31,7 +31,15 @@ export interface Quote {
   delayed: boolean;
   change: number | null;
   change_pct: number | null;
+  // Pre-market / after-hours trading since the last regular close (`price` stays the regular one).
+  ext_price: number | null;
+  ext_as_of: string | null;
+  ext_session: ExtSession | null;
+  ext_change: number | null;
+  ext_change_pct: number | null;
 }
+
+export type ExtSession = "pre" | "post";
 
 export interface Lot {
   txn_id: number;
@@ -59,6 +67,11 @@ export interface Position {
   unrealized_pnl?: number;
   unrealized_pct?: number | null;
   day_pnl?: number;
+  ext_price?: number;
+  ext_change_pct?: number | null;
+  ext_session?: ExtSession;
+  ext_as_of?: string;
+  ext_pnl?: number;
   quote_as_of?: string;
   quote_source?: string;
   weight_pct: number | null;
@@ -80,6 +93,10 @@ export interface Summary {
     dividends: number;
     position_count: number;
     fully_priced: boolean;
+    ext_pnl: number | null;
+    ext_pnl_pct: number | null;
+    ext_session: ExtSession | null;
+    ext_coverage_pct: number | null;
   };
   positions: Position[];
   quote_errors?: Record<string, string>;

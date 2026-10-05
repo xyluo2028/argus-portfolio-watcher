@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, type StreamUpdate, type WatchItem } from "../api";
 import { TickerInput } from "../components/TickerInput";
-import { big, pct, price, ratio, tone } from "../format";
+import { big, extLabel, pct, price, ratio, tone } from "../format";
 
 const pctCell = (v: number | null | undefined) => (v == null ? "–" : `${v.toFixed(1)}%`);
 
@@ -75,7 +75,14 @@ export function Watchlist({ live }: { live: StreamUpdate | null }) {
                     <tr key={i.symbol} onClick={() => navigate(`/t/${i.symbol}`)}>
                       <td><span className="sym">{i.symbol}</span></td>
                       <td>{price(q?.price)}</td>
-                      <td className={tone(q?.change_pct)}>{pct(q?.change_pct)}</td>
+                      <td className={tone(q?.change_pct)}>
+                        {pct(q?.change_pct)}
+                        {q?.ext_price != null && (
+                          <span className="ext-line" title={`${extLabel(q.ext_session)} ${price(q.ext_price)}`}>
+                            {extLabel(q.ext_session, true)} <span className={tone(q.ext_change_pct)}>{pct(q.ext_change_pct)}</span>
+                          </span>
+                        )}
+                      </td>
                       <td>{big(m.market_cap)}</td>
                       <td>{ratio(m.pe_ttm, 1)}</td>
                       <td>{ratio(m.pe_forward, 1)}</td>

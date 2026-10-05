@@ -267,6 +267,18 @@ class CompanyProfile(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class ExtQuote(Base):
+    """Latest pre-market / after-hours trade per symbol (cache; the regular quote lives in `quote`)."""
+
+    __tablename__ = "ext_quote"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    session: Mapped[str] = mapped_column(String(4))  # pre | post
+    price: Mapped[float] = mapped_column(Float)
+    as_of: Mapped[datetime] = mapped_column()
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class SecurityMap(Base):
     """ISIN/CUSIP -> exchange ticker (OpenFIGI), for N-PORT holdings. symbol None = no usable listing."""
 
@@ -307,6 +319,7 @@ __all__ = [
     "AuditLog",
     "CompanyProfile",
     "Event",
+    "ExtQuote",
     "Note",
     "Base",
     "FundProfile",

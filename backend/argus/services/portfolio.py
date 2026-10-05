@@ -293,6 +293,7 @@ class PortfolioService:
 
         rows = []
         tot = {"market_value": 0.0, "cost_basis": 0.0, "day_pnl": 0.0, "realized_pnl": 0.0, "dividends": 0.0}
+        ext_pnl, ext_mv, ext_sessions = 0.0, 0.0, set()
         priced_all = True
         for sym, pos in sorted(state.items()):
             tot["realized_pnl"] += pos.realized_pnl
@@ -332,6 +333,12 @@ class PortfolioService:
                 }
                 tot["market_value"] += mv
                 tot["day_pnl"] += day
+                if q.ext_price is not None:
+                    row |= {"ext_price": q.ext_price, "ext_change_pct": q.ext_change_pct, "ext_session": q.ext_session,
+                            "ext_as_of": q.ext_as_of.isoformat(), "ext_pnl": pos.qty * q.ext_change}
+                    ext_pnl += row["ext_pnl"]
+                    ext_mv += mv
+                    ext_sessions.add(q.ext_session)
             else:
                 priced_all = False
             if include_lots:
@@ -349,6 +356,11 @@ class PortfolioService:
             "unrealized_pct": (mv / tot["cost_basis"] - 1) * 100 if priced_all and tot["cost_basis"] else None,
             "day_pnl_pct": tot["day_pnl"] / prev_mv * 100 if priced_all and prev_mv else None,
             "fully_priced": priced_all,
+            # Pre-market / after-hours move of the positions that traded then (vs the last close).
+            "ext_pnl": ext_pnl if ext_sessions else None,
+            "ext_pnl_pct": ext_pnl / mv * 100 if ext_sessions and mv else None,
+            "ext_session": ("pre" if "pre" in ext_sessions else "post") if ext_sessions else None,
+            "ext_coverage_pct": ext_mv / mv * 100 if ext_sessions and mv else None,
         }
         if not priced_all:
             totals["market_value"] = None

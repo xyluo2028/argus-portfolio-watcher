@@ -6,7 +6,7 @@ the order of adapters per data type and falls back when one fails.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -26,6 +26,10 @@ class Quote:
     as_of: datetime
     source: str
     delayed: bool = False
+    # Pre-market or after-hours trading since the last regular close; `price` stays the regular one.
+    ext_price: float | None = None
+    ext_as_of: datetime | None = None
+    ext_session: str | None = None  # "pre" | "post"
 
     @property
     def change(self) -> float | None:
@@ -37,11 +41,26 @@ class Quote:
             return None
         return (self.price / self.prev_close - 1) * 100
 
+    @property
+    def ext_change(self) -> float | None:
+        """Extended-hours move from the regular price (the last close)."""
+        return None if self.ext_price is None else self.ext_price - self.price
+
+    @property
+    def ext_change_pct(self) -> float | None:
+        return None if self.ext_price is None or not self.price else (self.ext_price / self.price - 1) * 100
+
+    def without_ext(self) -> Quote:
+        return replace(self, ext_price=None, ext_as_of=None, ext_session=None)
+
     def to_dict(self) -> dict:
         from argus.market_calendar import session_date  # base types stay import-light
 
         d = asdict(self)
         d["as_of"] = self.as_of.isoformat()
+        d["ext_as_of"] = self.ext_as_of.isoformat() if self.ext_as_of else None
+        d["ext_change"] = self.ext_change
+        d["ext_change_pct"] = self.ext_change_pct
         # Trading day the price belongs to; fetch-time stamps (Yahoo) on a weekend map to Friday.
         d["session_date"] = session_date(self.as_of).isoformat()
         d["change"] = self.change

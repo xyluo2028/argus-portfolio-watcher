@@ -18,7 +18,7 @@ import { PeersCard } from "../components/PeersCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
-import { big, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
+import { big, extLabel, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -132,6 +132,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               {quote?.change == null ? "–" : `${quote.change > 0 ? "+" : quote.change < 0 ? "−" : ""}${Math.abs(quote.change).toFixed(2)}`} ({pct(quote?.change_pct)})
               <span className="muted small"> {quote ? `· ${quoteTime(quote, live?.market.session ?? "closed")} · ${quote.source}` : ""}</span>
             </div>
+            {quote?.ext_price != null && (
+              <div className="ext-hero">
+                <span className="muted">{extLabel(quote.ext_session)}</span>{" "}
+                <span className="num">{price(quote.ext_price)}</span>{" "}
+                <span className={tone(quote.ext_change)}>
+                  {`${quote.ext_change! > 0 ? "+" : quote.ext_change! < 0 ? "−" : ""}${Math.abs(quote.ext_change!).toFixed(2)}`} ({pct(quote.ext_change_pct)})
+                </span>
+                <span className="muted small"> · {nyTime(quote.ext_as_of!)}</span>
+              </div>
+            )}
           </div>
           {high52 != null && low52 != null && quote && (
             <div className="small text-2" style={{ minWidth: 220 }}>

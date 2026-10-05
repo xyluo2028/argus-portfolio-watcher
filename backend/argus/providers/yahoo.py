@@ -80,6 +80,32 @@ class YahooProvider:
                 continue
         return out
 
+    def get_extended(self, symbols: list[str]) -> dict[str, tuple[str, float, datetime]]:
+        """Latest pre-market or after-hours trade per symbol: {symbol: (session, price, time)}.
+        One batch request per 100 symbols (Yahoo's quote endpoint)."""
+        from yfinance.data import YfData
+
+        out: dict[str, tuple[str, float, datetime]] = {}
+        names = {to_yahoo(s): s for s in symbols}
+        ys = list(names)
+        for i in range(0, len(ys), 100):
+            try:
+                r = YfData().get("https://query1.finance.yahoo.com/v7/finance/quote",
+                                 params={"symbols": ",".join(ys[i:i + 100]),
+                                         "fields": "preMarketPrice,preMarketTime,postMarketPrice,postMarketTime"})
+                rows = r.json()["quoteResponse"]["result"]
+            except Exception as e:  # noqa: BLE001
+                raise ProviderError(f"yahoo extended quotes: {e}") from e
+            for q in rows:
+                sym = names.get(q.get("symbol"))
+                seen = [(t, session, _px(q.get(f"{session}MarketPrice")))
+                        for session in ("pre", "post") if (t := q.get(f"{session}MarketTime"))]
+                seen = [x for x in seen if x[2]]
+                if sym and seen:
+                    t, session, price = max(seen)
+                    out[sym] = (session, price, datetime.fromtimestamp(t, UTC))
+        return out
+
     def get_history(self, symbol: str, start: datetime, end: datetime | None, interval: str = "1d") -> list[Bar]:
         yf = _yf()
         try:

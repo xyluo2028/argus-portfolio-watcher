@@ -9,6 +9,8 @@ Freshness rules:
 
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import Engine, select
@@ -18,7 +20,7 @@ from argus.config import Settings
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
-from argus.models import Fundamental, Instrument, PriceBar, QuoteCache
+from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache
 from argus.providers.base import Bar, ProviderError, Quote
 
 METRIC_FIELDS = (
@@ -32,7 +34,12 @@ METRIC_FIELDS = (
 # (VIST in MXN, CNQ in CAD) while Yahoo reports the US listing in USD, so these prefer Yahoo.
 # Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
 PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm"}
+# Pre/post-market prices are re-fetched this often during those sessions, and while closed
+# (overnight, weekends) only to catch the last after-hours prints.
+EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 FUNDAMENTALS_VERSION = 3  # bump to invalidate cached rows when merge rules change
+
+log = logging.getLogger("argus.market")
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
@@ -86,7 +93,57 @@ class MarketService:
             errors.setdefault(sym, "unknown symbol or no provider returned a quote")
         for sym in quotes:
             errors.pop(sym, None)
-        return quotes, errors
+        return self.attach_extended(quotes, status), errors
+
+    def attach_extended(self, quotes: dict[str, Quote], status: dict | None = None) -> dict[str, Quote]:
+        """Add pre-market / after-hours prices traded since the last regular close (none during the
+        regular session). Cached; refreshed from Yahoo in one batch when stale. Best effort."""
+        status = status or market_status()
+        if status["session"] == "regular" or not quotes:
+            return {s: q.without_ext() if q.ext_price is not None else q for s, q in quotes.items()}
+        now = datetime.now(UTC)
+        since = datetime.fromisoformat(status["last_close"])
+        max_age = timedelta(seconds=EXT_MAX_AGE[status["session"]])
+        with session_scope(self.engine) as s:
+            rows = {r.symbol: (r.session, r.price, r.as_of, r.fetched_at)
+                    for r in s.scalars(select(ExtQuote).where(ExtQuote.symbol.in_(list(quotes))))}
+        stale = [sym for sym in quotes if sym not in rows or now - rows[sym][3] > max_age]
+        fetch = getattr(self.profile_provider, "get_extended", None)
+        if stale and fetch:
+            try:
+                got = fetch(stale)
+            except ProviderError as e:  # keep serving what's cached
+                log.warning("extended-hours quotes: %s", e)
+            else:
+                self.store_extended({sym: got.get(sym) for sym in stale}, now)
+                for sym in stale:
+                    if sym in got:
+                        rows[sym] = (*got[sym], now)
+        out = {}
+        for sym, q in quotes.items():
+            ext = rows.get(sym)
+            if ext and ext[2] > since and (q.ext_as_of is None or ext[2] > q.ext_as_of):
+                q = replace(q, ext_session=ext[0], ext_price=ext[1], ext_as_of=ext[2])
+            elif q.ext_as_of is not None and q.ext_as_of <= since:
+                q = q.without_ext()
+            out[sym] = q
+        return out
+
+    def store_extended(self, ext: dict[str, tuple[str, float, datetime] | Quote | None], now: datetime | None = None) -> None:
+        """Cache extended-hours prices; None records that a symbol had none (so it isn't re-asked)."""
+        now = now or datetime.now(UTC)
+        rows = []
+        for sym, e in ext.items():
+            if isinstance(e, Quote):
+                e = (e.ext_session, e.ext_price, e.ext_as_of) if e.ext_price is not None else None
+            # "none" rows keep the fetch time but an as_of that never counts as recent.
+            rows.append(dict(symbol=sym, session=e[0] if e else "none", price=e[1] if e else 0.0,
+                             as_of=e[2] if e else datetime(1970, 1, 1, tzinfo=UTC), fetched_at=now))
+        if rows:
+            with session_scope(self.engine) as s:
+                stmt = insert(ExtQuote).values(rows)
+                s.execute(stmt.on_conflict_do_update(index_elements=["symbol"], set_={
+                    c: stmt.excluded[c] for c in rows[0] if c != "symbol"}))
 
     def cached_quotes(self, symbols: list[str], max_age_s: int) -> dict[str, Quote]:
         """Quotes already in the cache and younger than `max_age_s`; never calls a provider."""
