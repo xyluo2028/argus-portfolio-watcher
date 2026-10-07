@@ -166,9 +166,13 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when the server wants a token (ARGUS_TOKEN set and the cookie missing or stale). */
+export const UNAUTHORIZED_EVENT = "argus:unauthorized";
+
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, init);
   const body = await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.startsWith("/api/auth/")) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!r.ok) {
     const e = body?.error ?? {};
     throw new ApiError(e.code ?? `HTTP_${r.status}`, e.message ?? r.statusText, e.hint);
@@ -325,6 +329,9 @@ export const api = {
   },
   importInvesting: (body: { filename: string; content: string; portfolio?: string; opening_through?: string; dry_run: boolean }) =>
     send<ImportReport>("POST", "/api/import/investing", body),
+  authStatus: () => get<{ required: boolean; authenticated: boolean }>("/api/auth/status"),
+  login: (token: string) => send<{ ok: boolean }>("POST", "/api/auth/login", { token }),
+  logout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
   snapshotUrl: "/api/snapshot",
   restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>
     send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),

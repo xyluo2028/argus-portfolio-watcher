@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
-import { ALL, api, type PortfolioRef } from "./api";
+import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Alerts } from "./pages/Alerts";
@@ -15,7 +15,54 @@ import { useLive } from "./useLive";
 
 const KEY = "argus.portfolio";
 
+/** Asks for the server's token first when it has one (ARGUS_TOKEN); otherwise goes straight in. */
 export function App() {
+  const [auth, setAuth] = useState<"checking" | "needed" | "ok">("checking");
+  useEffect(() => {
+    api.authStatus().then((s) => setAuth(s.authenticated ? "ok" : "needed"), () => setAuth("ok"));
+    const onUnauthorized = () => setAuth("needed");
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+  if (auth === "checking") return null;
+  if (auth === "needed") return <SignIn onDone={() => window.location.reload()} />;
+  return <Main />;
+}
+
+function SignIn({ onDone }: { onDone: () => void }) {
+  const [token, setToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.login(token);
+      onDone();
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <main style={{ maxWidth: 420, margin: "12vh auto 0", padding: "0 16px" }}>
+      <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
+        <div className="brand"><span className="brand-dot" aria-hidden />Argus</div>
+        <label className="field">Access token
+          <input className="input" type="password" autoComplete="current-password" autoFocus value={token}
+                 onChange={(e) => setToken(e.target.value)} />
+        </label>
+        <p className="small muted" style={{ margin: 0 }}>The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>. You stay signed in on this browser for 90 days.</p>
+        {error && <div className="error">{error}</div>}
+        <button className="btn primary" disabled={busy || !token.trim()}>{busy ? "Signing in…" : "Sign in"}</button>
+      </form>
+    </main>
+  );
+}
+
+function Main() {
   const [portfolios, setPortfolios] = useState<PortfolioRef[] | null>(null);
   const [current, setCurrent] = useState<string>(() => {
     try {

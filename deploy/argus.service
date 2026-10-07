@@ -1,0 +1,20 @@
+# systemd user unit: ~/.config/systemd/user/argus.service (see docs/deployment.md).
+# Assumes the checkout at ~/argus and uv at ~/.local/bin/uv; adjust both paths if not.
+[Unit]
+Description=Argus portfolio watcher (web UI, API, MCP, live prices)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/argus
+# --no-sync: start offline from the installed environment; run `uv sync` after `git pull`.
+ExecStart=%h/.local/bin/uv run --frozen --no-sync argus serve
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

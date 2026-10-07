@@ -64,3 +64,21 @@ def test_snapshot_rejects_other_files(make_argus, tmp_path):
     bad.write_text('{"hello": 1}')
     with pytest.raises(ArgusError):
         make_argus().snapshots.load(bad)
+
+
+def test_backup_writes_db_and_snapshot_and_rotates(make_argus, tmp_path):
+    import sqlite3
+
+    from argus.services.backup import backup
+
+    a = make_argus()
+    _seed(a)
+    dest = tmp_path / "backups"
+    for stamp in ("20260101-000000", "20260102-000000", "20260103-000000"):  # older sets
+        (dest / stamp).mkdir(parents=True)
+    (dest / "notes").mkdir()  # not a backup set: left alone
+    r = backup(a.settings.db_path, a.snapshots, dest, keep=2)
+    assert r["counts"]["txn"] == 2 and r["removed"] == ["20260101-000000", "20260102-000000"]
+    assert sorted(p.name for p in dest.iterdir())[-1] == "notes" and len(list(dest.iterdir())) == 3
+    with sqlite3.connect(f"{r['dir']}/argus.sqlite") as c:
+        assert c.execute("SELECT count(*) FROM txn").fetchone()[0] == 2

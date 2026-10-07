@@ -1,6 +1,5 @@
 # secrets
 .env
-.env.example
 # local data
 data/
 # python

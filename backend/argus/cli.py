@@ -88,7 +88,7 @@ def _cell(v, text: str) -> str:
 
 @app.command()
 def serve(port: Annotated[int | None, typer.Option(help="Default: ARGUS_PORT or 8787")] = None,
-          host: str = "127.0.0.1"):
+          host: Annotated[str | None, typer.Option(help="Default: ARGUS_HOST or 127.0.0.1")] = None):
     """Run the web UI, JSON API and live price stream (http://localhost:8787)."""
     from argus.api.server import serve as run_server
     from argus.config import load_settings
@@ -518,6 +518,26 @@ def snapshot_load(file: Path,
         if d.get("backup"):
             console.print(f"Previous records saved to {d['backup']}")
         console.print("[cyan]Dry run: nothing written.[/cyan]" if d["dry_run"] else "[green]Loaded.[/green]")
+    _run(as_json, go, render)
+
+
+@app.command("backup")
+def backup_cmd(dest: Annotated[Path | None, typer.Option(help="Default: <data dir>/backups")] = None,
+               keep: Annotated[int | None, typer.Option(help="Backup sets to keep; default ARGUS_BACKUP_KEEP or 14")] = None,
+               as_json: JsonOpt = False):
+    """Back up the database (consistent online copy) and a JSON snapshot; prune old sets."""
+    from argus.services.backup import backup
+
+    def go():
+        a = _argus()
+        return backup(a.settings.db_path, a.snapshots, dest or a.settings.data_dir / "backups",
+                      a.settings.backup_keep if keep is None else keep)
+
+    def render(d):
+        console.print(f"[green]Backed up to {d['dir']}[/green] ({d['db_bytes'] / 1e6:.1f} MB database; "
+                      f"{_counts_line(d['counts'])})")
+        if d["removed"]:
+            console.print(f"Removed {len(d['removed'])} old set(s); keeping {d['kept']}.")
     _run(as_json, go, render)
 
 

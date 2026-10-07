@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn>=0.30",
     "websockets>=13",
     "mcp>=1.10",
+    "alembic>=1.13",
 ]
 
 [project.scripts]

@@ -33,10 +33,12 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 ## Setup
 
 ```bash
-brew install uv
+brew install uv                                     # Linux/WSL: curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
-cp .env.example .env   # add FINNHUB_API_KEY and SEC_USER_AGENT
+cp .env.example .env && chmod 600 .env              # add FINNHUB_API_KEY and SEC_USER_AGENT
 ```
+
+Building the web UI needs Node 20.19+ (`nvm install 22` on Linux).
 
 Without `FINNHUB_API_KEY`, quotes and metrics fall back to Yahoo (slower, unofficial).
 `SEC_USER_AGENT` (an app name and your email, as SEC asks of automated clients) is needed for
@@ -116,6 +118,13 @@ uv run argus snapshot load backup.json --replace # wipe existing records first (
 
 A snapshot holds your records: portfolios, transactions (including deleted ones), watchlists,
 notes, alerts, targets and the audit log. Market data caches are not included; they refill on use.
+
+## Running it always-on
+
+To run Argus on a server, a home box or your PC and reach it from other devices (Tailscale,
+Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: access token
+(`ARGUS_TOKEN`) and allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
+nightly `argus backup`, schema migrations, and moving your data.
 
 ## Development
 

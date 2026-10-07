@@ -6,6 +6,7 @@ Errors are returned as {"error": {"code", "message", "hint"}} with a matching HT
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
+from argus.api.auth import COOKIE, COOKIE_MAX_AGE, TokenAuthMiddleware, request_token, token_ok
 from argus.app import Argus
 from argus.config import REPO_ROOT
 from argus.errors import ArgusError
@@ -31,7 +33,7 @@ UI_DIST = REPO_ROOT / "frontend" / "dist"
 STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
 
-_STATUS = {"NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
+_STATUS = {"UNAUTHORIZED": 401, "NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
 
 
 class PeersBody(BaseModel):
@@ -104,6 +106,10 @@ class SimBody(BaseModel):
     trades: list[dict]
 
 
+class LoginBody(BaseModel):
+    token: str
+
+
 class PortfolioBody(BaseModel):
     name: str
     benchmark: str = "SPY"
@@ -126,9 +132,12 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                 await hub.stop()
 
     app = FastAPI(title="Argus", lifespan=lifespan)
-    # Only answer requests addressed to this machine: blocks DNS-rebinding pages in the browser
-    # from reading or changing the portfolio through a hostile hostname that resolves to 127.0.0.1.
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
+    settings = argus.settings
+    app.add_middleware(TokenAuthMiddleware, token=settings.token)
+    # Only answer requests addressed to this machine (or a configured tunnel name): blocks DNS-rebinding
+    # pages in the browser from reaching the portfolio through a hostile name that resolves to 127.0.0.1.
+    # Added last, so it runs first.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", *settings.allowed_hosts])
     app.state.argus = argus
     app.state.hub = hub
 
@@ -355,16 +364,44 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def health():
         return {"ok": True, "stream": hub.ws_state, "session": hub.status["session"]}
 
+    # -- auth (only matters when ARGUS_TOKEN is set) ------------------------------
+    @app.get("/api/auth/status")
+    async def auth_status(request: Request):
+        required = bool(settings.token)
+        return {"required": required,
+                "authenticated": not required or token_ok(settings.token, request_token(dict(request.headers)))}
+
+    @app.post("/api/auth/login")
+    async def login(body: LoginBody, request: Request):
+        if not settings.token:
+            return {"ok": True, "required": False}
+        if not token_ok(settings.token, body.token.strip()):
+            await asyncio.sleep(1)  # slow down guessing (the token itself should be long and random)
+            raise ArgusError("UNAUTHORIZED", "Wrong token.")
+        resp = JSONResponse({"ok": True, "required": True})
+        resp.set_cookie(COOKIE, settings.token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+        return resp
+
+    @app.post("/api/auth/logout")
+    async def logout():
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(COOKIE, path="/")
+        return resp
+
     app.mount("/mcp", mcp_app)
 
     # -- web UI ----------------------------------------------------------------------
     if UI_DIST.exists():
         app.mount("/assets", StaticFiles(directory=UI_DIST / "assets"), name="assets")
 
+        root = UI_DIST.resolve()
+
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str):
-            f = UI_DIST / path
-            if path and f.is_file():
+            f = (root / path).resolve()
+            # Only files inside dist/ (an encoded "../" must not reach .env or data/).
+            if path and f.is_relative_to(root) and f.is_file():
                 return FileResponse(f)
             # index.html names the hashed bundles, so it must never be served stale after a rebuild.
             return FileResponse(UI_DIST / "index.html", headers={"Cache-Control": "no-cache"})
@@ -377,14 +414,57 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     return app
 
 
-def serve(port: int, host: str = "127.0.0.1") -> None:
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _lock_data_dir(data_dir: Path):
+    """One server per data directory: a second `argus serve` on the same data fails clearly.
+    The returned file must stay open for the life of the process."""
+    try:
+        import fcntl
+    except ImportError:  # Windows: no flock; skip the guard
+        return None
+    data_dir.mkdir(parents=True, exist_ok=True)
+    f = open(data_dir / "argus.lock", "w")  # noqa: SIM115 - held until exit
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as e:
+        f.close()
+        raise ArgusError("ALREADY_RUNNING", f"Another argus server is using {data_dir}.",
+                         hint="Stop it first (one server per data directory).") from e
+    f.write(str(os.getpid()))
+    f.flush()
+    return f
+
+
+def serve(port: int, host: str | None = None) -> None:
+    import logging
     import socket
 
     import uvicorn
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    from argus.config import load_settings
+
+    settings = load_settings()
+    host = host or settings.host
+    if host not in LOOPBACK and not settings.token and not settings.insecure_bind:
+        raise ArgusError("INSECURE", f"Refusing to listen on {host} without ARGUS_TOKEN.",
+                         hint="Set ARGUS_TOKEN (openssl rand -hex 32), or keep the default 127.0.0.1 and use a tunnel.")
+    if settings.allowed_hosts and not settings.token:
+        logging.getLogger("argus").warning(
+            "ARGUS_ALLOWED_HOSTS is set but ARGUS_TOKEN isn't: anyone who can reach %s gets full access.",
+            ", ".join(settings.allowed_hosts))
+    lock = _lock_data_dir(settings.data_dir)
+    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
         if s.connect_ex((host, port)) == 0:
             raise ArgusError("PORT_IN_USE", f"Port {port} is already in use.",
                              hint="Pass --port, or set ARGUS_PORT in .env.")
-    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+    try:
+        # One worker on purpose: the live hub lives in memory and SQLite has one writer.
+        # Proxy headers (from a local tunnel) give the real scheme, so the auth cookie is Secure on https.
+        uvicorn.run(create_app(), host=host, port=port, log_level="info", proxy_headers=True,
+                    forwarded_allow_ips="127.0.0.1")
+    finally:
+        if lock:
+            lock.close()
 
