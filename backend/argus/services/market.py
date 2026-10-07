@@ -28,16 +28,21 @@ METRIC_FIELDS = (
     "revenue_ttm", "revenue_growth_yoy_pct", "gross_margin_pct", "operating_margin_pct", "net_margin_pct",
     "roe_pct", "fcf_ttm", "debt_to_equity", "dividend_yield_pct", "beta", "high_52w", "low_52w",
     "expense_ratio_pct", "net_assets", "ytd_return_pct", "return_3y_pct", "return_5y_pct",
+    "revenue_growth_q_yoy_pct", "revenue_growth_3y_pct", "revenue_growth_5y_pct", "eps_growth_yoy_pct",
+    "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct", "roa_pct", "roi_pct",
+    "payout_ratio_pct", "dividend_growth_5y_pct", "return_1w_pct", "return_3m_pct", "return_6m_pct",
+    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
 # (VIST in MXN, CNQ in CAD) while Yahoo reports the US listing in USD, so these prefer Yahoo.
 # Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
-PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm"}
+PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm",
+                         "sma50", "sma200"}
 # Pre/post-market prices are re-fetched this often during those sessions, and while closed
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
-FUNDAMENTALS_VERSION = 3  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 4  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 

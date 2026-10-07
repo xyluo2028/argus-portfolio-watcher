@@ -197,3 +197,36 @@ class FakeQuotesAll:
 
     def get_quotes(self, symbols):
         return {s: Quote(s, 10.0, 10.0, None, None, None, datetime.now(UTC), "fake") for s in symbols}
+
+
+def test_earnings_overview_uses_calendar_then_eps_history(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event, Instrument
+
+    class FH:
+        calls = 0
+
+        def earnings_surprises(self, symbol):
+            FH.calls += 1
+            return [{"period": "2026-06-30", "actual": 2.0, "estimate": 1.9, "surprisePercent": 5.3, "quarter": 2,
+                     "year": 2027}, {"period": "2026-03-31", "actual": 1.5, "estimate": 1.6, "surprisePercent": -6.2}]
+
+    a = make_argus()
+    a.events.finnhub = FH()
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", s, at(2026, 9, 1), 1, 10) for s in ("MU", "NVDA", "BND")])
+    today = datetime.now(NY).date()
+    with session_scope(a.engine) as s:
+        s.merge(Instrument(symbol="BND", type="ETP"))
+        s.add(Event(symbol="MU", kind="earnings", d=today - timedelta(days=7), data={"epsActual": 33.4, "epsEstimate": 32.6}, source="t"))
+        s.add(Event(symbol="NVDA", kind="earnings", d=today + timedelta(days=40), hour="amc", data={"epsEstimate": 2.5}, source="t"))
+    a.events.refresh = lambda syms, **kw: {"refreshed": [], "failed": {}}
+
+    rows = {r["symbol"]: r for r in a.earnings_overview("growth")["rows"]}
+    assert rows["MU"]["last"]["epsActual"] == 33.4 and rows["MU"]["next"] is None
+    assert rows["NVDA"]["last"]["period"] == "2026-06-30" and rows["NVDA"]["last"]["epsSurprisePct"] == 5.3  # newest
+    assert rows["NVDA"]["next"]["hour"] == "amc"
+    assert rows["BND"]["last"] is None  # funds don't report earnings: no lookup
+    a.earnings_overview("growth")
+    assert FH.calls == 1  # NVDA only, then cached

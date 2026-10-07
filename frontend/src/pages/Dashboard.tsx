@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
-import { HoldingsTable } from "../components/HoldingsTable";
+import { HoldingsTabs } from "../components/HoldingsTabs";
 import { PerformanceCard } from "../components/PerformanceCard";
 import { extLabel, money, pct, tone } from "../format";
 
@@ -103,10 +103,7 @@ export function Dashboard({ portfolio, live }: Props) {
       {/* Refetch once per session day (and when the session changes), not on every tick. */}
       <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />
 
-      <section className="card">
-        <h2>Holdings</h2>
-        <HoldingsTable positions={summary.positions} />
-      </section>
+      <HoldingsTabs portfolio={portfolio} positions={summary.positions} />
 
       <EventsCard portfolio={portfolio} />
 

@@ -295,6 +295,14 @@ export interface Dividends {
   holdings: DividendHolding[];
 }
 
+export interface EarningsRow {
+  symbol: string;
+  last: { date: string | null; period?: string; quarter?: number; year?: number; epsActual?: number | null;
+          epsEstimate?: number | null; epsSurprisePct?: number | null; revenueActual?: number | null } | null;
+  next: { date: string; hour?: string | null; epsEstimate?: number | null; revenueEstimate?: number | null;
+          quarter?: number; year?: number } | null;
+}
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -352,6 +360,7 @@ export const api = {
     send<NoteItem>("POST", "/api/notes", body),
   updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
     send<NoteItem>("PATCH", `/api/notes/${id}`, body),
+  earnings: (name: string) => get<{ portfolio: string; as_of: string; rows: EarningsRow[] }>(`/api/portfolios/${enc(name)}/earnings`),
   dividends: (name: string) => get<Dividends>(`/api/portfolios/${enc(name)}/dividends`),
   exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),
   drift: (name: string, level: string) => get<Drift>(`/api/portfolios/${enc(name)}/drift?level=${level}`),

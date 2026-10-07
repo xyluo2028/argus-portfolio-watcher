@@ -34,6 +34,27 @@ _METRIC_MAP: dict[str, tuple[str, ...]] = {
     "debt_to_equity": ("totalDebt/totalEquityQuarterly", "totalDebt/totalEquityAnnual"),
     "high_52w": ("52WeekHigh",),
     "low_52w": ("52WeekLow",),
+    # growth (YoY and multi-year CAGR, percent)
+    "revenue_growth_q_yoy_pct": ("revenueGrowthQuarterlyYoy",),
+    "revenue_growth_3y_pct": ("revenueGrowth3Y",),
+    "revenue_growth_5y_pct": ("revenueGrowth5Y",),
+    "eps_growth_yoy_pct": ("epsGrowthTTMYoy",),
+    "eps_growth_q_yoy_pct": ("epsGrowthQuarterlyYoy",),
+    "eps_growth_3y_pct": ("epsGrowth3Y",),
+    "eps_growth_5y_pct": ("epsGrowth5Y",),
+    # profitability
+    "roa_pct": ("roaTTM",),
+    "roi_pct": ("roiTTM",),
+    # dividends
+    "payout_ratio_pct": ("payoutRatioTTM", "payoutRatioAnnual"),
+    "dividend_growth_5y_pct": ("dividendGrowthRate5Y",),
+    # momentum: price returns to the last daily close, percent
+    "return_1w_pct": ("5DayPriceReturnDaily",),
+    "return_3m_pct": ("13WeekPriceReturnDaily",),
+    "return_6m_pct": ("26WeekPriceReturnDaily",),
+    "return_ytd_price_pct": ("yearToDatePriceReturnDaily",),
+    "return_1y_pct": ("52WeekPriceReturnDaily",),
+    "rel_sp500_1y_pct": ("priceRelativeToS&P50052Week",),
 }
 
 

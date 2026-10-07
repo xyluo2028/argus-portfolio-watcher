@@ -703,6 +703,30 @@ class Argus:
         return {"portfolio": summ["portfolio"]["name"],
                 **dividends_mod.analyze(rows, histories, qty_at, datetime.now(NY).date())}
 
+    def earnings_overview(self, ref: str) -> dict:
+        """Per holding: the last reported quarter (EPS/revenue vs estimate) and the next report date."""
+        p = self.portfolios.view(ref)
+        state = self.portfolios.positions(p.id if p.id is not None else ALL)
+        syms = sorted(s for s, pos in state.items() if pos.is_open)
+        failed = self.events.refresh(syms)["failed"]
+        today = datetime.now(NY).date()
+        rows = self.events.between(syms, today - timedelta(days=120), today + timedelta(days=120), ["earnings"])
+        out: dict[str, dict] = {s: {"symbol": s, "last": None, "next": None} for s in syms}
+        for e in rows:  # ordered by date
+            o = out[e["symbol"]]
+            if e["date"] <= today.isoformat() and e.get("epsActual") is not None:
+                o["last"] = e
+            elif e["date"] >= today.isoformat() and o["next"] is None:
+                o["next"] = e
+        # The free calendar only reaches a few weeks back; fill older last reports from EPS history.
+        with session_scope(self.engine) as s:
+            funds = {i.symbol for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(syms)))
+                     if i.type == "ETP" or i.sector == "ETF"}
+        missing = [x for x in syms if out[x]["last"] is None and x not in funds]
+        for sym, r in self.events.latest_results(missing).items():
+            out[sym]["last"] = {"symbol": sym, "kind": "earnings", "date": None, **r, "source": "finnhub"}
+        return {"portfolio": p.name, "as_of": today.isoformat(), "rows": list(out.values()), "refresh_failed": failed}
+
     def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
         summ = self.portfolio(ref, True, False, live_quotes)
         rows = summ["positions"]

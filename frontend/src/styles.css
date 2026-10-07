@@ -158,6 +158,12 @@ select, .btn {
 .clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 tr.self td { background: var(--accent-wash); }
 
+/* holdings view tabs */
+.seg.tabs { max-width: 100%; overflow-x: auto; }
+.seg.tabs button { padding: 5px 12px; white-space: nowrap; }
+.metric-table .name { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: bottom; }
+
 /* trade & edit forms */
 .trade { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--page); }

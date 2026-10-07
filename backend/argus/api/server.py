@@ -282,6 +282,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.notes.update, note_id, body.text, review, body.clear_review, body.archived, "ui")
 
     # -- analysis -------------------------------------------------------------------
+    @app.get("/api/portfolios/{ref}/earnings")
+    async def get_earnings(ref: str):
+        return await run(argus.earnings_overview, ref)
+
     @app.get("/api/portfolios/{ref}/dividends")
     async def get_dividends(ref: str):
         return await run(argus.dividends, ref, dict(hub.quotes))

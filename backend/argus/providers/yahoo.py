@@ -210,6 +210,9 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "market_cap": _num(i.get("marketCap")),
         "high_52w": _num(i.get("fiftyTwoWeekHigh")),
         "low_52w": _num(i.get("fiftyTwoWeekLow")),
+        "sma50": _num(i.get("fiftyDayAverage")),
+        "sma200": _num(i.get("twoHundredDayAverage")),
+        "payout_ratio_pct": _pct(i.get("payoutRatio")),
         "expense_ratio_pct": _num(i.get("netExpenseRatio")),
         # Funds: assets under management; Yahoo gives ytdReturn in percent, multi-year averages as fractions.
         "net_assets": _num(i.get("totalAssets")),
