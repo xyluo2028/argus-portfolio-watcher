@@ -66,6 +66,7 @@ class PortfolioService:
         """`on_new_symbols` gets the symbols of each saved batch, to fill missing type/sector (best effort)."""
         self.engine = engine
         self.on_new_symbols = on_new_symbols
+        self.revision = 0  # bumped on every transaction write; lets callers cache derived results
 
     def _describe(self, symbols: list[str]) -> None:
         if self.on_new_symbols and symbols:
@@ -189,6 +190,7 @@ class PortfolioService:
             for t in rows:
                 s.add(AuditLog(actor=source, action="create", entity="txn", entity_id=str(t.id), after=txn_to_dict(t)))
             result["inserted_ids"] = [t.id for t in rows]
+            self.revision += 1
             return result
 
     def delete_transaction(self, txn_id: int, source: str = "cli", dry_run: bool = False) -> dict:
@@ -201,6 +203,7 @@ class PortfolioService:
             out = {"deleted": txn_to_dict(t), "dry_run": dry_run}
             if not dry_run:
                 t.deleted = True
+                self.revision += 1
                 s.add(AuditLog(actor=source, action="delete", entity="txn", entity_id=str(t.id),
                                before=txn_to_dict(t) | {"deleted": False}))
             return out
@@ -236,6 +239,7 @@ class PortfolioService:
             s.add(new)
             s.flush()
             out["after"] = txn_to_dict(new)
+            self.revision += 1
             s.add(AuditLog(actor=source, action="edit", entity="txn", entity_id=str(new.id),
                            before=out["before"], after=out["after"]))
             return out

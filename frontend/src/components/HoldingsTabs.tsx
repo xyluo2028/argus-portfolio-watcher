@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type DividendHolding, type EarningsRow, type Position } from "../api";
 import { big, money, pct, price, ratio, tone } from "../format";
@@ -7,7 +7,8 @@ import { HoldingsTable } from "./HoldingsTable";
 const TABS = ["Holdings", "Financials", "Growth", "Dividends", "Earnings", "Profitability", "Momentum"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_KEY = "argus.holdingsTab";
-const CONCURRENCY = 6;
+const POLL_MS = 3000;
+const MAX_POLLS = 60; // ~3 minutes: enough for a cold cache under Finnhub's 60 calls/minute
 
 type Metrics = Record<string, number | null>;
 type Row = { p: Position; m?: Metrics; div?: DividendHolding; earn?: EarningsRow };
@@ -109,31 +110,25 @@ const NOTES: Partial<Record<Tab, string>> = {
   Momentum: "Returns to the last daily close; distance from the high and the 50/200-day averages use the live price.",
 };
 
-/** Fetches fundamentals for symbols a few at a time, keeping what it already has. */
-function useFundamentals(symbols: string[], enabled: boolean) {
-  const [data, setData] = useState<Record<string, Metrics>>({});
-  const requested = useRef(new Set<string>());
-  const key = symbols.join(",");
+/** One request for the whole portfolio. The server answers from its cache (stale values included)
+ * and refreshes missing or stale symbols in the background; poll while it reports them pending. */
+function usePortfolioFundamentals(portfolio: string, enabled: boolean) {
+  const [data, setData] = useState<{ metrics: Record<string, Metrics>; pending: string[] } | null>(null);
+  useEffect(() => { setData(null); }, [portfolio]);
   useEffect(() => {
     if (!enabled) return;
-    const queue = symbols.filter((s) => !requested.current.has(s));
-    queue.forEach((s) => requested.current.add(s));
-    let cancelled = false;
-    const worker = async () => {
-      for (let s = queue.shift(); s && !cancelled; s = queue.shift()) {
-        const sym = s;
-        // Always keep a finished result (it's keyed by symbol); cancelling only stops the queue.
-        await api.fundamentals(sym).then((f) => setData((d) => ({ ...d, [sym]: f.metrics })),
-          () => setData((d) => ({ ...d, [sym]: {} })));
-      }
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = (polls: number) => {
+      api.portfolioFundamentals(portfolio).then((r) => {
+        if (stop) return;
+        setData({ metrics: r.metrics, pending: r.pending });
+        if (r.pending.length && polls < MAX_POLLS) timer = setTimeout(() => load(polls + 1), POLL_MS);
+      }, () => { if (!stop) setData((d) => d ?? { metrics: {}, pending: [] }); });
     };
-    for (let i = 0; i < CONCURRENCY; i++) void worker();
-    return () => {
-      cancelled = true;
-      queue.forEach((s) => requested.current.delete(s)); // not fetched yet: allow a retry next time
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled]);
+    load(0);
+    return () => { stop = true; clearTimeout(timer); };
+  }, [portfolio, enabled]);
   return data;
 }
 
@@ -153,7 +148,8 @@ export function HoldingsTabs({ portfolio, positions }: { portfolio: string; posi
 
   const symbols = useMemo(() => positions.map((p) => p.symbol).sort(), [positions]);
   const needsMetrics = ["Financials", "Growth", "Dividends", "Profitability", "Momentum"].includes(tab);
-  const metrics = useFundamentals(symbols, needsMetrics);
+  const fund = usePortfolioFundamentals(portfolio, needsMetrics);
+  const metrics = fund?.metrics ?? {};
 
   const [divs, setDivs] = useState<Record<string, DividendHolding> | null>(null);
   const [earn, setEarn] = useState<Record<string, EarningsRow> | null>(null);
@@ -167,11 +163,12 @@ export function HoldingsTabs({ portfolio, positions }: { portfolio: string; posi
     }
   }, [tab, portfolio, divs, earn]);
 
-  const loaded = symbols.filter((s) => metrics[s]).length;
+  const pendingCount = fund ? fund.pending.length : symbols.length;
   const waiting =
     tab === "Dividends" && divs === null ? "Loading dividend history…"
     : tab === "Earnings" && earn === null ? "Loading earnings dates…"
-    : needsMetrics && loaded < symbols.length ? `Loading metrics ${loaded}/${symbols.length}…` : null;
+    : needsMetrics && !fund ? "Loading metrics…"
+    : needsMetrics && pendingCount ? `Updating metrics ${symbols.length - pendingCount}/${symbols.length}…` : null;
 
   return (
     <section className="card">

@@ -367,6 +367,9 @@ export const api = {
     send<NoteItem>("POST", "/api/notes", body),
   updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
     send<NoteItem>("PATCH", `/api/notes/${id}`, body),
+  portfolioFundamentals: (name: string) =>
+    get<{ symbols: string[]; pending: string[]; metrics: Record<string, Record<string, number | null>> }>(
+      `/api/portfolios/${enc(name)}/fundamentals`),
   earnings: (name: string) => get<{ portfolio: string; as_of: string; rows: EarningsRow[] }>(`/api/portfolios/${enc(name)}/earnings`),
   dividends: (name: string) => get<Dividends>(`/api/portfolios/${enc(name)}/dividends`),
   exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),

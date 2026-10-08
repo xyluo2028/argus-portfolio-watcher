@@ -6,6 +6,8 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -41,6 +43,7 @@ from argus.symbols import is_plausible_symbol, normalize_symbol
 
 
 log = logging.getLogger("argus.app")
+FUND_RETRY_S = 15 * 60
 
 
 class Argus:
@@ -55,6 +58,31 @@ class Argus:
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
+        self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)
+        self._jobs_lock = threading.Lock()
+        self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
+
+    def run_background(self, name: str, fn: Callable[[], object]) -> bool:
+        """Run `fn` on a daemon thread unless a job with this name is already running."""
+        with self._jobs_lock:
+            if name in self._jobs:
+                return False
+            self._jobs.add(name)
+
+        def go():
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 - background work: log and move on
+                log.exception("background job %s failed", name)
+            finally:
+                with self._jobs_lock:
+                    self._jobs.discard(name)
+        threading.Thread(target=go, name=f"argus-{name}", daemon=True).start()
+        return True
+
+    def job_running(self, name: str) -> bool:
+        with self._jobs_lock:
+            return name in self._jobs
 
     @staticmethod
     def _default_market(engine: Engine, s: Settings) -> MarketService:
@@ -510,6 +538,62 @@ class Argus:
                            before={"peers": before_peers}, after={"peers": clean}))
         return self.peers(sym, with_metrics=False)
 
+    def warm_caches(self) -> dict:
+        """Fill the caches the first views of the day need (fundamentals, dividends, earnings, ETF
+        profiles, price history for the performance charts), so they open instantly. Each step is
+        best-effort; the live hub runs this at startup and after each close."""
+        t0 = time.monotonic()
+        held = sorted(self.held_positions())
+        report: dict[str, object] = {"symbols": len(held)}
+        steps = {
+            "fundamentals": lambda: self.portfolio_fundamentals(ALL, wait=True),
+            "dividends": lambda: self.dividend_histories(held),
+            "earnings": lambda: self.earnings_overview(ALL),
+            "fund_profiles": lambda: self.fund_profiles(held),
+            "history": self._warm_history,
+        }
+        for name, step in steps.items():
+            try:
+                step()
+                report[name] = "ok"
+            except Exception as e:  # noqa: BLE001 - keep warming the rest
+                log.warning("warm %s: %s", name, e)
+                report[name] = f"failed: {e}"
+        report["seconds"] = round(time.monotonic() - t0, 1)
+        log.info("caches warmed: %s", report)
+        return report
+
+    def _warm_history(self) -> None:
+        txns = self.portfolios.active_transactions(ALL)
+        if txns:
+            start = min(t.ts for t in txns).astimezone(NY).date()
+            benchmarks = {p["benchmark"] for p in self.portfolios.list_portfolios()}
+            self.market.daily_closes_many(sorted({t.symbol for t in txns} | benchmarks), start)
+
+    def portfolio_fundamentals(self, ref: str, wait: bool = False) -> dict:
+        """Cached fundamentals for every open position in one call. Missing or stale symbols are
+        refreshed in the background (or now, with `wait`); `pending` lists them so a client can poll."""
+        p = self.portfolios.view(ref)
+        state = self.portfolios.positions(p.id if p.id is not None else ALL)
+        syms = sorted(s for s, pos in state.items() if pos.is_open)
+        cached = self.market.cached_fundamentals(syms)
+        stale = [s for s in syms if s not in cached or not cached[s]["fresh"]]
+        if stale and wait:
+            self.market.refresh_fundamentals(stale)
+            cached, todo = self.market.cached_fundamentals(syms), []
+        elif self.job_running("fundamentals"):
+            todo = stale  # still being fetched
+        else:
+            # Symbols tried in the last 15 minutes failed (no provider has them): don't retry or wait on them.
+            now = time.monotonic()
+            todo = [s for s in stale if now - self._fund_attempted.get(s, -1e9) > FUND_RETRY_S]
+            if todo:
+                self._fund_attempted |= {s: now for s in todo}
+                self.run_background("fundamentals", lambda: self.market.refresh_fundamentals(todo))
+        return {"portfolio": p.name, "symbols": syms, "pending": todo,
+                "metrics": {s: c["metrics"] for s, c in cached.items()},
+                "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()}}
+
     def held_positions(self) -> dict[str, tuple[float, float]]:
         """symbol -> (total shares, weighted average cost) across all portfolios."""
         agg: dict[str, list[float]] = {}
@@ -847,8 +931,7 @@ class Argus:
         end = date.fromisoformat(status["last_session"])
         sessions = sessions_between(start, end)
         symbols = sorted({t.symbol for t in txns} | {p.benchmark})
-        with ThreadPoolExecutor(max_workers=8) as pool:  # first run fetches ~all symbols from Yahoo
-            closes = dict(zip(symbols, pool.map(lambda s: self.market.daily_closes(s, start), symbols)))
+        closes = self.market.daily_closes_many(symbols, start)  # one query; downloads only what's missing
 
         # While a session is open, add today as a provisional point priced from live quotes.
         today = datetime.now(NY).date()

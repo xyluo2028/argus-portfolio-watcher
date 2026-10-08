@@ -291,6 +291,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.notes.update, note_id, body.text, review, body.clear_review, body.archived, "ui")
 
     # -- analysis -------------------------------------------------------------------
+    @app.get("/api/portfolios/{ref}/fundamentals")
+    async def get_portfolio_fundamentals(ref: str):
+        return await run(argus.portfolio_fundamentals, ref)
+
     @app.get("/api/portfolios/{ref}/earnings")
     async def get_earnings(ref: str):
         return await run(argus.earnings_overview, ref)
@@ -316,6 +320,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.simulate_trades, ref, body.trades, dict(hub.quotes))
 
     # -- live stream -------------------------------------------------------------
+    # Every open tab/device on the same portfolio gets the same summary per hub update: compute it once.
+    summaries: dict[str, tuple[tuple[int, int], dict]] = {}
+
+    async def summary_at(portfolio: str, version: int) -> dict:
+        key = (version, argus.portfolios.revision)  # new prices or a new trade both invalidate
+        hit = summaries.get(portfolio)
+        if hit and hit[0] == key:
+            return hit[1]
+        summary = await run(argus.portfolios.summary, portfolio, dict(hub.quotes))
+        summaries[portfolio] = (key, summary)
+        return summary
+
     @app.get("/api/stream")
     async def stream(request: Request, portfolio: str | None = None):
         """SSE: an `update` event at most once per second while prices change."""
@@ -330,7 +346,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                 payload = hub.snapshot()
                 if portfolio:
                     try:
-                        payload["portfolio"] = await run(argus.portfolios.summary, portfolio, dict(hub.quotes))
+                        payload["portfolio"] = await summary_at(portfolio, version)
                     except ArgusError as e:
                         payload["portfolio_error"] = e.to_dict()
                 yield f"event: update\ndata: {json.dumps(payload, default=str)}\n\n"

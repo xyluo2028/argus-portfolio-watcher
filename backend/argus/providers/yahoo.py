@@ -7,12 +7,15 @@ surfaces as ProviderError and callers fall back or serve cache.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 
 from argus.providers.base import Bar, ProviderError, Quote
 from argus.symbols import to_yahoo
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+log = logging.getLogger("argus.yahoo")
 
 
 def _yf():
@@ -49,11 +52,60 @@ YAHOO_FUND_SECTORS = {
 }
 
 
+QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+QUOTE_BATCH = 100  # symbols per request on Yahoo's quote endpoint
+INFO_TTL_S = 6 * 3600
+
+
 class YahooProvider:
     name = "yahoo"
+    # MarketService puts this provider first for large lookups: one request covers 100 symbols.
+    batch_quotes = True
+
+    def __init__(self):
+        # `info` feeds fundamentals, company profiles and sector lookups; one fetch serves all three.
+        self._info: dict[str, tuple[float, dict]] = {}
+        self._info_lock = threading.Lock()
+
+    @staticmethod
+    def _quote_rows(symbols: list[str], fields: str) -> list[dict]:
+        """Yahoo's batch quote endpoint (the one its own site uses), 100 symbols per request."""
+        from yfinance.data import YfData
+
+        rows: list[dict] = []
+        for i in range(0, len(symbols), QUOTE_BATCH):
+            try:
+                r = YfData().get(QUOTE_URL, params={"symbols": ",".join(symbols[i:i + QUOTE_BATCH]), "fields": fields})
+                rows += r.json()["quoteResponse"]["result"]
+            except Exception as e:  # noqa: BLE001 - network, auth crumb, or a changed payload
+                raise ProviderError(f"yahoo quote batch: {e}") from e
+        return rows
 
     def get_quotes(self, symbols: list[str], native: bool = False) -> dict[str, Quote]:
-        """`native` takes Yahoo's own symbols as given (e.g. foreign listings like 2330.TW)."""
+        """`native` takes Yahoo's own symbols as given (e.g. foreign listings like 2330.TW).
+        One batch request per 100 symbols; falls back to per-symbol lookups if the batch fails."""
+        names = {(s if native else to_yahoo(s)): s for s in symbols}
+        try:
+            rows = self._quote_rows(list(names), "regularMarketPrice,regularMarketPreviousClose,regularMarketOpen,"
+                                                 "regularMarketDayHigh,regularMarketDayLow,regularMarketTime")
+        except ProviderError as e:
+            log.info("%s; falling back to per-symbol quotes", e)
+            return self._quotes_one_by_one(symbols, native)
+        out: dict[str, Quote] = {}
+        now = datetime.now(UTC)
+        for q in rows:
+            sym, price = names.get(q.get("symbol")), _px(q.get("regularMarketPrice"))
+            if not sym or not price:
+                continue
+            t = q.get("regularMarketTime")
+            out[sym] = Quote(symbol=sym, price=price, prev_close=_px(q.get("regularMarketPreviousClose")),
+                             open=_px(q.get("regularMarketOpen")), high=_px(q.get("regularMarketDayHigh")),
+                             low=_px(q.get("regularMarketDayLow")),
+                             as_of=datetime.fromtimestamp(t, UTC) if isinstance(t, (int, float)) else now,
+                             source=self.name, delayed=False)
+        return out
+
+    def _quotes_one_by_one(self, symbols: list[str], native: bool) -> dict[str, Quote]:
         yf = _yf()
         out: dict[str, Quote] = {}
         now = datetime.now(UTC)
@@ -83,27 +135,17 @@ class YahooProvider:
     def get_extended(self, symbols: list[str]) -> dict[str, tuple[str, float, datetime]]:
         """Latest pre-market or after-hours trade per symbol: {symbol: (session, price, time)}.
         One batch request per 100 symbols (Yahoo's quote endpoint)."""
-        from yfinance.data import YfData
-
         out: dict[str, tuple[str, float, datetime]] = {}
         names = {to_yahoo(s): s for s in symbols}
-        ys = list(names)
-        for i in range(0, len(ys), 100):
-            try:
-                r = YfData().get("https://query1.finance.yahoo.com/v7/finance/quote",
-                                 params={"symbols": ",".join(ys[i:i + 100]),
-                                         "fields": "preMarketPrice,preMarketTime,postMarketPrice,postMarketTime"})
-                rows = r.json()["quoteResponse"]["result"]
-            except Exception as e:  # noqa: BLE001
-                raise ProviderError(f"yahoo extended quotes: {e}") from e
-            for q in rows:
-                sym = names.get(q.get("symbol"))
-                seen = [(t, session, _px(q.get(f"{session}MarketPrice")))
-                        for session in ("pre", "post") if (t := q.get(f"{session}MarketTime"))]
-                seen = [x for x in seen if x[2]]
-                if sym and seen:
-                    t, session, price = max(seen)
-                    out[sym] = (session, price, datetime.fromtimestamp(t, UTC))
+        rows = self._quote_rows(list(names), "preMarketPrice,preMarketTime,postMarketPrice,postMarketTime")
+        for q in rows:
+            sym = names.get(q.get("symbol"))
+            seen = [(t, session, _px(q.get(f"{session}MarketPrice")))
+                    for session in ("pre", "post") if (t := q.get(f"{session}MarketTime"))]
+            seen = [x for x in seen if x[2]]
+            if sym and seen:
+                t, session, price = max(seen)
+                out[sym] = (session, price, datetime.fromtimestamp(t, UTC))
         return out
 
     def get_history(self, symbol: str, start: datetime, end: datetime | None, interval: str = "1d") -> list[Bar]:
@@ -133,10 +175,19 @@ class YahooProvider:
         return [(ts.date().isoformat(), float(v)) for ts, v in s.items() if ts.date() >= cutoff and v > 0]
 
     def get_info(self, symbol: str) -> dict:
+        """Yahoo's `info` (~0.4 s per call), kept in memory for a few hours."""
+        now = time.monotonic()
+        with self._info_lock:
+            hit = self._info.get(symbol)
+        if hit and now - hit[0] < INFO_TTL_S:
+            return hit[1]
         try:
-            return _yf().Ticker(to_yahoo(symbol)).info or {}
+            info = _yf().Ticker(to_yahoo(symbol)).info or {}
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"yahoo info {symbol}: {e}") from e
+        with self._info_lock:
+            self._info[symbol] = (now, info)
+        return info
 
     def get_calendar(self, symbol: str) -> dict:
         """Upcoming dates: 'Earnings Date' (list), 'Ex-Dividend Date', 'Dividend Date'."""

@@ -35,6 +35,8 @@ REST_INTERVAL_S = 60
 SESSION_CHECK_S = 30
 FLUSH_INTERVAL_S = 10
 EVENTS_REFRESH_S = 6 * 3600
+WARM_CHECK_S = 15 * 60
+WARM_START_DELAY_S = 60  # let the first quotes and page loads go first
 
 
 class LiveHub:
@@ -53,12 +55,14 @@ class LiveHub:
         self._ws_task: asyncio.Task | None = None
         self._resubscribe = asyncio.Event()
         self.fired_alerts: list[dict] = []  # fired this session, newest first (pushed to the UI)
+        self.warmed_for: str | None = None  # last_session the caches were warmed after
 
     # -- lifecycle ------------------------------------------------------------
     async def start(self) -> None:
         self._tasks = [asyncio.create_task(self._session_loop(), name="argus-session"),
                        asyncio.create_task(self._flush_loop(), name="argus-flush"),
-                       asyncio.create_task(self._events_loop(), name="argus-events")]
+                       asyncio.create_task(self._events_loop(), name="argus-events"),
+                       asyncio.create_task(self._warm_loop(), name="argus-warm")]
 
     async def stop(self) -> None:
         for t in [*self._tasks, self._ws_task]:
@@ -169,6 +173,23 @@ class LiveHub:
             except Exception:  # noqa: BLE001 - provider hiccups: try again next cycle
                 log.exception("events refresh failed")
             await asyncio.sleep(EVENTS_REFRESH_S)
+
+    async def _warm_loop(self) -> None:
+        """Warm the caches once at startup, then once after each session closes."""
+        await asyncio.sleep(WARM_START_DELAY_S)
+        while True:
+            try:
+                status = market_status()
+                due = self.warmed_for is None or (status["session"] == "closed"
+                                                  and self.warmed_for != status["last_session"])
+                if due:
+                    await asyncio.to_thread(self.argus.warm_caches)
+                    self.warmed_for = status["last_session"]
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                log.exception("cache warming failed")
+            await asyncio.sleep(WARM_CHECK_S)
 
     # -- websocket ------------------------------------------------------------
     def _ensure_stream(self, symbols: list[str]) -> None:

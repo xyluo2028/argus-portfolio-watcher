@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { Alerts } from "./pages/Alerts";
-import { Analysis } from "./pages/Analysis";
-import { Compare } from "./pages/Compare";
 import { Dashboard } from "./pages/Dashboard";
-import { Data } from "./pages/Data";
-import { Ticker } from "./pages/Ticker";
-import { Transactions } from "./pages/Transactions";
-import { Watchlist } from "./pages/Watchlist";
 import { useLive } from "./useLive";
+
+// Every page but the dashboard loads on first visit, so the first screen downloads less.
+const Alerts = lazy(() => import("./pages/Alerts").then((m) => ({ default: m.Alerts })));
+const Analysis = lazy(() => import("./pages/Analysis").then((m) => ({ default: m.Analysis })));
+const Compare = lazy(() => import("./pages/Compare").then((m) => ({ default: m.Compare })));
+const Data = lazy(() => import("./pages/Data").then((m) => ({ default: m.Data })));
+const Ticker = lazy(() => import("./pages/Ticker").then((m) => ({ default: m.Ticker })));
+const Transactions = lazy(() => import("./pages/Transactions").then((m) => ({ default: m.Transactions })));
+const Watchlist = lazy(() => import("./pages/Watchlist").then((m) => ({ default: m.Watchlist })));
 
 const KEY = "argus.portfolio";
 
@@ -113,6 +115,7 @@ function Main() {
         <ThemeToggle />
       </header>
       <main>
+        <Suspense fallback={<p className="muted">Loading…</p>}>
         {portfolios === null ? <p className="muted">Loading…</p>
           : portfolios.length === 0 ? (
             <Routes>
@@ -137,6 +140,7 @@ function Main() {
               <Route path="/data" element={<Data />} />
             </Routes>
           )}
+        </Suspense>
       </main>
     </>
   );

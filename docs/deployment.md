@@ -16,7 +16,7 @@ Status: ✅ done · 🟡 done, not yet verified end to end · ⬜ to do
 | 3 | **Schema migrations.** Alembic with a baseline of the current schema. New databases are created at the latest revision, pre-Alembic databases are stamped, and every start upgrades to head. A test keeps models and migrations in sync. | ✅ |
 | 4 | **Backups.** `argus backup` writes an SQLite online backup plus a JSON snapshot and prunes old sets; a systemd timer runs it nightly. Copying backups off the machine is described below. | ✅ |
 | 5 | **One instance.** `argus serve` takes a lock on the data directory, so a second server on the same data fails clearly. Running a second copy elsewhere with the same Finnhub key isn't detectable; see "Moving your data". | ✅ |
-| 6 | **Process supervision.** systemd units (`deploy/`) and a Dockerfile + compose file: restart on failure, start at boot, one worker, `/api/health` for health checks. The units pass `systemd-analyze verify` and their command was run; **the container image hasn't been built yet** (Docker wasn't running). | 🟡 |
+| 6 | **Process supervision.** systemd units (`deploy/`) and a Dockerfile + compose file: restart on failure, start at boot, one worker, `/api/health` for health checks. The units pass `systemd-analyze verify` and their command was run; the image was built and run (healthy, non-root, migrations, token mode, snapshot load, backup). | ✅ |
 | 7 | **Setup docs.** `.env.example` restored and tracked; README covers Linux/server setup. | ✅ |
 | 7a | **Static files stay inside the UI folder.** The UI route served any file reachable from `frontend/dist` by an encoded `../` (e.g. `/%2e%2e/%2e%2e/.env`, your API keys). Fixed and covered by tests. | ✅ |
 
@@ -91,8 +91,8 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Data lives in the `argus-data` volume. Backups: `docker compose exec argus argus backup`, or run it
-from the host's cron.
+Data lives in the `argus-data` volume. Full walkthrough (configuration, moving your data, backups
+and restore, updates, troubleshooting): **[docker.md](docker.md)**.
 
 ## Exposing it
 
