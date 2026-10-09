@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Argus backup
+
+[Timer]
+OnCalendar=*-*-* 03:30
+# Run at the next boot if the machine was off at 03:30.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

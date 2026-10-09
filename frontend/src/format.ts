@@ -44,6 +44,11 @@ export function nyTime(iso: string, withDate = true): string {
   }) + " ET";
 }
 
+export function extLabel(session: string | null | undefined, short = false): string {
+  if (session === "pre") return short ? "Pre" : "Pre-market";
+  return short ? "AH" : "After hours";
+}
+
 /** When the market is closed a quote is that session's close, whatever its fetch time. */
 export function quoteTime(q: { as_of: string; session_date: string }, session: string): string {
   if (session !== "closed") return nyTime(q.as_of);

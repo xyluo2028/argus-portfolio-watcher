@@ -88,7 +88,7 @@ def _cell(v, text: str) -> str:
 
 @app.command()
 def serve(port: Annotated[int | None, typer.Option(help="Default: ARGUS_PORT or 8787")] = None,
-          host: str = "127.0.0.1"):
+          host: Annotated[str | None, typer.Option(help="Default: ARGUS_HOST or 127.0.0.1")] = None):
     """Run the web UI, JSON API and live price stream (http://localhost:8787)."""
     from argus.api.server import serve as run_server
     from argus.config import load_settings
@@ -129,10 +129,16 @@ def _ny(iso: str) -> str:
 def quotes(symbols: Annotated[list[str], typer.Argument(help="Tickers, e.g. NVDA MSFT")], as_json: JsonOpt = False):
     """Latest quotes (cached for 15s; settled closes are reused while the market is closed)."""
     def render(d):
-        t = Table("Symbol", "Price", "Chg", "Chg %", "As of (ET)", "Source")
+        ext = any(q.get("ext_price") is not None for q in d["quotes"])
+        t = Table("Symbol", "Price", "Chg", "Chg %", *(["Pre/After", "Ext %"] if ext else []), "As of (ET)", "Source")
         for q in d["quotes"]:
+            extra = []
+            if ext:
+                tag = {"pre": "pre", "post": "after"}.get(q.get("ext_session") or "", "")
+                extra = [f"{_money(q['ext_price'])} {tag}" if q.get("ext_price") is not None else "",
+                         _cell(q.get("ext_change_pct"), _pct(q.get("ext_change_pct"))) if q.get("ext_price") is not None else ""]
             t.add_row(q["symbol"], _money(q["price"]), _cell(q["change"], _money(q["change"], True)),
-                      _cell(q["change_pct"], _pct(q["change_pct"])), _ny(q["as_of"]), q["source"])
+                      _cell(q["change_pct"], _pct(q["change_pct"])), *extra, _ny(q["as_of"]), q["source"])
         console.print(t)
         for sym, err in d["errors"].items():
             console.print(f"[yellow]{sym}: {err}[/yellow]")
@@ -512,6 +518,26 @@ def snapshot_load(file: Path,
         if d.get("backup"):
             console.print(f"Previous records saved to {d['backup']}")
         console.print("[cyan]Dry run: nothing written.[/cyan]" if d["dry_run"] else "[green]Loaded.[/green]")
+    _run(as_json, go, render)
+
+
+@app.command("backup")
+def backup_cmd(dest: Annotated[Path | None, typer.Option(help="Default: <data dir>/backups")] = None,
+               keep: Annotated[int | None, typer.Option(help="Backup sets to keep; default ARGUS_BACKUP_KEEP or 14")] = None,
+               as_json: JsonOpt = False):
+    """Back up the database (consistent online copy) and a JSON snapshot; prune old sets."""
+    from argus.services.backup import backup
+
+    def go():
+        a = _argus()
+        return backup(a.settings.db_path, a.snapshots, dest or a.settings.data_dir / "backups",
+                      a.settings.backup_keep if keep is None else keep)
+
+    def render(d):
+        console.print(f"[green]Backed up to {d['dir']}[/green] ({d['db_bytes'] / 1e6:.1f} MB database; "
+                      f"{_counts_line(d['counts'])})")
+        if d["removed"]:
+            console.print(f"Removed {len(d['removed'])} old set(s); keeping {d['kept']}.")
     _run(as_json, go, render)
 
 

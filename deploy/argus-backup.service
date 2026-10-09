@@ -1,0 +1,10 @@
+# Nightly backup, run by argus-backup.timer: database copy + JSON snapshot in data/backups/.
+[Unit]
+Description=Argus backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/argus
+ExecStart=%h/.local/bin/uv run --frozen --no-sync argus backup
+NoNewPrivileges=true
+UMask=0077

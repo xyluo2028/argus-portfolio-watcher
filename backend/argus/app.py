@@ -6,6 +6,8 @@ Every public method returns plain JSON-serializable data or raises ArgusError.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -19,13 +21,21 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import AuditLog, CompanyProfile, FundProfile, Instrument, PeerList, SecurityMap, Target
+from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
+                          Target)
 from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
+from argus.services import dividends as dividends_mod
+from argus.services import research as research_mod
+from argus.services import screener as screener_mod
+from argus.services import risk as risk_mod
+from argus.providers.french import FrenchFactors
+from argus.providers.macro import MacroProvider
+from argus.services import market_context as context_mod
 from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
@@ -39,6 +49,7 @@ from argus.symbols import is_plausible_symbol, normalize_symbol
 
 
 log = logging.getLogger("argus.app")
+FUND_RETRY_S = 15 * 60
 
 
 class Argus:
@@ -53,6 +64,36 @@ class Argus:
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
+        self.factors = FrenchFactors(self.settings.cache_dir)
+        self.macro = MacroProvider()
+        self.screener = screener_mod.ScreenerService(self.settings.cache_dir, self.market.sec, self.market.profile_provider)
+        self.screener_progress: str | None = None
+        self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)
+        self._jobs_lock = threading.Lock()
+        self._research: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, bundle)
+        self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
+
+    def run_background(self, name: str, fn: Callable[[], object]) -> bool:
+        """Run `fn` on a daemon thread unless a job with this name is already running."""
+        with self._jobs_lock:
+            if name in self._jobs:
+                return False
+            self._jobs.add(name)
+
+        def go():
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 - background work: log and move on
+                log.exception("background job %s failed", name)
+            finally:
+                with self._jobs_lock:
+                    self._jobs.discard(name)
+        threading.Thread(target=go, name=f"argus-{name}", daemon=True).start()
+        return True
+
+    def job_running(self, name: str) -> bool:
+        with self._jobs_lock:
+            return name in self._jobs
 
     @staticmethod
     def _default_market(engine: Engine, s: Settings) -> MarketService:
@@ -127,6 +168,41 @@ class Argus:
                 for k, v in computed.items()
             }
         return out
+
+    RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
+
+    def return_bases(self, symbol: str) -> dict:
+        """The price each chart range is measured from, so a client can show live returns:
+        1D the previous close, 5D the close five sessions back, 1M-5Y the close on or before that
+        calendar date, YTD last year's final close, Max the first close. Split-adjusted closes,
+        dividends not included (price return). A range longer than the history is null."""
+        from argus.services.dividends import add_months
+
+        sym = normalize_symbol(symbol)
+        bars = self.market.get_history(sym, "max", "1d")
+        status = market_status()
+        # "Now" is today's live price during the session; otherwise the last completed close.
+        anchor = datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+        closes = [(b.ts.astimezone(NY).date(), b.c) for b in bars]
+        before = [c for c in closes if c[0] < anchor]
+
+        def on_or_before(d: date) -> dict | None:
+            if not before or d < before[0][0]:
+                return None  # the range reaches back before the first bar
+            day, close = next(c for c in reversed(before) if c[0] <= d)
+            return {"date": day.isoformat(), "close": close}
+
+        bases: dict[str, dict | None] = {
+            "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
+            "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
+        }
+        for label, months in self.RETURN_MONTHS.items():
+            bases[label] = on_or_before(add_months(anchor, -months))
+        bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
+        bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
+        last = closes[-1] if closes else None
+        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"], "bases": bases,
+                "last_close": {"date": last[0].isoformat(), "close": last[1]} if last else None}
 
     COMPARE_FIELDS = ("pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "market_cap",
                       "revenue_growth_yoy_pct", "gross_margin_pct", "net_margin_pct", "roe_pct", "dividend_yield_pct",
@@ -508,6 +584,104 @@ class Argus:
                            before={"peers": before_peers}, after={"peers": clean}))
         return self.peers(sym, with_metrics=False)
 
+    def warm_caches(self) -> dict:
+        """Fill the caches the first views of the day need (fundamentals, dividends, earnings, ETF
+        profiles, price history for the performance charts), so they open instantly. Each step is
+        best-effort; the live hub runs this at startup and after each close."""
+        t0 = time.monotonic()
+        held = sorted(self.held_positions())
+        report: dict[str, object] = {"symbols": len(held)}
+        steps = {
+            "fundamentals": lambda: self.portfolio_fundamentals(ALL, wait=True),
+            "dividends": lambda: self.dividend_histories(held),
+            "earnings": lambda: self.earnings_overview(ALL),
+            "fund_profiles": lambda: self.fund_profiles(held),
+            "history": self._warm_history,
+            "risk": lambda: self.risk(ALL),  # long history for stress windows, and the factor data
+            "market_context": self.market_context,
+            "screener": self._warm_screener,
+        }
+        for name, step in steps.items():
+            try:
+                step()
+                report[name] = "ok"
+            except Exception as e:  # noqa: BLE001 - keep warming the rest
+                log.warning("warm %s: %s", name, e)
+                report[name] = f"failed: {e}"
+        report["seconds"] = round(time.monotonic() - t0, 1)
+        log.info("caches warmed: %s", report)
+        return report
+
+    def _warm_screener(self) -> None:
+        st = self.screener.status()
+        if not st["built"] or st["stale"]:
+            self.screener.build()
+        elif st["prices_stale"]:
+            self.screener.refresh_prices()
+
+    def _warm_history(self) -> None:
+        txns = self.portfolios.active_transactions(ALL)
+        if txns:
+            start = min(t.ts for t in txns).astimezone(NY).date()
+            benchmarks = {p["benchmark"] for p in self.portfolios.list_portfolios()}
+            self.market.daily_closes_many(sorted({t.symbol for t in txns} | benchmarks), start)
+
+    def open_symbols(self, ref: str) -> list[str]:
+        p = self.portfolios.view(ref)
+        return sorted(s for s, pos in self.portfolios.positions(p.id if p.id is not None else ALL).items() if pos.is_open)
+
+    def portfolio_fundamentals(self, ref: str, wait: bool = False) -> dict:
+        """Cached fundamentals for every open position in one call (see symbol_fundamentals)."""
+        return {"portfolio": self.portfolios.view(ref).name, **self.symbol_fundamentals(self.open_symbols(ref), wait)}
+
+    def watchlist_fundamentals(self, name: str = DEFAULT_WATCHLIST) -> dict:
+        return {"watchlist": name, **self.symbol_fundamentals([i["symbol"] for i in self.watchlists.items(name)])}
+
+    def returns_1m(self, symbols: list[str]) -> dict[str, float | None]:
+        """Price return over the last month to the latest daily close (cached bars)."""
+        from argus.services.dividends import add_months
+
+        closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=45))
+        out: dict[str, float | None] = {}
+        for sym, by_day in closes.items():
+            days = sorted(by_day)
+            if not days:
+                out[sym] = None
+                continue
+            target = add_months(days[-1], -1)
+            base = next((by_day[d] for d in reversed(days) if d <= target), None)
+            out[sym] = (by_day[days[-1]] / base - 1) * 100 if base else None
+        return out
+
+    def symbol_fundamentals(self, syms: list[str], wait: bool = False) -> dict:
+        """Cached fundamentals for many symbols in one call, plus the 1-month return. Missing or stale
+        symbols are refreshed in the background (or now, with `wait`); `pending` lists them so a
+        client can poll."""
+        cached = self.market.cached_fundamentals(syms)
+        stale = [s for s in syms if s not in cached or not cached[s]["fresh"]]
+        if stale and wait:
+            self.market.refresh_fundamentals(stale)
+            cached, todo = self.market.cached_fundamentals(syms), []
+        elif self.job_running("fundamentals"):
+            todo = stale  # still being fetched
+        else:
+            # Symbols tried in the last 15 minutes failed (no provider has them): don't retry or wait on them.
+            now = time.monotonic()
+            todo = [s for s in stale if now - self._fund_attempted.get(s, -1e9) > FUND_RETRY_S]
+            if todo:
+                self._fund_attempted |= {s: now for s in todo}
+                self.run_background("fundamentals", lambda: self.market.refresh_fundamentals(todo))
+        try:
+            r1m = self.returns_1m(syms)
+        except ArgusError as e:  # history provider down: the rest still stands
+            log.warning("1M returns: %s", e.message)
+            r1m = {}
+        metrics = {s: dict(c["metrics"]) for s, c in cached.items()}
+        for s, v in r1m.items():
+            metrics.setdefault(s, {})["return_1m_pct"] = v
+        return {"symbols": syms, "pending": todo, "metrics": metrics,
+                "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()}}
+
     def held_positions(self) -> dict[str, tuple[float, float]]:
         """symbol -> (total shares, weighted average cost) across all portfolios."""
         agg: dict[str, list[float]] = {}
@@ -528,8 +702,14 @@ class Argus:
         return sorted(set(self.held_positions()) | set(watched))
 
     def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
-                        symbols: list[str] | None = None) -> dict:
-        syms = [normalize_symbol(x) for x in symbols] if symbols else self.tracked_symbols()
+                        symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
+        """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
+        if symbols:
+            syms = [normalize_symbol(x) for x in symbols]
+        elif portfolio and str(portfolio).lower() != ALL:
+            syms = sorted(s for s, p in self.portfolios.positions(portfolio).items() if p.is_open)
+        else:
+            syms = self.tracked_symbols()
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
         today = datetime.now(NY).date()
         held = set(self.held_positions())
@@ -648,6 +828,252 @@ class Argus:
                     s.merge(FundProfile(symbol=sym, as_of=now, data=data))
             out |= fetched
         return {k: v for k, v in out.items() if v}
+
+    DIVIDEND_MAX_AGE = timedelta(hours=24)
+
+    def dividend_histories(self, symbols: list[str]) -> dict[str, list[tuple[str, float]]]:
+        """Ex-date dividend history per symbol (Yahoo), cached a day; a failed fetch keeps the old copy."""
+        now = datetime.now(UTC)
+        fresh: dict[str, list] = {}
+        stale: dict[str, list] = {}
+        with session_scope(self.engine) as s:
+            for row in s.scalars(select(DividendHistory).where(DividendHistory.symbol.in_(symbols))):
+                (fresh if now - row.as_of < self.DIVIDEND_MAX_AGE else stale)[row.symbol] = [tuple(x) for x in row.data]
+        yahoo = self.market.profile_provider
+        todo = [x for x in symbols if x not in fresh]
+        if yahoo is not None and todo:
+            def fetch(sym):
+                try:
+                    return yahoo.get_dividends(sym)
+                except ProviderError:
+                    return None
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                fetched = dict(zip(todo, pool.map(fetch, todo)))
+            with session_scope(self.engine) as s:
+                for sym, rows in fetched.items():
+                    if rows is not None:
+                        s.merge(DividendHistory(symbol=sym, as_of=now, data=[list(x) for x in rows]))
+                        fresh[sym] = rows
+        return {sym: fresh.get(sym) or stale.get(sym, []) for sym in symbols}
+
+    def dividends(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Forward dividend income and yield per holding, plus this year's dividends: estimated
+        received so far (shares held at each ex-date) and projected for the rest of the year."""
+        summ = self.portfolio(ref, True, False, live_quotes)
+        rows = summ["positions"]
+        p = self.portfolios.view(ref)
+        by_sym: dict[str, list] = {}
+        for t in self.portfolios.active_transactions(p.id if p.id is not None else ALL):
+            by_sym.setdefault(t.symbol, []).append(t)
+
+        def qty_at(sym: str, d: date) -> float:
+            cutoff = datetime.combine(d, datetime.min.time(), NY)
+            pos = build_positions([t for t in by_sym.get(sym, []) if t.ts < cutoff]).get(sym)
+            return pos.qty if pos else 0.0
+
+        histories = self.dividend_histories([r["symbol"] for r in rows])
+        return {"portfolio": summ["portfolio"]["name"],
+                **dividends_mod.analyze(rows, histories, qty_at, datetime.now(NY).date())}
+
+    def watchlist_dividends(self, name: str = DEFAULT_WATCHLIST, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Yield, rate, frequency and next ex-date for watched symbols (no shares, so no income)."""
+        syms = [i["symbol"] for i in self.watchlists.items(name)]
+        quotes = {s: live_quotes[s] for s in syms if live_quotes and s in live_quotes}
+        if missing := [s for s in syms if s not in quotes]:
+            quotes |= self.market.get_quotes(missing)[0]
+        rows = [{"symbol": s, "name": None, "qty": 0.0, "avg_cost": None, "cost_basis": 0.0,
+                 "price": quotes[s].price if s in quotes else None, "market_value": 0.0} for s in syms]
+        histories = self.dividend_histories(syms)
+        return {"watchlist": name, **dividends_mod.analyze(rows, histories, lambda s, d: 0.0, datetime.now(NY).date())}
+
+    def watchlist_earnings(self, name: str = DEFAULT_WATCHLIST) -> dict:
+        return {"watchlist": name, **self.earnings_for([i["symbol"] for i in self.watchlists.items(name)])}
+
+    def earnings_overview(self, ref: str) -> dict:
+        """Per holding: the last reported quarter (EPS/revenue vs estimate) and the next report date."""
+        p = self.portfolios.view(ref)
+        return {"portfolio": p.name, **self.earnings_for(self.open_symbols(ref))}
+
+    def earnings_for(self, syms: list[str]) -> dict:
+        failed = self.events.refresh(syms)["failed"]
+        today = datetime.now(NY).date()
+        rows = self.events.between(syms, today - timedelta(days=120), today + timedelta(days=120), ["earnings"])
+        out: dict[str, dict] = {s: {"symbol": s, "last": None, "next": None} for s in syms}
+        for e in rows:  # ordered by date
+            o = out[e["symbol"]]
+            if e["date"] <= today.isoformat() and e.get("epsActual") is not None:
+                o["last"] = e
+            elif e["date"] >= today.isoformat() and o["next"] is None:
+                o["next"] = e
+        # The free calendar only reaches a few weeks back; fill older last reports from EPS history.
+        with session_scope(self.engine) as s:
+            funds = {i.symbol for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(syms)))
+                     if i.type == "ETP" or i.sector == "ETF"}
+        missing = [x for x in syms if out[x]["last"] is None and x not in funds]
+        for sym, r in self.events.latest_results(missing).items():
+            out[sym]["last"] = {"symbol": sym, "kind": "earnings", "date": None, **r, "source": "finnhub"}
+        return {"as_of": today.isoformat(), "rows": list(out.values()), "refresh_failed": failed}
+
+    def _screener_job(self, prices_only: bool = False) -> bool:
+        def go():
+            try:
+                set_progress = lambda msg: setattr(self, "screener_progress", msg)  # noqa: E731
+                (self.screener.refresh_prices if prices_only else self.screener.build)(set_progress)
+            finally:
+                self.screener_progress = None
+        return self.run_background("screener", go)
+
+    def screener_status(self) -> dict:
+        return self.screener.status() | {"building": self.job_running("screener"), "progress": self.screener_progress,
+                                         "fields": {k: {"label": l, "unit": u} for k, (l, u) in screener_mod.FIELDS.items()}}
+
+    def screen_stocks(self, filters: dict[str, list] | None = None, sort: str = "market_cap", descending: bool = True,
+                      limit: int = 100, include_otc: bool = False) -> dict:
+        """Screen US companies on SEC fundamentals (latest calendar year) and live market caps.
+        `filters`: {field: [min, max]} with null for an open bound; see screener_status()["fields"].
+        The first call starts building the universe in the background (`building`)."""
+        status = self.screener.status()
+        if not status["built"]:
+            self._screener_job()
+            return {"status": self.screener_status(), "matches": 0, "rows": []}
+        if status["stale"]:
+            self._screener_job()
+        elif status["prices_stale"]:
+            self._screener_job(prices_only=True)
+        try:
+            result = screener_mod.screen(self.screener.load()["rows"], filters or {}, sort, descending, min(limit, 500),
+                                         include_otc)
+        except ValueError as e:
+            raise ArgusError("INVALID_ARG", str(e), hint=f"Fields: {', '.join(screener_mod.FIELDS)}") from e
+        return {"status": self.screener_status(), **result}
+
+    def rebuild_screener(self) -> dict:
+        self._screener_job()
+        return self.screener_status()
+
+    def market_context(self) -> dict:
+        """Indices, VIX, rates, USD/JPY, oil, gold, bitcoin; a sector heatmap; breadth proxies; the
+        Treasury yield curve; FOMC meetings and major US economic releases. Sources fetch in
+        parallel and fail independently (`errors`)."""
+        jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS),
+                "curve": self.macro.treasury_curve, "fomc": self.macro.fomc_meetings,
+                "events": lambda: self.macro.economic_events(21)}
+        def run(item):
+            name, fn = item
+            try:
+                return name, fn(), None
+            except Exception as e:  # noqa: BLE001
+                return name, None, str(e)
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            got = {n: (v, e) for n, v, e in pool.map(run, jobs.items())}
+        out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], got["events"][0],
+                                datetime.now(NY).date())
+        return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
+
+    RESEARCH_TTL_S = 3600
+
+    def research(self, symbol: str, live_quotes: dict[str, Quote] | None = None, refresh: bool = False) -> dict:
+        """Analyst consensus and targets, estimate trend and revisions, insider trades, ownership,
+        short interest, 5-year valuation bands, quality scores and recent headlines with tone.
+        Each source is optional: a missing one leaves its section empty. Cached for an hour."""
+        sym = normalize_symbol(symbol)
+        hit = self._research.get(sym)
+        if hit and not refresh and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+            bundle = hit[1]
+        else:
+            bundle = self._build_research(sym)
+            self._research[sym] = (time.monotonic(), bundle)
+        q = (live_quotes or {}).get(sym) or self.market.get_quotes([sym])[0].get(sym)
+        price = q.price if q else None
+        a = bundle.get("analysts")
+        if a and price and a.get("target_mean"):
+            a = a | {"upside_pct": (a["target_mean"] / price - 1) * 100}
+        return bundle | {"price": price, "analysts": a}
+
+    def _build_research(self, sym: str) -> dict:
+        yahoo, fh = self.market.profile_provider, self.market.directory
+        today = datetime.now(NY).date()
+        jobs = {
+            "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
+            "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
+            "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
+            "insiders": (lambda: fh.insider_transactions(sym, today - timedelta(days=400))) if fh else None,
+            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "news": lambda: self.events.news(sym, days=7, limit=25),
+        }
+        def run(item):
+            name, fn = item
+            if fn is None:
+                return name, None, "not configured"
+            try:
+                return name, fn(), None
+            except Exception as e:  # noqa: BLE001 - every section is optional
+                return name, None, str(e)
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
+            got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        errors = {k: e for k, (_, e) in got.items() if e}
+        info = got["info"][0] or {}
+        fund = info.get("quoteType") in ("ETF", "MUTUALFUND")
+        cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
+        m = cached["metrics"] if cached else {}
+
+        analyst = got["analyst"][0] or {}
+        analysts = None if fund else {
+            "count": info.get("numberOfAnalystOpinions"), "rating": info.get("recommendationKey"),
+            "rating_mean": info.get("recommendationMean"), "target_mean": info.get("targetMeanPrice"),
+            "target_median": info.get("targetMedianPrice"), "target_high": info.get("targetHighPrice"),
+            "target_low": info.get("targetLowPrice"), "trend": analyst.get("recommendations") or [],
+        }
+        estimates = None if fund else {"trend": analyst.get("eps_trend"), "revisions": analyst.get("eps_revisions")}
+        short_date = info.get("dateShortInterest")
+        short = {
+            "shares_short": info.get("sharesShort"), "prior_month": info.get("sharesShortPriorMonth"),
+            "pct_float": (info["shortPercentOfFloat"] * 100) if info.get("shortPercentOfFloat") is not None else None,
+            "days_to_cover": info.get("shortRatio"),
+            "as_of": datetime.fromtimestamp(short_date, UTC).date().isoformat() if isinstance(short_date, (int, float)) else None,
+        }
+        if short["shares_short"] and short["prior_month"]:
+            short["change_pct"] = (short["shares_short"] / short["prior_month"] - 1) * 100
+        ownership = {
+            "institutions_pct": info["heldPercentInstitutions"] * 100 if info.get("heldPercentInstitutions") is not None else None,
+            "insiders_pct": info["heldPercentInsiders"] * 100 if info.get("heldPercentInsiders") is not None else None,
+            "top": analyst.get("institutions") or [],
+        }
+        statements = got["statements"][0] or {}
+        quality = None if fund or not statements.get("years") else {
+            "piotroski": research_mod.piotroski(statements),
+            "altman": research_mod.altman_z(statements, m.get("market_cap") or info.get("marketCap"), info.get("sector")),
+        }
+        current = {"peTTM": m.get("pe_ttm"), "psTTM": m.get("ps_ttm"), "pb": m.get("pb"), "evEbitdaTTM": m.get("ev_ebitda")}
+        valuation = None if fund else research_mod.valuation_bands(got["series"][0] or {}, current, today=today)
+        news = [n | {"tone": research_mod.tone(f"{n.get('headline') or ''}. {n.get('summary') or ''}")}
+                for n in (got["news"][0] or [])]
+        counts = {k: sum(1 for n in news if n["tone"]["label"] == k) for k in ("positive", "neutral", "negative")}
+        return {
+            "symbol": sym, "as_of": datetime.now(UTC).isoformat(), "fund": fund,
+            "analysts": analysts, "estimates": estimates,
+            "insiders": None if fund else research_mod.insider_summary(got["insiders"][0] or [], today=today),
+            "ownership": ownership, "short_interest": short, "valuation": valuation, "quality": quality,
+            "news": [{k: v for k, v in n.items() if k != "summary"} for n in news], "news_tone": counts,
+            "errors": errors,
+        }
+
+    RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
+
+    def risk(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """Beta, volatility, VaR/CVaR, drawdown, risk share per position, correlations, stress
+        scenarios and factor exposures for the portfolio as it stands today (see services/risk.py)."""
+        summ = self.portfolio(ref, True, False, live_quotes)
+        values = {r["symbol"]: r.get("market_value") or 0.0 for r in summ["positions"]}
+        bench = summ["portfolio"]["benchmark"] or "SPY"
+        closes = self.market.daily_closes_many(sorted(set(values) | {bench}), self.RISK_HISTORY_START)
+        try:
+            factors = self.factors.daily()
+        except ProviderError as e:
+            log.warning("factor data: %s", e)
+            factors = None
+        return {"portfolio": summ["portfolio"]["name"], "fully_priced": summ["totals"]["fully_priced"],
+                **risk_mod.analyze(values, closes, bench, factors)}
 
     def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
         summ = self.portfolio(ref, True, False, live_quotes)
@@ -769,8 +1195,7 @@ class Argus:
         end = date.fromisoformat(status["last_session"])
         sessions = sessions_between(start, end)
         symbols = sorted({t.symbol for t in txns} | {p.benchmark})
-        with ThreadPoolExecutor(max_workers=8) as pool:  # first run fetches ~all symbols from Yahoo
-            closes = dict(zip(symbols, pool.map(lambda s: self.market.daily_closes(s, start), symbols)))
+        closes = self.market.daily_closes_many(symbols, start)  # one query; downloads only what's missing
 
         # While a session is open, add today as a provisional point priced from live quotes.
         today = datetime.now(NY).date()

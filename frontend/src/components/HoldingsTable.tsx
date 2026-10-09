@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Position } from "../api";
-import { money, pct, price, tone } from "../format";
+import { extLabel, money, pct, price, tone } from "../format";
 
 type Key = "symbol" | "qty" | "avg_cost" | "price" | "change_pct" | "day_pnl" | "market_value" | "weight_pct" |
   "unrealized_pnl" | "unrealized_pct";
@@ -66,7 +66,14 @@ export function HoldingsTable({ positions }: { positions: Position[] }) {
               <td>{p.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
               <td>{price(p.avg_cost)}</td>
               <td>{price(p.price)}</td>
-              <td className={tone(p.change_pct)}>{pct(p.change_pct)}</td>
+              <td className={tone(p.change_pct)}>
+                {pct(p.change_pct)}
+                {p.ext_price != null && (
+                  <span className="ext-line" title={`${extLabel(p.ext_session)} ${price(p.ext_price)}`}>
+                    {extLabel(p.ext_session, true)} <span className={tone(p.ext_change_pct)}>{pct(p.ext_change_pct)}</span>
+                  </span>
+                )}
+              </td>
               <td className={tone(p.day_pnl)}>{money(p.day_pnl, { signed: true })}</td>
               <td>{money(p.market_value)}</td>
               <td>{p.weight_pct == null ? "–" : `${p.weight_pct.toFixed(1)}%`}</td>

@@ -10,19 +10,24 @@ function day(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 }
 
-/** Upcoming earnings and dividends for holdings + watchlist, and results reported in the last week. */
-export function EventsCard({ symbol }: { symbol?: string }) {
+/** Upcoming earnings and dividends, and results reported in the last week: for one symbol, one
+ * portfolio's holdings, or (no portfolio, or the All view) every holding plus the watchlist. */
+export function EventsCard({ symbol, portfolio }: { symbol?: string; portfolio?: string }) {
   const [data, setData] = useState<{ upcoming: CalEvent[]; recent: CalEvent[] } | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    api.events(symbol ? 60 : 14, 7).then(setData, () => setFailed(true));
-  }, [symbol]);
+    setData(null);
+    setFailed(false);
+    let stale = false;
+    api.events(symbol ? 60 : 14, 7, symbol ? { symbol } : { portfolio })
+      .then((d) => !stale && setData(d), () => !stale && setFailed(true));
+    return () => { stale = true; };
+  }, [symbol, portfolio]);
 
   if (failed) return null;
-  const filter = (rows: CalEvent[]) => (symbol ? rows.filter((e) => e.symbol === symbol) : rows);
-  const upcoming = data ? filter(data.upcoming) : [];
-  const recent = data ? filter(data.recent).filter((e) => e.kind === "earnings" && e.epsActual != null) : [];
+  const upcoming = data?.upcoming ?? [];
+  const recent = (data?.recent ?? []).filter((e) => e.kind === "earnings" && e.epsActual != null);
 
   return (
     <section className="card">

@@ -9,16 +9,19 @@ Freshness rules:
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from argus.config import Settings
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
-from argus.models import Fundamental, Instrument, PriceBar, QuoteCache
+from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
 
 METRIC_FIELDS = (
@@ -26,16 +29,32 @@ METRIC_FIELDS = (
     "revenue_ttm", "revenue_growth_yoy_pct", "gross_margin_pct", "operating_margin_pct", "net_margin_pct",
     "roe_pct", "fcf_ttm", "debt_to_equity", "dividend_yield_pct", "beta", "high_52w", "low_52w",
     "expense_ratio_pct", "net_assets", "ytd_return_pct", "return_3y_pct", "return_5y_pct",
+    "revenue_growth_q_yoy_pct", "revenue_growth_3y_pct", "revenue_growth_5y_pct", "eps_growth_yoy_pct",
+    "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct", "roa_pct", "roi_pct",
+    "payout_ratio_pct", "dividend_growth_5y_pct", "return_1w_pct", "return_3m_pct", "return_6m_pct",
+    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
 # (VIST in MXN, CNQ in CAD) while Yahoo reports the US listing in USD, so these prefer Yahoo.
 # Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
-PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm"}
-FUNDAMENTALS_VERSION = 3  # bump to invalidate cached rows when merge rules change
+PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm",
+                         "sma50", "sma200"}
+# Pre/post-market prices are re-fetched this often during those sessions, and while closed
+# (overnight, weekends) only to catch the last after-hours prints.
+EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
+BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
+FUNDAMENTALS_VERSION = 4  # bump to invalidate cached rows when merge rules change
+
+log = logging.getLogger("argus.market")
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
+
+
+def _aware(dt: datetime) -> datetime:
+    """Aggregates (min/max) bypass the UTC column type and come back naive."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 class MarketService:
     def __init__(self, engine: Engine, settings: Settings, quote_providers: list, history_provider,
@@ -70,7 +89,12 @@ class MarketService:
 
         missing = [s for s in symbols if s not in quotes]
         errors: dict[str, str] = {}
-        for provider in self.quote_providers:
+        providers = self.quote_providers
+        if len(missing) >= BATCH_FIRST_MIN:
+            # Many symbols: a batch provider answers in one request and spares Finnhub's 60 calls/minute
+            # for streaming, metrics and events.
+            providers = sorted(providers, key=lambda p: not getattr(p, "batch_quotes", False))
+        for provider in providers:
             if not missing:
                 break
             try:
@@ -86,7 +110,57 @@ class MarketService:
             errors.setdefault(sym, "unknown symbol or no provider returned a quote")
         for sym in quotes:
             errors.pop(sym, None)
-        return quotes, errors
+        return self.attach_extended(quotes, status), errors
+
+    def attach_extended(self, quotes: dict[str, Quote], status: dict | None = None) -> dict[str, Quote]:
+        """Add pre-market / after-hours prices traded since the last regular close (none during the
+        regular session). Cached; refreshed from Yahoo in one batch when stale. Best effort."""
+        status = status or market_status()
+        if status["session"] == "regular" or not quotes:
+            return {s: q.without_ext() if q.ext_price is not None else q for s, q in quotes.items()}
+        now = datetime.now(UTC)
+        since = datetime.fromisoformat(status["last_close"])
+        max_age = timedelta(seconds=EXT_MAX_AGE[status["session"]])
+        with session_scope(self.engine) as s:
+            rows = {r.symbol: (r.session, r.price, r.as_of, r.fetched_at)
+                    for r in s.scalars(select(ExtQuote).where(ExtQuote.symbol.in_(list(quotes))))}
+        stale = [sym for sym in quotes if sym not in rows or now - rows[sym][3] > max_age]
+        fetch = getattr(self.profile_provider, "get_extended", None)
+        if stale and fetch:
+            try:
+                got = fetch(stale)
+            except ProviderError as e:  # keep serving what's cached
+                log.warning("extended-hours quotes: %s", e)
+            else:
+                self.store_extended({sym: got.get(sym) for sym in stale}, now)
+                for sym in stale:
+                    if sym in got:
+                        rows[sym] = (*got[sym], now)
+        out = {}
+        for sym, q in quotes.items():
+            ext = rows.get(sym)
+            if ext and ext[2] > since and (q.ext_as_of is None or ext[2] > q.ext_as_of):
+                q = replace(q, ext_session=ext[0], ext_price=ext[1], ext_as_of=ext[2])
+            elif q.ext_as_of is not None and q.ext_as_of <= since:
+                q = q.without_ext()
+            out[sym] = q
+        return out
+
+    def store_extended(self, ext: dict[str, tuple[str, float, datetime] | Quote | None], now: datetime | None = None) -> None:
+        """Cache extended-hours prices; None records that a symbol had none (so it isn't re-asked)."""
+        now = now or datetime.now(UTC)
+        rows = []
+        for sym, e in ext.items():
+            if isinstance(e, Quote):
+                e = (e.ext_session, e.ext_price, e.ext_as_of) if e.ext_price is not None else None
+            # "none" rows keep the fetch time but an as_of that never counts as recent.
+            rows.append(dict(symbol=sym, session=e[0] if e else "none", price=e[1] if e else 0.0,
+                             as_of=e[2] if e else datetime(1970, 1, 1, tzinfo=UTC), fetched_at=now))
+        if rows:
+            with session_scope(self.engine) as s:
+                stmt = insert(ExtQuote).values(rows)
+                s.execute(stmt.on_conflict_do_update(index_elements=["symbol"], set_={
+                    c: stmt.excluded[c] for c in rows[0] if c != "symbol"}))
 
     def cached_quotes(self, symbols: list[str], max_age_s: int) -> dict[str, Quote]:
         """Quotes already in the cache and younger than `max_age_s`; never calls a provider."""
@@ -109,39 +183,82 @@ class MarketService:
 
     # -- history --------------------------------------------------------------
     def get_history(self, symbol: str, period: str = "1y", interval: str = "1d") -> list[Bar]:
-        if period not in PERIODS and period != "max":
-            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.", hint=f"Use one of {', '.join(PERIODS)}, max")
+        if period not in PERIODS and period not in ("max", "ytd"):
+            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.", hint=f"Use one of {', '.join(PERIODS)}, ytd, max")
         now = datetime.now(UTC)
-        start = datetime(1970, 1, 2, tzinfo=UTC) if period == "max" else now - timedelta(days=PERIODS[period])
+        if period == "max":
+            start = datetime(1970, 1, 2, tzinfo=UTC)
+        elif period == "ytd":
+            start = datetime(now.astimezone(NY).year, 1, 1, tzinfo=NY).astimezone(UTC)
+        else:
+            start = now - timedelta(days=PERIODS[period])
         if interval != "1d":
             return self._fetch_history(symbol, start, None, interval)
-
+        self._ensure_daily_bars([symbol], start)
         with session_scope(self.engine) as s:
-            cached = list(s.scalars(select(PriceBar).where(PriceBar.symbol == symbol, PriceBar.interval == "1d")
-                                    .order_by(PriceBar.ts)))
-        first = cached[0].ts if cached else None
-        last = cached[-1].ts if cached else None
-        last_session = datetime.fromisoformat(market_status(now)["last_close"]) - timedelta(hours=12)
-        fetch_from = None
-        if not cached or first > start + timedelta(days=5):
-            fetch_from = start
-        elif last < last_session:
-            fetch_from = last - timedelta(days=3)  # re-fetch a few bars to pick up late corrections
-        if fetch_from is not None:
-            self._store_bars(symbol, "1d", self._fetch_history(symbol, fetch_from, None, "1d"))
-        with session_scope(self.engine) as s:
-            rows = s.scalars(select(PriceBar).where(PriceBar.symbol == symbol, PriceBar.interval == "1d",
-                                                    PriceBar.ts >= start).order_by(PriceBar.ts))
-            return [Bar(r.ts, r.o, r.h, r.l, r.c, r.v) for r in rows]
+            rows = s.execute(select(PriceBar.ts, PriceBar.o, PriceBar.h, PriceBar.l, PriceBar.c, PriceBar.v).where(
+                PriceBar.symbol == symbol, PriceBar.interval == "1d", PriceBar.ts >= start).order_by(PriceBar.ts))
+            return [Bar(*r) for r in rows]
 
     def daily_closes(self, symbol: str, start: date) -> dict[date, float]:
         """Close per New York trading date from `start` on (cached daily bars)."""
-        days = (datetime.now(UTC).date() - start).days + 7
-        period = next((p for p, n in PERIODS.items() if n >= days), "max")
-        return {b.ts.astimezone(NY).date(): b.c for b in self.get_history(symbol, period, "1d")
-                if b.ts.astimezone(NY).date() >= start}
+        return self.daily_closes_many([symbol], start).get(symbol, {})
+
+    def daily_closes_many(self, symbols: list[str], start: date) -> dict[str, dict[date, float]]:
+        """Closes for many symbols at once: missing history downloads in parallel, then one query
+        reads everything. (SQLite reads stay on this thread: Python's sqlite3 hands the GIL back and
+        forth per row, so threaded reads of big results run many times slower than sequential ones.)"""
+        start_dt = datetime.combine(start - timedelta(days=7), datetime.min.time(), UTC)
+        self._ensure_daily_bars(symbols, start_dt)
+        out: dict[str, dict[date, float]] = {s: {} for s in symbols}
+        with session_scope(self.engine) as s:
+            for sym, ts, c in s.execute(select(PriceBar.symbol, PriceBar.ts, PriceBar.c).where(
+                    PriceBar.symbol.in_(symbols), PriceBar.interval == "1d", PriceBar.ts >= start_dt)
+                    .order_by(PriceBar.symbol, PriceBar.ts)):
+                d = ts.astimezone(NY).date()
+                if d >= start:
+                    out[sym][d] = c
+        return out
+
+    def _ensure_daily_bars(self, symbols: list[str], start: datetime) -> None:
+        """Download whatever daily history the cache lacks from `start` to the last close."""
+        now = datetime.now(UTC)
+        last_session = datetime.fromisoformat(market_status(now)["last_close"]) - timedelta(hours=12)
+        with session_scope(self.engine) as s:
+            cov = {sym: (lo, hi) for sym, lo, hi in s.execute(
+                select(PriceBar.symbol, func.min(PriceBar.ts), func.max(PriceBar.ts))
+                .where(PriceBar.symbol.in_(symbols), PriceBar.interval == "1d").group_by(PriceBar.symbol))}
+            # "Yahoo has nothing before X": recent listings would otherwise re-download on every call.
+            listed = {r.key.split(":", 1)[1]: r.at for r in s.scalars(select(RefreshLog).where(
+                RefreshLog.key.in_([f"bars-first:{x}" for x in symbols])))}
+        todo: dict[str, datetime] = {}
+        for sym in symbols:
+            first, last = cov.get(sym, (None, None))
+            first, last = (_aware(first), _aware(last)) if first else (None, None)
+            earliest = _aware(listed[sym]) if sym in listed else None
+            if first is None:
+                todo[sym] = start
+            elif first > start + timedelta(days=5) and not (earliest and first <= earliest + timedelta(days=1)):
+                todo[sym] = start
+            elif last < last_session:
+                todo[sym] = last - timedelta(days=3)  # re-fetch a few bars to pick up late corrections
+        if not todo:
+            return
+        if len(todo) == 1:
+            fetched = {sym: self._fetch_history(sym, frm, None, "1d") for sym, frm in todo.items()}
+        else:
+            with ThreadPoolExecutor(max_workers=8) as pool:  # network only; storing happens below
+                fetched = dict(zip(todo, pool.map(lambda kv: self._fetch_history(kv[0], kv[1], None, "1d"),
+                                                  todo.items())))
+        for sym, bars in fetched.items():
+            self._store_bars(sym, "1d", bars)
+            if bars and todo[sym] == start and bars[0].ts > start + timedelta(days=5):
+                with session_scope(self.engine) as s:
+                    s.merge(RefreshLog(key=f"bars-first:{sym}", at=bars[0].ts))
 
     def _fetch_history(self, symbol, start, end, interval) -> list[Bar]:
+        if self.history_provider is None:
+            raise ArgusError("NOT_CONFIGURED", "No price history provider.")
         try:
             return self.history_provider.get_history(symbol, start, end, interval)
         except ProviderError as e:
@@ -162,41 +279,17 @@ class MarketService:
         unknown = [f for f in fields or [] if f not in METRIC_FIELDS]
         if unknown:
             raise ArgusError("INVALID_ARG", f"Unknown fields: {', '.join(unknown)}", hint=f"Valid: {', '.join(METRIC_FIELDS)}")
-        now = datetime.now(UTC)
-        with session_scope(self.engine) as s:
-            row = s.get(Fundamental, symbol)
-            cached = (row.metrics, row.sources, row.as_of) if row else None
-        fresh = cached and cached[1].get("_version") == FUNDAMENTALS_VERSION and \
-            now - cached[2] < timedelta(seconds=self.settings.fundamentals_max_age_s)
-        if fresh and not refresh:
-            metrics, sources, as_of = cached
+        cached = self.cached_fundamentals([symbol]).get(symbol)
+        if cached and cached["fresh"] and not refresh:
+            metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]
         else:
-            by_provider: dict[str, dict] = {}
-            errors = []
-            for provider in self.fundamentals_providers:
-                try:
-                    by_provider[provider.name] = provider.get_metrics(symbol)
-                except ProviderError as e:
-                    errors.append(str(e))
-            metrics, sources = {}, {}
-            names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
-            for field in METRIC_FIELDS:
-                order = sorted(names, key=lambda n: n != "yahoo") if field in PRICE_CURRENCY_FIELDS else names
-                for n in order:
-                    v = by_provider[n].get(field)
-                    if v is not None:
-                        metrics[field], sources[field] = v, n
-                        break
-            if not metrics:
-                if cached:
-                    metrics, sources, as_of = cached  # stale beats nothing
-                else:
-                    raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors) or None)
+            fetched, errors = self._fetch_fundamentals(symbol)
+            if fetched:
+                metrics, sources, as_of = self._store_fundamentals(symbol, *fetched, errors, cached)
+            elif cached:
+                metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]  # stale beats nothing
             else:
-                as_of = now
-                sources["_version"] = FUNDAMENTALS_VERSION
-                with session_scope(self.engine) as s:
-                    s.merge(Fundamental(symbol=symbol, as_of=as_of, metrics=metrics, sources=sources))
+                raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
         wanted = fields or list(METRIC_FIELDS)
         return {
             "symbol": symbol,
@@ -204,6 +297,74 @@ class MarketService:
             "metrics": {f: metrics.get(f) for f in wanted},
             "sources": {f: sources[f] for f in wanted if f in sources},
         }
+
+    def cached_fundamentals(self, symbols: list[str]) -> dict[str, dict]:
+        """Whatever the cache holds for these symbols, in one query; `fresh` says if it's current."""
+        now = datetime.now(UTC)
+        out: dict[str, dict] = {}
+        with session_scope(self.engine) as s:
+            for row in s.scalars(select(Fundamental).where(Fundamental.symbol.in_(symbols))):
+                fresh = row.sources.get("_version") == FUNDAMENTALS_VERSION and \
+                    now - row.as_of < timedelta(seconds=self.settings.fundamentals_max_age_s)
+                out[row.symbol] = {"metrics": row.metrics, "sources": row.sources, "as_of": row.as_of, "fresh": fresh}
+        return out
+
+    def refresh_fundamentals(self, symbols: list[str], workers: int = 6) -> dict[str, str]:
+        """Fetch and store fundamentals for many symbols: network calls in parallel (Finnhub's own
+        rate limiter paces them), writes on this thread. Returns {symbol: error} for failures."""
+        if not symbols:
+            return {}
+        with ThreadPoolExecutor(max_workers=min(workers, len(symbols))) as pool:
+            results = dict(zip(symbols, pool.map(self._fetch_fundamentals, symbols)))
+        cached = self.cached_fundamentals(symbols)
+        failed = {}
+        for sym, (fetched, errors) in results.items():
+            if fetched:
+                self._store_fundamentals(sym, *fetched, errors, cached.get(sym))
+            else:
+                failed[sym] = "; ".join(errors.values()) or "no data"
+        return failed
+
+    def _fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
+        """Ask every fundamentals provider at once (network only) and merge: first non-null wins,
+        except price-currency fields, where Yahoo goes first. None if nobody had anything."""
+        def ask(provider):
+            try:
+                return provider.name, provider.get_metrics(symbol), None
+            except ProviderError as e:
+                return provider.name, None, str(e)
+        if len(self.fundamentals_providers) > 1:
+            with ThreadPoolExecutor(max_workers=len(self.fundamentals_providers)) as pool:
+                answers = list(pool.map(ask, self.fundamentals_providers))
+        else:
+            answers = [ask(p) for p in self.fundamentals_providers]
+        by_provider = {name: m for name, m, _ in answers if m is not None}
+        errors = {name: e for name, _, e in answers if e}  # provider -> error
+        names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
+        metrics, sources = {}, {}
+        for field in METRIC_FIELDS:
+            order = sorted(names, key=lambda n: n != "yahoo") if field in PRICE_CURRENCY_FIELDS else names
+            for n in order:
+                v = by_provider[n].get(field)
+                if v is not None:
+                    metrics[field], sources[field] = v, n
+                    break
+        return ((metrics, sources) if metrics else None), errors
+
+    def _store_fundamentals(self, symbol: str, metrics: dict, sources: dict, errors: dict[str, str] | None = None,
+                            previous: dict | None = None) -> tuple[dict, dict, datetime]:
+        """Store a fresh merge. Fields from a provider that failed this time keep their last values
+        (a Finnhub rate-limit hiccup shouldn't blank growth and momentum for a day)."""
+        if errors and previous:
+            metrics, sources = dict(metrics), dict(sources)
+            for field, src in previous["sources"].items():
+                if src in errors and field not in metrics and previous["metrics"].get(field) is not None:
+                    metrics[field], sources[field] = previous["metrics"][field], src
+        as_of = datetime.now(UTC)
+        sources = sources | {"_version": FUNDAMENTALS_VERSION}
+        with session_scope(self.engine) as s:
+            s.merge(Fundamental(symbol=symbol, as_of=as_of, metrics=metrics, sources=sources))
+        return metrics, sources, as_of
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         if self.sec is None:

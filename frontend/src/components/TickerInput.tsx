@@ -9,10 +9,13 @@ interface Props {
   onChange: (v: string) => void;
   placeholder?: string;
   "aria-label"?: string;
+  required?: boolean;
+  /** Applied to the wrapper, e.g. a maxWidth in a form row (the suggestion list may be wider). */
+  style?: React.CSSProperties;
 }
 
 /** Text input for one or more tickers ("TSLA, COST") that suggests completions for the last one. */
-export function TickerInput({ value, onChange, placeholder, "aria-label": label }: Props) {
+export function TickerInput({ value, onChange, placeholder, "aria-label": label, required, style }: Props) {
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -61,8 +64,8 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label 
   };
 
   return (
-    <div className="combo">
-      <input className="input" value={value} placeholder={placeholder} aria-label={label} autoComplete="off"
+    <div className="combo" style={style}>
+      <input className="input" value={value} placeholder={placeholder} aria-label={label} autoComplete="off" required={required}
              role="combobox" aria-expanded={shown.length > 0} aria-controls={listId} aria-autocomplete="list"
              aria-activedescendant={shown.length ? `${listId}-${active}` : undefined}
              onChange={(e) => { onChange(e.target.value); setOpen(true); }}

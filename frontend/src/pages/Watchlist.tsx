@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, type StreamUpdate, type WatchItem } from "../api";
+import { HoldingsTabs } from "../components/HoldingsTabs";
 import { TickerInput } from "../components/TickerInput";
-import { big, pct, price, ratio, tone } from "../format";
+import { big, extLabel, pct, price, ratio, tone } from "../format";
 
 const pctCell = (v: number | null | undefined) => (v == null ? "–" : `${v.toFixed(1)}%`);
 
@@ -54,47 +55,58 @@ export function Watchlist({ live }: { live: StreamUpdate | null }) {
         {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
       </section>
 
-      <section className="card">
-        <h2>Watchlist {items ? <span className="muted">· {items.length}</span> : null}</h2>
-        {!items ? <p className="muted">Loading…</p> : items.length === 0 ? (
+      {!items ? <section className="card"><p className="muted">Loading…</p></section> : items.length === 0 ? (
+        <section className="card">
+          <h2>Watchlist</h2>
           <p className="muted">Nothing yet. Add tickers above, or ask Claude: “add TSLA to my Argus watchlist”.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th><th>Price</th><th>Day %</th><th>Mkt cap</th><th>P/E</th><th>Fwd P/E</th><th>P/S</th>
-                  <th>Rev growth</th><th>Net margin</th><th>Note</th><th aria-label="Remove" />
+        </section>
+      ) : (
+        <HoldingsTabs source={{ kind: "watchlist", name: "Watchlist" }}
+                      rows={items.map((i) => ({ symbol: i.symbol, name: null, price: (live?.quotes[i.symbol] ?? i.quote)?.price ?? null }))}
+                      first={{ label: `Watchlist · ${items.length}`, content: (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th><th>Price</th><th>Day %</th><th>Mkt cap</th><th>P/E</th><th>Fwd P/E</th><th>P/S</th>
+              <th>Rev growth</th><th>Net margin</th><th>Note</th><th aria-label="Remove" />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((i) => {
+              const q = live?.quotes[i.symbol] ?? i.quote;
+              const m = i.metrics ?? {};
+              return (
+                <tr key={i.symbol} onClick={() => navigate(`/t/${i.symbol}`)}>
+                  <td><span className="sym">{i.symbol}</span></td>
+                  <td>{price(q?.price)}</td>
+                  <td className={tone(q?.change_pct)}>
+                    {pct(q?.change_pct)}
+                    {q?.ext_price != null && (
+                      <span className="ext-line" title={`${extLabel(q.ext_session)} ${price(q.ext_price)}`}>
+                        {extLabel(q.ext_session, true)} <span className={tone(q.ext_change_pct)}>{pct(q.ext_change_pct)}</span>
+                      </span>
+                    )}
+                  </td>
+                  <td>{big(m.market_cap)}</td>
+                  <td>{ratio(m.pe_ttm, 1)}</td>
+                  <td>{ratio(m.pe_forward, 1)}</td>
+                  <td>{ratio(m.ps_ttm, 1)}</td>
+                  <td className={tone(m.revenue_growth_yoy_pct)}>{pct(m.revenue_growth_yoy_pct, 1)}</td>
+                  <td>{pctCell(m.net_margin_pct)}</td>
+                  <td style={{ textAlign: "left", whiteSpace: "normal" }} className="text-2">{i.note ?? ""}</td>
+                  <td>
+                    <button className="btn ghost" title={`Remove ${i.symbol}`}
+                            onClick={(e) => { e.stopPropagation(); remove(i.symbol); }}>×</button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {items.map((i) => {
-                  const q = live?.quotes[i.symbol] ?? i.quote;
-                  const m = i.metrics ?? {};
-                  return (
-                    <tr key={i.symbol} onClick={() => navigate(`/t/${i.symbol}`)}>
-                      <td><span className="sym">{i.symbol}</span></td>
-                      <td>{price(q?.price)}</td>
-                      <td className={tone(q?.change_pct)}>{pct(q?.change_pct)}</td>
-                      <td>{big(m.market_cap)}</td>
-                      <td>{ratio(m.pe_ttm, 1)}</td>
-                      <td>{ratio(m.pe_forward, 1)}</td>
-                      <td>{ratio(m.ps_ttm, 1)}</td>
-                      <td className={tone(m.revenue_growth_yoy_pct)}>{pct(m.revenue_growth_yoy_pct, 1)}</td>
-                      <td>{pctCell(m.net_margin_pct)}</td>
-                      <td style={{ textAlign: "left", whiteSpace: "normal" }} className="text-2">{i.note ?? ""}</td>
-                      <td>
-                        <button className="btn ghost" title={`Remove ${i.symbol}`}
-                                onClick={(e) => { e.stopPropagation(); remove(i.symbol); }}>×</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+                      ) }} />
+      )}
     </div>
   );
 }

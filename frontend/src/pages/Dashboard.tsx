@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
-import { PerformanceCard } from "../components/PerformanceCard";
-import { money, pct, tone } from "../format";
+import { HoldingsTabs } from "../components/HoldingsTabs";
+import { extLabel, money, pct, tone } from "../format";
+
+// The chart library is the biggest dependency: let the numbers render first.
+const PerformanceCard = lazy(() => import("../components/PerformanceCard").then((m) => ({ default: m.PerformanceCard })));
 
 interface Props {
   portfolio: string;
@@ -48,8 +51,17 @@ export function Dashboard({ portfolio, live }: Props) {
         <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
         <div className="hero-value">{money(t.market_value)}</div>
         <div className={`hero-delta ${tone(t.day_pnl)}`}>
-          {money(t.day_pnl, { signed: true })} ({pct(t.day_pnl_pct)}) {summary.market.session === "closed" ? "last session" : "today"}
+          {money(t.day_pnl, { signed: true })} ({pct(t.day_pnl_pct)}) {["closed", "pre"].includes(summary.market.session) ? "last session" : "today"}
         </div>
+        {t.ext_pnl != null && (
+          <div className="ext-hero">
+            <span className="muted">{extLabel(t.ext_session)}</span>{" "}
+            <span className={tone(t.ext_pnl)}>{money(t.ext_pnl, { signed: true })} ({pct(t.ext_pnl_pct)})</span>
+            {t.ext_coverage_pct != null && t.ext_coverage_pct < 99.5 && (
+              <span className="muted small"> · positions worth {t.ext_coverage_pct.toFixed(0)}% of the portfolio traded</span>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="tiles" aria-label="Key figures">
@@ -69,7 +81,7 @@ export function Dashboard({ portfolio, live }: Props) {
           <div className="delta muted">FIFO, since import</div>
         </div>
         <div className="tile">
-          <div className="label">Portfolio vs {summary.portfolio.benchmark}, {summary.market.session === "closed" ? "last session" : "today"}</div>
+          <div className="label">Portfolio vs {summary.portfolio.benchmark}, {["closed", "pre"].includes(summary.market.session) ? "last session" : "today"}</div>
           <div className="value">
             <span className={tone(t.day_pnl_pct)}>{pct(t.day_pnl_pct)}</span>
             <span className="muted"> / </span>
@@ -92,14 +104,14 @@ export function Dashboard({ portfolio, live }: Props) {
       )}
 
       {/* Refetch once per session day (and when the session changes), not on every tick. */}
-      <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />
+      <Suspense fallback={<section className="card"><p className="muted">Loading chart…</p></section>}>
+        <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />
+      </Suspense>
 
-      <section className="card">
-        <h2>Holdings</h2>
-        <HoldingsTable positions={summary.positions} />
-      </section>
+      <HoldingsTabs source={{ kind: "portfolio", name: portfolio }} rows={summary.positions}
+                    first={{ label: "Holdings", content: <HoldingsTable positions={summary.positions} /> }} />
 
-      <EventsCard />
+      <EventsCard portfolio={portfolio} />
 
       <section className="grid-2">
         <div className="card">

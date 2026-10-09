@@ -267,6 +267,18 @@ class CompanyProfile(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class ExtQuote(Base):
+    """Latest pre-market / after-hours trade per symbol (cache; the regular quote lives in `quote`)."""
+
+    __tablename__ = "ext_quote"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    session: Mapped[str] = mapped_column(String(4))  # pre | post
+    price: Mapped[float] = mapped_column(Float)
+    as_of: Mapped[datetime] = mapped_column()
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class SecurityMap(Base):
     """ISIN/CUSIP -> exchange ticker (OpenFIGI), for N-PORT holdings. symbol None = no usable listing."""
 
@@ -277,6 +289,16 @@ class SecurityMap(Base):
     exchange: Mapped[str | None] = mapped_column(String(8))
     symbol: Mapped[str | None] = mapped_column(String(32))  # Yahoo form; US listings in canonical form
     as_of: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DividendHistory(Base):
+    """Cash dividends per share by ex-date (Yahoo), cached a day: [[YYYY-MM-DD, amount], ...]."""
+
+    __tablename__ = "dividend_history"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(default=utcnow)
+    data: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class PeerList(Base):
@@ -306,7 +328,9 @@ __all__ = [
     "AlertEvent",
     "AuditLog",
     "CompanyProfile",
+    "DividendHistory",
     "Event",
+    "ExtQuote",
     "Note",
     "Base",
     "FundProfile",

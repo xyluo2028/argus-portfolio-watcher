@@ -168,3 +168,65 @@ def test_metadata_failure_never_blocks_a_trade(make_argus):
     a.portfolios.create_portfolio("growth")
     assert a.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 1, 10)])["inserted_ids"]
     assert a.portfolio("growth", with_quotes=False)["positions"][0]["symbol"] == "X"
+
+
+def test_events_follow_the_selected_portfolio(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event
+
+    a = make_argus([FakeQuotesAll()])
+    for name, sym in (("growth", "MU"), ("fixed-income", "BND")):
+        a.portfolios.create_portfolio(name)
+        a.portfolios.add_transactions(name, [TxnInput("BUY", sym, at(2026, 9, 1), 1, 10)])
+    a.watchlists.add(["BNS"])
+    soon = datetime.now(NY).date() + timedelta(days=3)
+    with session_scope(a.engine) as s:
+        for sym in ("MU", "BND", "BNS"):
+            s.add(Event(symbol=sym, kind="ex_dividend", d=soon, data={}, source="test"))
+
+    syms = lambda **kw: [e["symbol"] for e in a.upcoming_events(refresh=False, **kw)["upcoming"]]  # noqa: E731
+    assert syms(portfolio="fixed-income") == ["BND"]
+    assert syms(portfolio="growth") == ["MU"]
+    assert syms(portfolio="all") == syms() == ["BND", "BNS", "MU"]
+    assert syms(symbols=["mu"]) == ["MU"]
+
+
+class FakeQuotesAll:
+    name = "fake"
+
+    def get_quotes(self, symbols):
+        return {s: Quote(s, 10.0, 10.0, None, None, None, datetime.now(UTC), "fake") for s in symbols}
+
+
+def test_earnings_overview_uses_calendar_then_eps_history(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event, Instrument
+
+    class FH:
+        calls = 0
+
+        def earnings_surprises(self, symbol):
+            FH.calls += 1
+            return [{"period": "2026-06-30", "actual": 2.0, "estimate": 1.9, "surprisePercent": 5.3, "quarter": 2,
+                     "year": 2027}, {"period": "2026-03-31", "actual": 1.5, "estimate": 1.6, "surprisePercent": -6.2}]
+
+    a = make_argus()
+    a.events.finnhub = FH()
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", s, at(2026, 9, 1), 1, 10) for s in ("MU", "NVDA", "BND")])
+    today = datetime.now(NY).date()
+    with session_scope(a.engine) as s:
+        s.merge(Instrument(symbol="BND", type="ETP"))
+        s.add(Event(symbol="MU", kind="earnings", d=today - timedelta(days=7), data={"epsActual": 33.4, "epsEstimate": 32.6}, source="t"))
+        s.add(Event(symbol="NVDA", kind="earnings", d=today + timedelta(days=40), hour="amc", data={"epsEstimate": 2.5}, source="t"))
+    a.events.refresh = lambda syms, **kw: {"refreshed": [], "failed": {}}
+
+    rows = {r["symbol"]: r for r in a.earnings_overview("growth")["rows"]}
+    assert rows["MU"]["last"]["epsActual"] == 33.4 and rows["MU"]["next"] is None
+    assert rows["NVDA"]["last"]["period"] == "2026-06-30" and rows["NVDA"]["last"]["epsSurprisePct"] == 5.3  # newest
+    assert rows["NVDA"]["next"]["hour"] == "amc"
+    assert rows["BND"]["last"] is None  # funds don't report earnings: no lookup
+    a.earnings_overview("growth")
+    assert FH.calls == 1  # NVDA only, then cached

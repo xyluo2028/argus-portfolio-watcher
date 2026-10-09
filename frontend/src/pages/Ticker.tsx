@@ -8,6 +8,7 @@ import {
   type HistoryResponse,
   type Position,
   type Quote,
+  type ReturnBases,
   type StreamUpdate,
 } from "../api";
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
@@ -15,10 +16,11 @@ import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
+import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
-import { big, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
+import { big, extLabel, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -26,6 +28,7 @@ const RANGES = [
   { label: "1M", period: "1mo", interval: "1d" },
   { label: "3M", period: "3mo", interval: "1d" },
   { label: "6M", period: "6mo", interval: "1d" },
+  { label: "YTD", period: "ytd", interval: "1d" },
   { label: "1Y", period: "1y", interval: "1d" },
   { label: "5Y", period: "5y", interval: "1d" },
   { label: "Max", period: "max", interval: "1d" },
@@ -67,7 +70,8 @@ const STATS: { key: string; label: string; fmt: (v: number | null | undefined) =
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
   const symbol = (useParams().symbol ?? "").toUpperCase();
-  const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[5]);
+  const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES.find((r) => r.label === "1Y")!);
+  const [bases, setBases] = useState<ReturnBases | null>(null);
   const [overlays, setOverlays] = useState<Overlay[]>(["sma50", "sma200"]);
   const [panes, setPanes] = useState<Pane[]>(["volume"]);
   const [history, setHistory] = useState<HistoryResponse | null>(null);
@@ -116,6 +120,20 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   }, [symbol, streamed]);
   const quote = streamed ?? polled;
 
+  // Each range's base price comes from the server; the return itself follows the live price.
+  const session = live?.market.session;
+  useEffect(() => {
+    let stale = false;
+    setBases(null);
+    api.returnBases(symbol).then((b) => !stale && setBases(b), () => undefined);
+    return () => { stale = true; };
+  }, [symbol, session]);
+  const rangeReturn = (label: string): number | null => {
+    const now = quote?.price ?? bases?.last_close?.close;
+    const base = label === "1D" ? (quote?.prev_close ?? bases?.bases["1D"]?.close) : bases?.bases[label]?.close;
+    return now != null && base ? (now / base - 1) * 100 : null;
+  };
+
   const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
   const m = fund?.metrics ?? {};
   const high52 = m.high_52w, low52 = m.low_52w;
@@ -132,6 +150,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               {quote?.change == null ? "–" : `${quote.change > 0 ? "+" : quote.change < 0 ? "−" : ""}${Math.abs(quote.change).toFixed(2)}`} ({pct(quote?.change_pct)})
               <span className="muted small"> {quote ? `· ${quoteTime(quote, live?.market.session ?? "closed")} · ${quote.source}` : ""}</span>
             </div>
+            {quote?.ext_price != null && (
+              <div className="ext-hero">
+                <span className="muted">{extLabel(quote.ext_session)}</span>{" "}
+                <span className="num">{price(quote.ext_price)}</span>{" "}
+                <span className={tone(quote.ext_change)}>
+                  {`${quote.ext_change! > 0 ? "+" : quote.ext_change! < 0 ? "−" : ""}${Math.abs(quote.ext_change!).toFixed(2)}`} ({pct(quote.ext_change_pct)})
+                </span>
+                <span className="muted small"> · {nyTime(quote.ext_as_of!)}</span>
+              </div>
+            )}
           </div>
           {high52 != null && low52 != null && quote && (
             <div className="small text-2" style={{ minWidth: 220 }}>
@@ -149,10 +177,20 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
 
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-          <div className="seg" role="group" aria-label="Range">
-            {RANGES.map((r) => (
-              <button key={r.label} aria-pressed={r.label === range.label} onClick={() => setRange(r)}>{r.label}</button>
-            ))}
+          <div className="seg ranges" role="group" aria-label="Range">
+            {RANGES.map((r) => {
+              const ret = rangeReturn(r.label);
+              const base = r.label === "1D" ? null : bases?.bases[r.label];
+              return (
+                <button key={r.label} aria-pressed={r.label === range.label} onClick={() => setRange(r)}
+                        title={base ? `Price return since the ${base.date} close (${price(base.close)}); dividends not included` : undefined}>
+                  <span>{r.label}</span>
+                  <span className={`ret ${tone(ret)}`}>
+                    {ret == null ? "–" : Math.abs(ret) >= 1000 ? `${ret > 0 ? "+" : "−"}${Math.round(Math.abs(ret)).toLocaleString("en-US")}%` : pct(ret, 1)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <div className="row">
             {OVERLAYS.map((o) => (
@@ -195,6 +233,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       </section>
 
       <PeersCard symbol={symbol} />
+      <ResearchCard symbol={symbol} />
 
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />

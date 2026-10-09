@@ -4,6 +4,9 @@
 - While the market is in a session (pre/regular/post), streams trade prints from the
   Finnhub WebSocket for the largest positions (free tier caps subscriptions at ~50) and
   refreshes everything over REST once a minute (this also supplies prev_close).
+- Pre-market and after-hours prints go to the quote's `ext_*` fields; `price` stays the
+  regular session's, so day change and P&L match the official close. Yahoo's batch quote
+  fills extended prices for everything tracked; they are dropped at the open.
 - While closed, it serves the settled close and does not poll.
 - WebSocket prices are flushed to the quote cache so the CLI and MCP see them too.
 """
@@ -32,6 +35,8 @@ REST_INTERVAL_S = 60
 SESSION_CHECK_S = 30
 FLUSH_INTERVAL_S = 10
 EVENTS_REFRESH_S = 6 * 3600
+WARM_CHECK_S = 15 * 60
+WARM_START_DELAY_S = 60  # let the first quotes and page loads go first
 
 
 class LiveHub:
@@ -42,7 +47,7 @@ class LiveHub:
         self.quotes: dict[str, Quote] = {}
         self.status: dict = market_status()
         self.streamed: list[str] = []
-        self.ws_state = "disabled" if not argus.settings.finnhub_api_key else "idle"
+        self.ws_state = "disabled" if not (argus.settings.finnhub_api_key and argus.settings.stream) else "idle"
         self.version = 0
         self._cond = asyncio.Condition()
         self._dirty: set[str] = set()
@@ -50,12 +55,14 @@ class LiveHub:
         self._ws_task: asyncio.Task | None = None
         self._resubscribe = asyncio.Event()
         self.fired_alerts: list[dict] = []  # fired this session, newest first (pushed to the UI)
+        self.warmed_for: str | None = None  # last_session the caches were warmed after
 
     # -- lifecycle ------------------------------------------------------------
     async def start(self) -> None:
         self._tasks = [asyncio.create_task(self._session_loop(), name="argus-session"),
                        asyncio.create_task(self._flush_loop(), name="argus-flush"),
-                       asyncio.create_task(self._events_loop(), name="argus-events")]
+                       asyncio.create_task(self._events_loop(), name="argus-events"),
+                       asyncio.create_task(self._warm_loop(), name="argus-warm")]
 
     async def stop(self) -> None:
         for t in [*self._tasks, self._ws_task]:
@@ -118,6 +125,10 @@ class LiveHub:
                     # Closed market: MarketService serves the settled close from cache.
                     await self._rest_refresh(symbols, max_age_s=self.rest_interval_s - 5 if in_session else None)
                     last_rest = loop.time()
+                if self.status["session"] == "regular":  # the open ends pre-market prices
+                    for sym, q in list(self.quotes.items()):
+                        if q.ext_price is not None:
+                            self.quotes[sym] = q.without_ext()
                 if in_session and self.ws_state != "disabled":
                     self._ensure_stream(symbols[: self.stream_limit])
                 else:
@@ -136,9 +147,13 @@ class LiveHub:
             live = self.quotes.get(sym)
             # Never let a slower REST quote overwrite a newer streamed trade price.
             if live and live.source == "finnhub-ws" and live.as_of > q.as_of:
-                self.quotes[sym] = replace(live, prev_close=q.prev_close, open=q.open)
-            else:
-                self.quotes[sym] = q
+                q = replace(live, prev_close=q.prev_close, open=q.open,
+                            ext_price=q.ext_price, ext_as_of=q.ext_as_of, ext_session=q.ext_session)
+            # Same for a newer streamed pre/post-market print.
+            if live and live.ext_as_of and (q.ext_as_of is None or live.ext_as_of > q.ext_as_of) \
+                    and self.status["session"] in ("pre", "post"):
+                q = replace(q, ext_price=live.ext_price, ext_as_of=live.ext_as_of, ext_session=live.ext_session)
+            self.quotes[sym] = q
         if errors:
             log.warning("no quotes for %s", ", ".join(sorted(errors)))
 
@@ -158,6 +173,23 @@ class LiveHub:
             except Exception:  # noqa: BLE001 - provider hiccups: try again next cycle
                 log.exception("events refresh failed")
             await asyncio.sleep(EVENTS_REFRESH_S)
+
+    async def _warm_loop(self) -> None:
+        """Warm the caches once at startup, then once after each session closes."""
+        await asyncio.sleep(WARM_START_DELAY_S)
+        while True:
+            try:
+                status = market_status()
+                due = self.warmed_for is None or (status["session"] == "closed"
+                                                  and self.warmed_for != status["last_session"])
+                if due:
+                    await asyncio.to_thread(self.argus.warm_caches)
+                    self.warmed_for = status["last_session"]
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                log.exception("cache warming failed")
+            await asyncio.sleep(WARM_CHECK_S)
 
     # -- websocket ------------------------------------------------------------
     def _ensure_stream(self, symbols: list[str]) -> None:
@@ -232,6 +264,16 @@ class LiveHub:
 
     def apply_trade(self, symbol: str, price: float, ts: datetime) -> None:
         base = self.quotes.get(symbol)
+        session = self.status["session"]
+        if session in ("pre", "post"):
+            # Extended hours: keep the regular price (the last close) and record the move beside it.
+            # (A Yahoo fallback quote is stamped with its fetch time, so compare with the last close.)
+            if base is None or (base.ext_as_of and ts < base.ext_as_of) \
+                    or ts <= datetime.fromisoformat(self.status["last_close"]):
+                return
+            self.quotes[symbol] = replace(base, ext_price=price, ext_as_of=ts, ext_session=session)
+            self._dirty.add(symbol)
+            return
         if base is None:
             self.quotes[symbol] = Quote(symbol, price, None, None, price, price, ts, "finnhub-ws")
         else:
@@ -239,8 +281,7 @@ class LiveHub:
                 return
             self.quotes[symbol] = replace(
                 base, price=price, as_of=ts, source="finnhub-ws", delayed=False,
-                high=max(base.high or price, price) if self.status["session"] == "regular" else base.high,
-                low=min(base.low or price, price) if self.status["session"] == "regular" else base.low,
+                high=max(base.high or price, price), low=min(base.low or price, price),
             )
         self._dirty.add(symbol)
 
@@ -253,4 +294,6 @@ class LiveHub:
     def _flush(self) -> None:
         dirty, self._dirty = self._dirty, set()
         if dirty:
-            self.argus.market.store_quotes([self.quotes[s] for s in dirty if s in self.quotes])
+            quotes = [self.quotes[s] for s in dirty if s in self.quotes]
+            self.argus.market.store_quotes(quotes)
+            self.argus.market.store_extended({q.symbol: q for q in quotes if q.ext_price is not None})

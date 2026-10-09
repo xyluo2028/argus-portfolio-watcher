@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** P0 foundation, P1 monitor MVP, P2 routines and P3 analysis are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, exposure with ETF look-through, targets & drift, what-if trades, and a 32-tool MCP server. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 foundation, P1 monitor MVP, P2 routines and P3 analysis are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, exposure with ETF look-through, targets & drift, what-if trades, and a 37-tool MCP server. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -33,10 +33,12 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 ## Setup
 
 ```bash
-brew install uv
+brew install uv                                     # Linux/WSL: curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
-cp .env.example .env   # add FINNHUB_API_KEY and SEC_USER_AGENT
+cp .env.example .env && chmod 600 .env              # add FINNHUB_API_KEY and SEC_USER_AGENT
 ```
+
+Building the web UI needs Node 20.19+ (`nvm install 22` on Linux).
 
 Without `FINNHUB_API_KEY`, quotes and metrics fall back to Yahoo (slower, unofficial).
 `SEC_USER_AGENT` (an app name and your email, as SEC asks of automated clients) is needed for
@@ -57,7 +59,7 @@ development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite prox
 
 ## Use it from Claude (MCP)
 
-Argus exposes 32 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, SEC
+Argus exposes 37 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
 financials, compare, performance, transactions (add, edit, delete), watchlist, events, alerts, notes, exposure,
 drift/targets, what-if (`simulate_trades`), and
 `get_daily_brief_data`, which gathers everything for a brief in one call. Write tools default
@@ -116,6 +118,13 @@ uv run argus snapshot load backup.json --replace # wipe existing records first (
 
 A snapshot holds your records: portfolios, transactions (including deleted ones), watchlists,
 notes, alerts, targets and the audit log. Market data caches are not included; they refill on use.
+
+## Running it always-on
+
+To run Argus on a server, a home box or your PC and reach it from other devices (Tailscale,
+Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: access token
+(`ARGUS_TOKEN`) and allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
+nightly `argus backup`, schema migrations, and moving your data.
 
 ## Development
 

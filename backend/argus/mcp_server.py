@@ -216,10 +216,12 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
 
     @mcp.tool(annotations=READ)
     @_tool
-    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None) -> dict:
+    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None,
+                   portfolio: str | None = None) -> dict:
         """Earnings (with hour, EPS/revenue estimates, and actuals once reported) and ex-dividend /
-        payment dates for held + watchlist symbols (or `symbols`). `held` marks current holdings."""
-        return argus.upcoming_events(days_ahead, days_back, symbols=symbols)
+        payment dates for `symbols`, else one `portfolio`'s holdings, else all held + watchlist
+        symbols. `held` marks current holdings."""
+        return argus.upcoming_events(days_ahead, days_back, symbols=symbols, portfolio=portfolio)
 
     @mcp.tool(annotations=READ)
     @_tool
@@ -239,6 +241,59 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         (overdue included)."""
         due = date.today() + timedelta(days=due_within_days) if due_within_days is not None else None
         return argus.notes.list(symbol, include_archived, due)
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_risk(portfolio: str) -> dict:
+        """Risk of the portfolio as it stands today ("all" = every portfolio), from a year of daily
+        returns: beta and volatility vs the benchmark, 1-day historical VaR/CVaR (95/99%), max
+        drawdown, each position's share of risk vs its weight, correlations among the largest
+        positions, stress scenarios (2008, COVID 2020, 2022 rates, Q4 2018 replayed on actual prices,
+        beta x SPY for holdings listed later; plus SPY -10%) and Fama-French 5 + momentum exposures."""
+        return argus.risk(portfolio, quotes_now())
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_research(symbol: str) -> dict:
+        """Research on one company: analyst consensus, price targets and monthly rating counts; EPS
+        estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
+        institutional and insider ownership, top 13F holders; short interest; 5-year valuation bands
+        (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; last week's
+        headlines with a keyword-based tone. Cached for an hour."""
+        return argus.research(symbol, quotes_now())
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_market_context() -> dict:
+        """The market backdrop: S&P 500, Nasdaq 100, Russell 2000, VIX, 10-year yield, USD/JPY,
+        oil, gold, bitcoin (levels and 1D/1W/1M/3M/YTD/1Y returns); the 11 sector ETFs with returns and
+        50/200-day trend; breadth proxies (RSP vs SPY, IWM vs SPY, sectors above their averages); the
+        Treasury yield curve today, a month and a year ago with 10Y-2Y and 10Y-3M spreads; upcoming
+        FOMC meetings and major US economic releases (times ET, consensus and previous)."""
+        return argus.market_context()
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def screen_stocks(filters: dict[str, list[float | None]] | None = None, sort: str = "market_cap",
+                      descending: bool = True, limit: int = 50, include_otc: bool = False) -> dict:
+        """Screen US-listed companies on SEC fundamentals (latest calendar year, prior year for growth,
+        latest balance sheet) and live market caps. filters: {field: [min, max]}, null for an open bound;
+        money in USD (market_cap 1e9 = $1B), percents as numbers (net_margin_pct 15 = 15%). Fields:
+        market_cap, price, revenue, revenue_growth_pct, net_income, earnings_growth_pct, gross_margin_pct,
+        operating_margin_pct, net_margin_pct, fcf_margin_pct, fcf_yield_pct, pe, ps, pb, roe_pct, roa_pct,
+        debt_to_equity, current_ratio. The first call may start building the universe (status.building);
+        call again in a minute."""
+        return argus.screen_stocks(filters, sort, descending, limit, include_otc)
+
+    @mcp.tool(annotations=READ)
+    @_tool
+    def get_dividends(portfolio: str) -> dict:
+        """Dividend income for a portfolio ("all" = every portfolio): per holding the frequency,
+        forward annual rate per share (latest payment x payments/year), yield, yield on cost and
+        expected annual income; and this calendar year's dividends by ex-date: estimated received so
+        far (shares held at each ex-date) plus projected for the rest of the year, also by month.
+        Before tax; payments usually follow the ex-date by 1-4 weeks."""
+        return argus.dividends(portfolio, quotes_now())
 
     @mcp.tool(annotations=READ)
     @_tool

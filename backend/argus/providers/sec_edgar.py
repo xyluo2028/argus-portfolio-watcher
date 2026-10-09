@@ -24,6 +24,7 @@ import httpx
 from argus.providers.base import ProviderError
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+FRAMES_MAX_AGE_S = 7 * 24 * 3600
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 TICKERS_MAX_AGE_S = 7 * 24 * 3600
 FACTS_MAX_AGE_S = 24 * 3600
@@ -140,6 +141,25 @@ class SecEdgarProvider:
             if row.get("ticker", "").upper() == want:
                 return int(row["cik_str"])
         return None
+
+    def company_tickers(self) -> list[dict]:
+        """SEC's ticker map: [{"cik", "ticker", "name"}], in SEC's own order (roughly largest first).
+        A company with several share classes appears once per ticker."""
+        rows = self._fetch_json(TICKERS_URL, "company_tickers.json", TICKERS_MAX_AGE_S)
+        return [{"cik": int(r["cik_str"]), "ticker": r["ticker"], "name": r.get("title")} for r in rows.values()]
+
+    def frame(self, concept: str, unit: str, period: str, taxonomy: str = "us-gaap") -> dict[int, dict]:
+        """One XBRL fact per company for a period ("CY2025" = a calendar year, "CY2026Q1I" = an
+        instant at that quarter's end): {cik: {"val", "end", "start"?}}. Cached for a week; a period
+        nobody reported yet comes back empty."""
+        url = f"https://data.sec.gov/api/xbrl/frames/{taxonomy}/{concept}/{unit}/{period}.json"
+        try:
+            data = self._fetch_json(url, f"frames/{taxonomy}-{concept}-{unit}-{period}.json", FRAMES_MAX_AGE_S)
+        except ProviderError as e:
+            if "no XBRL" in str(e):  # 404: nobody has reported this concept for this period (yet)
+                return {}
+            raise
+        return {int(r["cik"]): {"val": r["val"], "end": r.get("end"), "start": r.get("start")} for r in data.get("data", [])}
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         cik = self.cik_for(symbol)

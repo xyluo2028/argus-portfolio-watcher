@@ -18,8 +18,9 @@ from argus.providers.base import ProviderError
 log = logging.getLogger("argus.events")
 
 REFRESH_EVERY = timedelta(hours=20)
-LOOKBACK_DAYS = 14
-HORIZON_DAYS = 60
+LOOKBACK_DAYS = 100  # a full quarter back, so the last report is always known
+HORIZON_DAYS = 100
+REFRESH_KEY = "events100"  # RefreshLog prefix; renamed when the window changes so stored events refetch
 NEWS_TTL = timedelta(hours=1)
 
 
@@ -50,7 +51,7 @@ class EventsService:
         now = datetime.now(UTC)
         with session_scope(self.engine) as s:
             fresh = {r.key.split(":", 1)[1] for r in s.scalars(select(RefreshLog).where(
-                RefreshLog.key.in_([f"events:{x}" for x in symbols]))) if now - r.at < REFRESH_EVERY}
+                RefreshLog.key.in_([f"{REFRESH_KEY}:{x}" for x in symbols]))) if now - r.at < REFRESH_EVERY}
         return [x for x in symbols if x not in fresh]
 
     def refresh(self, symbols: list[str], force: bool = False, today: date | None = None) -> dict:
@@ -71,7 +72,7 @@ class EventsService:
                 s.execute(delete(Event).where(Event.symbol == sym, Event.d >= start, Event.d <= end))
                 for r in rows:
                     s.merge(r)
-                s.merge(RefreshLog(key=f"events:{sym}", at=datetime.now(UTC)))
+                s.merge(RefreshLog(key=f"{REFRESH_KEY}:{sym}", at=datetime.now(UTC)))
         return {"refreshed": [x for x in todo if x not in failed], "failed": failed}
 
     def _earnings(self, sym: str, start: date, end: date) -> list[Event]:
@@ -110,6 +111,38 @@ class EventsService:
         return out
 
     # -- queries --------------------------------------------------------------
+    def latest_results(self, symbols: list[str]) -> dict[str, dict]:
+        """Most recent reported quarter per symbol from Finnhub's earnings history (EPS actual vs
+        estimate; `period` is the fiscal quarter end, not the report date). Cached ~a day."""
+        if self.finnhub is None or not symbols:
+            return {}
+        now = datetime.now(UTC)
+        with session_scope(self.engine) as s:
+            fresh = {r.key.split(":", 1)[1] for r in s.scalars(select(RefreshLog).where(
+                RefreshLog.key.in_([f"results:{x}" for x in symbols]))) if now - r.at < REFRESH_EVERY}
+        for sym in [x for x in symbols if x not in fresh]:
+            try:
+                rows = self.finnhub.earnings_surprises(sym)
+            except ProviderError as e:
+                log.warning("earnings results %s: %s", sym, e)
+                continue
+            with session_scope(self.engine) as s:
+                s.execute(delete(Event).where(Event.symbol == sym, Event.kind == "eps_result"))
+                for r in rows:
+                    d = _to_date(r.get("period"))
+                    if d is not None and r.get("actual") is not None:
+                        s.merge(Event(symbol=sym, kind="eps_result", d=d, hour=None, source="finnhub", data={
+                            "epsActual": r.get("actual"), "epsEstimate": r.get("estimate"),
+                            "epsSurprisePct": r.get("surprisePercent"), "quarter": r.get("quarter"),
+                            "year": r.get("year")}))
+                s.merge(RefreshLog(key=f"results:{sym}", at=now))
+        out: dict[str, dict] = {}
+        with session_scope(self.engine) as s:
+            for e in s.scalars(select(Event).where(Event.symbol.in_(symbols), Event.kind == "eps_result")
+                               .order_by(Event.d)):
+                out[e.symbol] = {"period": e.d.isoformat(), **(e.data or {})}
+        return out
+
     def between(self, symbols: list[str], start: date, end: date, kinds: list[str] | None = None) -> list[dict]:
         with session_scope(self.engine) as s:
             q = select(Event).where(Event.symbol.in_(symbols), Event.d >= start, Event.d <= end)
@@ -140,7 +173,7 @@ class EventsService:
                 log.warning("news %s: %s", symbol, e)
                 return []
             items = [{"ts": datetime.fromtimestamp(n["datetime"], UTC).isoformat(), "headline": n.get("headline"),
-                      "source": n.get("source"), "url": n.get("url")}
+                      "source": n.get("source"), "url": n.get("url"), "summary": n.get("summary") or None}
                      for n in sorted(raw, key=lambda n: -n.get("datetime", 0)) if n.get("headline")]
             self._news[symbol] = (now, items)
         return items[:limit]
