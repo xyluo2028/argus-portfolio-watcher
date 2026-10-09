@@ -16,6 +16,7 @@ import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
+import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
@@ -232,6 +233,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       </section>
 
       <PeersCard symbol={symbol} />
+      <ResearchCard symbol={symbol} />
 
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />

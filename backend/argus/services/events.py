@@ -173,7 +173,7 @@ class EventsService:
                 log.warning("news %s: %s", symbol, e)
                 return []
             items = [{"ts": datetime.fromtimestamp(n["datetime"], UTC).isoformat(), "headline": n.get("headline"),
-                      "source": n.get("source"), "url": n.get("url")}
+                      "source": n.get("source"), "url": n.get("url"), "summary": n.get("summary") or None}
                      for n in sorted(raw, key=lambda n: -n.get("datetime", 0)) if n.get("headline")]
             self._news[symbol] = (now, items)
         return items[:limit]

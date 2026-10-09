@@ -10,7 +10,7 @@ A local-first portfolio monitor for US stocks and ETFs, designed to be operated 
 - Valuation and fundamentals: PE, forward PE, PB, PS, EV/EBITDA, revenue growth, margins
 - MCP server and JSON CLI so Claude (Desktop / Code) can query and update your portfolio
 
-> **Status:** P0 foundation, P1 monitor MVP, P2 routines and P3 analysis are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, exposure with ETF look-through, targets & drift, what-if trades, and a 33-tool MCP server. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
+> **Status:** P0 foundation, P1 monitor MVP, P2 routines and P3 analysis are done: dashboard, ticker charts, live prices, performance vs benchmark, watchlist, transactions, compare, events calendar, alerts, thesis notes, daily-brief data, exposure with ETF look-through, targets & drift, what-if trades, and a 37-tool MCP server. See the [design doc](docs/design.html) (open it in a browser for the diagrams).
 
 ## Planned stack
 
@@ -59,7 +59,7 @@ development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite prox
 
 ## Use it from Claude (MCP)
 
-Argus exposes 33 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, SEC
+Argus exposes 37 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
 financials, compare, performance, transactions (add, edit, delete), watchlist, events, alerts, notes, exposure,
 drift/targets, what-if (`simulate_trades`), and
 `get_daily_brief_data`, which gathers everything for a brief in one call. Write tools default

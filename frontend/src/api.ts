@@ -313,6 +313,60 @@ export interface ReturnBases {
   last_close: { date: string; close: number } | null;
 }
 
+export interface RiskReport {
+  portfolio: string; available: boolean; reason?: string; fully_priced?: boolean;
+  as_of: string; lookback_days: number; benchmark: string; total_value: number;
+  beta: number; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
+  var: Record<"95" | "99", { var_pct: number; cvar_pct: number; var_value: number; cvar_value: number }>;
+  positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; vol_pct: number; history_days: number; proxied: boolean }[];
+  correlation: { symbols: string[]; matrix: (number | null)[][] };
+  scenarios: { key: string; label: string; start: string | null; end: string | null; spy_pct: number; portfolio_pct: number; value: number; proxied: string[] }[];
+  factors: { from: string; to: string; days: number; r2: number; alpha_annual_pct: number;
+             loadings: { factor: string; label: string; beta: number; t: number }[] } | null;
+}
+
+export interface Research {
+  symbol: string; as_of: string; fund: boolean; price: number | null; errors: Record<string, string>;
+  analysts: { count: number | null; rating: string | null; rating_mean: number | null; target_mean: number | null;
+              target_median: number | null; target_high: number | null; target_low: number | null; upside_pct?: number;
+              trend: { period: string; strongBuy: number; buy: number; hold: number; sell: number; strongSell: number }[] } | null;
+  estimates: { trend: Record<string, Record<string, number | null>> | null; revisions: Record<string, Record<string, number | null>> | null } | null;
+  insiders: { since: string; buy_count: number; buy_value: number; buyers: number; sell_count: number; sell_value: number; sellers: number;
+              recent: { date: string; name: string; code: string; kind: string; shares: number; price: number | null; value: number | null; derivative: boolean }[] } | null;
+  ownership: { institutions_pct: number | null; insiders_pct: number | null;
+               top: { Holder: string; pctHeld: number | null; Shares: number | null; Value: number | null; pctChange: number | null; "Date Reported": string }[] };
+  short_interest: { shares_short: number | null; prior_month: number | null; pct_float: number | null; days_to_cover: number | null; as_of: string | null; change_pct?: number };
+  valuation: { key: string; label: string; current: number | null; min: number; p25: number; median: number; p75: number; max: number;
+               percentile: number | null; points: number }[] | null;
+  quality: { piotroski: { available: boolean; reason?: string; score: number; out_of: number; label: string; fiscal_years: string[];
+                          tests: { test: string; group: string; pass: boolean | null }[] };
+             altman: { available: boolean; reason?: string; z?: number; zone?: string; caveat?: string | null; parts: Record<string, number | null> } } | null;
+  news: { ts: string; headline: string; source: string; url: string; tone: { score: number; label: string } }[];
+  news_tone: { positive: number; neutral: number; negative: number };
+}
+
+export interface EconEvent { date: string; time_et: string | null; event: string; actual: string | null; consensus: string | null; previous: string | null }
+
+export interface MarketContext {
+  as_of: string; periods: string[]; errors: Record<string, string>;
+  gauges: { symbol: string; label: string; kind: string; last: number; as_of: string; change: number | null;
+            returns: Record<string, number | null>; spark: number[] }[];
+  sectors: { symbol: string; name: string; returns: Record<string, number | null>; above_50d: boolean; above_200d: boolean }[];
+  breadth: { equal_vs_cap: Record<string, number | null>; small_vs_large: Record<string, number | null>;
+             sectors_above_50d: number; sectors_above_200d: number; sectors: number };
+  yield_curve: { as_of: string; spread_10y_2y: number | null; spread_10y_3m: number | null;
+                 lines: { label: string; date: string; points: { tenor: string; yield: number | null }[] }[] } | null;
+  calendar: { fomc: { date: string; days: string; month: string; projections: boolean }[];
+              events: EconEvent[]; all_events: EconEvent[]; all_count: number } | null;
+}
+
+export interface ScreenerStatus {
+  built: boolean; building: boolean; progress: string | null; fiscal_year?: number; companies?: number;
+  fundamentals_at?: string; prices_at?: string; fields: Record<string, { label: string; unit: "$" | "%" | "x" }>;
+}
+export type ScreenRow = Record<string, number | string | boolean | null> & { symbol: string; name: string | null; exchange: string | null };
+export interface ScreenResult { status: ScreenerStatus; matches: number; rows: ScreenRow[] }
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -352,6 +406,11 @@ export const api = {
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
   profile: (symbol: string) => get<CompanyProfile>(`/api/profile/${enc(symbol)}`),
   holdings: (symbol: string) => get<FundHoldings>(`/api/holdings/${enc(symbol)}`),
+  screenerStatus: () => get<ScreenerStatus>("/api/screener"),
+  screen: (body: { filters: Record<string, (number | null)[]>; sort: string; descending: boolean; limit?: number; include_otc?: boolean }) =>
+    send<ScreenResult>("POST", "/api/screener", body),
+  marketContext: () => get<MarketContext>("/api/market-context"),
+  research: (symbol: string) => get<Research>(`/api/research/${enc(symbol)}`),
   returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
@@ -374,11 +433,17 @@ export const api = {
     send<NoteItem>("POST", "/api/notes", body),
   updateNote: (id: number, body: { text?: string; review_on?: string; clear_review?: boolean; archived?: boolean }) =>
     send<NoteItem>("PATCH", `/api/notes/${id}`, body),
+  watchlistFundamentals: (name = "Watchlist") =>
+    get<{ symbols: string[]; pending: string[]; metrics: Record<string, Record<string, number | null>> }>(
+      `/api/watchlists/${enc(name)}/fundamentals`),
+  watchlistDividends: (name = "Watchlist") => get<Dividends>(`/api/watchlists/${enc(name)}/dividends`),
+  watchlistEarnings: (name = "Watchlist") => get<{ as_of: string; rows: EarningsRow[] }>(`/api/watchlists/${enc(name)}/earnings`),
   portfolioFundamentals: (name: string) =>
     get<{ symbols: string[]; pending: string[]; metrics: Record<string, Record<string, number | null>> }>(
       `/api/portfolios/${enc(name)}/fundamentals`),
   earnings: (name: string) => get<{ portfolio: string; as_of: string; rows: EarningsRow[] }>(`/api/portfolios/${enc(name)}/earnings`),
   dividends: (name: string) => get<Dividends>(`/api/portfolios/${enc(name)}/dividends`),
+  risk: (name: string) => get<RiskReport>(`/api/portfolios/${enc(name)}/risk`),
   exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),
   drift: (name: string, level: string) => get<Drift>(`/api/portfolios/${enc(name)}/drift?level=${level}`),
   setTargets: (name: string, level: string, weights: Record<string, number>, dryRun: boolean) =>

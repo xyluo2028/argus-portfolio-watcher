@@ -31,6 +31,9 @@ class Settings:
     # published on the host's loopback (compose.yaml), where the network is the boundary.
     insecure_bind: bool = False
     backup_keep: int = 14
+    # Live WebSocket prices (Finnhub allows one connection per key); off = REST polling only, e.g. for
+    # a second instance that must not take the stream from the main one.
+    stream: bool = True
     # A cached quote younger than this is served without hitting a provider.
     quote_max_age_s: int = 15
     fundamentals_max_age_s: int = 24 * 3600
@@ -55,4 +58,5 @@ def load_settings() -> Settings:
         token=os.environ.get("ARGUS_TOKEN") or None,
         insecure_bind=(os.environ.get("ARGUS_INSECURE_BIND") or "").lower() in ("1", "true", "yes"),
         backup_keep=int(os.environ.get("ARGUS_BACKUP_KEEP") or 14),
+        stream=(os.environ.get("ARGUS_STREAM") or "on").lower() not in ("off", "0", "false", "no"),
     )

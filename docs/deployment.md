@@ -61,6 +61,7 @@ Settings come from environment variables or the repo-root `.env` (see `.env.exam
 | `ARGUS_INSECURE_BIND` | – | `1` allows a non-loopback `ARGUS_HOST` without a token; only for a container published on the host's loopback (`compose.yaml` sets it) |
 | `ARGUS_DATA_DIR` | `./data` | Database, caches, snapshots, backups |
 | `ARGUS_BACKUP_KEEP` | `14` | Backup sets kept by `argus backup` |
+| `ARGUS_STREAM` | `on` | `off` = no live WebSocket, REST polling only (for a second instance sharing the Finnhub key) |
 
 ## Setup on a Linux host (systemd)
 

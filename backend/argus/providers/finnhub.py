@@ -100,6 +100,7 @@ class FinnhubProvider:
         self._directory: tuple[float, dict[str, SymbolInfo]] | None = None
         self._cache_dir = cache_dir
         self._limiter = _RateLimiter(per_minute)
+        self._series: dict[str, tuple[float, dict]] = {}  # symbol -> (time, quarterly ratio history)
 
     def _get(self, path: str, timeout: float | None = None, **params) -> dict | list:
         for attempt in range(3):
@@ -144,12 +145,30 @@ class FinnhubProvider:
     def get_metrics(self, symbol: str) -> dict[str, float | None]:
         d = self._get("/stock/metric", symbol=symbol, metric="all")
         raw = (d or {}).get("metric") or {}
+        # The same response carries quarterly ratio history; keep it for valuation bands (no extra call).
+        self._series[symbol] = (time.time(), ((d or {}).get("series") or {}).get("quarterly") or {})
         out: dict[str, float | None] = {}
         for field, candidates in _METRIC_MAP.items():
             out[field] = next((_num(raw[c]) for c in candidates if _num(raw.get(c)) is not None), None)
         cap = _num(raw.get("marketCapitalization"))
         out["market_cap"] = cap * 1e6 if cap is not None else None
         return out
+
+    def ratio_series(self, symbol: str, max_age_s: int = 24 * 3600) -> dict[str, list[dict]]:
+        """Quarterly history of valuation and quality ratios: {"peTTM": [{"period", "v"}, ...], "psTTM", "pb", ...},
+        newest first. Shares the /stock/metric call with get_metrics."""
+        hit = self._series.get(symbol)
+        if not hit or time.time() - hit[0] > max_age_s:
+            self.get_metrics(symbol)
+            hit = self._series.get(symbol)
+        return hit[1] if hit else {}
+
+    def insider_transactions(self, symbol: str, since: date) -> list[dict]:
+        """Form 4 filings (via Finnhub): name, share change, price, transaction code, dates."""
+        d = self._get("/stock/insider-transactions", symbol=symbol, **{"from": since.isoformat()})
+        if not isinstance(d, dict):
+            return []
+        return d.get("data") or []
 
     def get_profile(self, symbol: str) -> dict:
         d = self._get("/stock/profile2", symbol=symbol)

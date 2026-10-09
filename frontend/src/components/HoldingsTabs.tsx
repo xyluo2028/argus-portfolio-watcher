@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type DividendHolding, type EarningsRow, type Position } from "../api";
+import { api, type DividendHolding, type EarningsRow } from "../api";
 import { big, money, pct, price, ratio, tone } from "../format";
-import { HoldingsTable } from "./HoldingsTable";
 
-const TABS = ["Holdings", "Financials", "Growth", "Dividends", "Earnings", "Profitability", "Momentum"] as const;
+// The first tab is the caller's own view ("Holdings" on a portfolio, "Overview" on the watchlist).
+const TABS = ["First", "Financials", "Growth", "Dividends", "Earnings", "Profitability", "Momentum"] as const;
 type Tab = (typeof TABS)[number];
-const TAB_KEY = "argus.holdingsTab";
+type MetricTab = Exclude<Tab, "First">;
+
+/** What a metric row needs to know about a symbol. */
+export interface TabRow { symbol: string; name?: string | null; price?: number | null }
+/** Where the rows come from; picks the endpoints. */
+export type TabSource = { kind: "portfolio"; name: string } | { kind: "watchlist"; name: string };
 const POLL_MS = 3000;
 const MAX_POLLS = 60; // ~3 minutes: enough for a cold cache under Finnhub's 60 calls/minute
 
 type Metrics = Record<string, number | null>;
-type Row = { p: Position; m?: Metrics; div?: DividendHolding; earn?: EarningsRow };
+type Row = { p: TabRow; m?: Metrics; div?: DividendHolding; earn?: EarningsRow };
 type Col = { label: string; title?: string; value: (r: Row) => number | string | null | undefined; cell?: (r: Row) => React.ReactNode };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -26,7 +31,10 @@ const day = (iso: string | null | undefined) =>
   iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" }) : "–";
 const HOUR: Record<string, string> = { bmo: "pre", amc: "post", dmh: "mid" };
 
-const COLUMNS: Record<Exclude<Tab, "Holdings">, Col[]> = {
+// Watchlists hold no shares: no income or yield on cost.
+const NEEDS_SHARES = new Set(["Yield on cost", "Annual income"]);
+
+const COLUMNS: Record<MetricTab, Col[]> = {
   Financials: [
     { label: "Mkt cap", value: metric("market_cap"), cell: (r) => big(num(r.m?.market_cap)) },
     { label: "P/E", title: "Trailing 12 months", value: metric("pe_ttm"), cell: (r) => ratio(num(r.m?.pe_ttm), 1) },
@@ -87,6 +95,7 @@ const COLUMNS: Record<Exclude<Tab, "Holdings">, Col[]> = {
   ],
   Momentum: [
     { label: "1W", value: metric("return_1w_pct"), cell: signed("return_1w_pct") },
+    { label: "1M", title: "Last month, to the latest daily close", value: metric("return_1m_pct"), cell: signed("return_1m_pct") },
     { label: "3M", value: metric("return_3m_pct"), cell: signed("return_3m_pct") },
     { label: "6M", value: metric("return_6m_pct"), cell: signed("return_6m_pct") },
     { label: "YTD", value: metric("return_ytd_price_pct"), cell: signed("return_ytd_price_pct") },
@@ -112,15 +121,16 @@ const NOTES: Partial<Record<Tab, string>> = {
 
 /** One request for the whole portfolio. The server answers from its cache (stale values included)
  * and refreshes missing or stale symbols in the background; poll while it reports them pending. */
-function usePortfolioFundamentals(portfolio: string, enabled: boolean) {
+function useFundamentals(source: TabSource, enabled: boolean) {
+  const key = `${source.kind}:${source.name}`;
   const [data, setData] = useState<{ metrics: Record<string, Metrics>; pending: string[] } | null>(null);
-  useEffect(() => { setData(null); }, [portfolio]);
+  useEffect(() => { setData(null); }, [key]);
   useEffect(() => {
     if (!enabled) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = (polls: number) => {
-      api.portfolioFundamentals(portfolio).then((r) => {
+      (source.kind === "portfolio" ? api.portfolioFundamentals(source.name) : api.watchlistFundamentals(source.name)).then((r) => {
         if (stop) return;
         setData({ metrics: r.metrics, pending: r.pending });
         if (r.pending.length && polls < MAX_POLLS) timer = setTimeout(() => load(polls + 1), POLL_MS);
@@ -128,40 +138,50 @@ function usePortfolioFundamentals(portfolio: string, enabled: boolean) {
     };
     load(0);
     return () => { stop = true; clearTimeout(timer); };
-  }, [portfolio, enabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, enabled]);
   return data;
 }
 
-export function HoldingsTabs({ portfolio, positions }: { portfolio: string; positions: Position[] }) {
+/** Tabbed per-symbol views. `first` is the caller's own tab (its label and content); the rest are
+ * shared metric tables fed by the portfolio's or the watchlist's endpoints. */
+export function HoldingsTabs({ source, rows, first }: {
+  source: TabSource; rows: TabRow[]; first: { label: string; content: React.ReactNode };
+}) {
+  const tabKey = `argus.tabs.${source.kind}`;
   const [tab, setTab] = useState<Tab>(() => {
     try {
-      const t = localStorage.getItem(TAB_KEY) as Tab | null;
-      return t && TABS.includes(t) ? t : "Holdings";
+      const t = localStorage.getItem(tabKey) as Tab | null;
+      return t && TABS.includes(t) ? t : "First";
     } catch {
-      return "Holdings";
+      return "First";
     }
   });
   const pick = (t: Tab) => {
     setTab(t);
-    try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
+    try { localStorage.setItem(tabKey, t); } catch { /* ignore */ }
   };
 
-  const symbols = useMemo(() => positions.map((p) => p.symbol).sort(), [positions]);
+  const symbols = useMemo(() => rows.map((p) => p.symbol).sort(), [rows]);
   const needsMetrics = ["Financials", "Growth", "Dividends", "Profitability", "Momentum"].includes(tab);
-  const fund = usePortfolioFundamentals(portfolio, needsMetrics);
+  const fund = useFundamentals(source, needsMetrics);
   const metrics = fund?.metrics ?? {};
 
+  const sourceKey = `${source.kind}:${source.name}`;
   const [divs, setDivs] = useState<Record<string, DividendHolding> | null>(null);
   const [earn, setEarn] = useState<Record<string, EarningsRow> | null>(null);
-  useEffect(() => { setDivs(null); setEarn(null); }, [portfolio]);
+  useEffect(() => { setDivs(null); setEarn(null); }, [sourceKey, symbols.join(",")]);
   useEffect(() => {
+    const isPf = source.kind === "portfolio";
     if (tab === "Dividends" && divs === null) {
-      api.dividends(portfolio).then((d) => setDivs(Object.fromEntries(d.holdings.map((h) => [h.symbol, h]))), () => setDivs({}));
+      (isPf ? api.dividends(source.name) : api.watchlistDividends(source.name))
+        .then((d) => setDivs(Object.fromEntries(d.holdings.map((h) => [h.symbol, h]))), () => setDivs({}));
     }
     if (tab === "Earnings" && earn === null) {
-      api.earnings(portfolio).then((d) => setEarn(Object.fromEntries(d.rows.map((r) => [r.symbol, r]))), () => setEarn({}));
+      (isPf ? api.earnings(source.name) : api.watchlistEarnings(source.name))
+        .then((d) => setEarn(Object.fromEntries(d.rows.map((r) => [r.symbol, r]))), () => setEarn({}));
     }
-  }, [tab, portfolio, divs, earn]);
+  }, [tab, sourceKey, divs, earn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendingCount = fund ? fund.pending.length : symbols.length;
   const waiting =
@@ -169,20 +189,23 @@ export function HoldingsTabs({ portfolio, positions }: { portfolio: string; posi
     : tab === "Earnings" && earn === null ? "Loading earnings dates…"
     : needsMetrics && !fund ? "Loading metrics…"
     : needsMetrics && pendingCount ? `Updating metrics ${symbols.length - pendingCount}/${symbols.length}…` : null;
+  const cols = tab === "First" ? [] : COLUMNS[tab].filter((c) => source.kind === "portfolio" || !NEEDS_SHARES.has(c.label));
 
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-        <div className="seg tabs" role="tablist" aria-label="Holdings views">
+        <div className="seg tabs" role="tablist" aria-label="Views">
           {TABS.map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} aria-pressed={tab === t} onClick={() => pick(t)}>{t}</button>
+            <button key={t} role="tab" aria-selected={tab === t} aria-pressed={tab === t} onClick={() => pick(t)}>
+              {t === "First" ? first.label : t}
+            </button>
           ))}
         </div>
         {waiting && <span className="small muted">{waiting}</span>}
       </div>
-      {tab === "Holdings" ? <HoldingsTable positions={positions} /> : (
-        <MetricTable cols={COLUMNS[tab]} note={NOTES[tab]}
-                     rows={positions.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
+      {tab === "First" ? first.content : (
+        <MetricTable cols={cols} note={NOTES[tab]}
+                     rows={rows.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
       )}
     </section>
   );

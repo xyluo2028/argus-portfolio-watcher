@@ -8,6 +8,8 @@ import { useLive } from "./useLive";
 
 // Every page but the dashboard loads on first visit, so the first screen downloads less.
 const Alerts = lazy(() => import("./pages/Alerts").then((m) => ({ default: m.Alerts })));
+const Screener = lazy(() => import("./pages/Screener").then((m) => ({ default: m.Screener })));
+const Markets = lazy(() => import("./pages/Markets").then((m) => ({ default: m.Markets })));
 const Analysis = lazy(() => import("./pages/Analysis").then((m) => ({ default: m.Analysis })));
 const Compare = lazy(() => import("./pages/Compare").then((m) => ({ default: m.Compare })));
 const Data = lazy(() => import("./pages/Data").then((m) => ({ default: m.Data })));
@@ -100,6 +102,8 @@ function Main() {
           <NavLink to="/watchlist">Watchlist</NavLink>
           <NavLink to="/transactions">Transactions</NavLink>
           <NavLink to="/analysis">Analysis</NavLink>
+          <NavLink to="/markets">Markets</NavLink>
+          <NavLink to="/screener">Screener</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
           <NavLink to="/data">Data</NavLink>
@@ -136,6 +140,8 @@ function Main() {
               <Route path="/transactions" element={<Transactions portfolio={current} />} />
               <Route path="/compare" element={<Compare portfolio={current} />} />
               <Route path="/analysis" element={<Analysis portfolio={current} />} />
+              <Route path="/markets" element={<Markets />} />
+              <Route path="/screener" element={<Screener />} />
               <Route path="/alerts" element={<Alerts live={live} />} />
               <Route path="/data" element={<Data />} />
             </Routes>

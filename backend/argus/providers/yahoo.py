@@ -105,6 +105,27 @@ class YahooProvider:
                              source=self.name, delayed=False)
         return out
 
+    def market_caps(self, symbols: list[str]) -> dict[str, dict]:
+        """Price, market cap, exchange and quote type for Yahoo symbols as given, 100 per request.
+        Batches run 4 at a time; a failed batch just leaves its symbols out."""
+        fields = "regularMarketPrice,marketCap,exchange,fullExchangeName,quoteType,currency"
+        chunks = [symbols[i:i + QUOTE_BATCH] for i in range(0, len(symbols), QUOTE_BATCH)]
+
+        def one(chunk):
+            try:
+                return self._quote_rows(chunk, fields)
+            except ProviderError as e:
+                log.info("%s", e)
+                return []
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            rows = [r for batch in pool.map(one, chunks) for r in batch]
+        return {r["symbol"]: {"price": _px(r.get("regularMarketPrice")), "market_cap": _num(r.get("marketCap")),
+                              "exchange": r.get("fullExchangeName") or r.get("exchange"), "exchange_code": r.get("exchange"),
+                              "quote_type": r.get("quoteType"), "currency": r.get("currency")}
+                for r in rows if r.get("symbol")}
+
     def _quotes_one_by_one(self, symbols: list[str], native: bool) -> dict[str, Quote]:
         yf = _yf()
         out: dict[str, Quote] = {}
@@ -173,6 +194,60 @@ class YahooProvider:
             return []
         cutoff = datetime.now(UTC).date() - timedelta(days=366 * years)
         return [(ts.date().isoformat(), float(v)) for ts, v in s.items() if ts.date() >= cutoff and v > 0]
+
+    def _memo(self, key: str, fn, ttl: float = INFO_TTL_S):
+        now = time.monotonic()
+        with self._info_lock:
+            hit = self._info.get(key)
+        if hit and now - hit[0] < ttl:
+            return hit[1]
+        value = fn()
+        with self._info_lock:
+            self._info[key] = (now, value)
+        return value
+
+    def get_analyst(self, symbol: str) -> dict:
+        """Recommendation counts by month, EPS estimate trend and revisions, top institutions."""
+        def fetch():
+            t = _yf().Ticker(to_yahoo(symbol))
+            out: dict = {}
+            for name, get in (("recommendations", lambda: t.recommendations), ("eps_trend", lambda: t.eps_trend),
+                              ("eps_revisions", lambda: t.eps_revisions), ("institutions", lambda: t.institutional_holders)):
+                try:
+                    df = get()
+                except Exception as e:  # noqa: BLE001 - each piece is optional
+                    log.info("yahoo %s %s: %s", name, symbol, e)
+                    df = None
+                if df is None or getattr(df, "empty", True):
+                    out[name] = None
+                elif name in ("recommendations", "institutions"):
+                    out[name] = [{k: (v.isoformat()[:10] if hasattr(v, "isoformat") else _num(v) if not isinstance(v, str) else v)
+                                  for k, v in row.items()} for row in df.head(10).to_dict("records")]
+                else:  # rows = horizons (0q, +1q, 0y, +1y), columns = measures
+                    out[name] = {str(h): {str(k): (_num(v) if not isinstance(v, str) else v) for k, v in vals.items()}
+                                 for h, vals in df.to_dict("index").items()}
+            return out
+        return self._memo(f"analyst:{symbol}", fetch)
+
+    def get_statements(self, symbol: str) -> dict:
+        """Annual statements, newest first: {"years": [...], "balance"|"income"|"cashflow": {row: [values]}}."""
+        def fetch():
+            t = _yf().Ticker(to_yahoo(symbol))
+            out: dict = {"years": []}
+            for name, get in (("balance", lambda: t.balance_sheet), ("income", lambda: t.income_stmt),
+                              ("cashflow", lambda: t.cashflow)):
+                try:
+                    df = get()
+                except Exception as e:  # noqa: BLE001
+                    raise ProviderError(f"yahoo statements {symbol}: {e}") from e
+                if df is None or df.empty:
+                    out[name] = {}
+                    continue
+                cols = sorted(df.columns, reverse=True)
+                out["years"] = out["years"] or [c.date().isoformat() for c in cols]
+                out[name] = {str(row): [_num(df.at[row, c]) for c in cols] for row in df.index}
+            return out
+        return self._memo(f"statements:{symbol}", fetch, ttl=24 * 3600)
 
     def get_info(self, symbol: str) -> dict:
         """Yahoo's `info` (~0.4 s per call), kept in memory for a few hours."""

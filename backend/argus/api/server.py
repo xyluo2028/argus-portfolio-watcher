@@ -40,6 +40,14 @@ class PeersBody(BaseModel):
     peers: list[str] | None  # None resets to the suggested peers
 
 
+class ScreenBody(BaseModel):
+    filters: dict[str, list[float | None]] = {}
+    sort: str = "market_cap"
+    descending: bool = True
+    limit: int = 100
+    include_otc: bool = False
+
+
 class ImportBody(BaseModel):
     filename: str
     content: str
@@ -157,6 +165,26 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/quotes")
     async def quotes(symbols: str = Query(..., description="Comma-separated")):
         return await run(argus.quotes, [s for s in symbols.split(",") if s.strip()])
+
+    @app.get("/api/screener")
+    async def screener_status():
+        return await run(argus.screener_status)
+
+    @app.post("/api/screener")
+    async def screen(body: ScreenBody):
+        return await run(argus.screen_stocks, body.filters, body.sort, body.descending, body.limit, body.include_otc)
+
+    @app.post("/api/screener/rebuild")
+    async def rebuild_screener():
+        return await run(argus.rebuild_screener)
+
+    @app.get("/api/market-context")
+    async def market_context():
+        return await run(argus.market_context)
+
+    @app.get("/api/research/{symbol}")
+    async def research(symbol: str, refresh: bool = False):
+        return await run(argus.research, symbol, dict(hub.quotes), refresh)
 
     @app.get("/api/returns/{symbol}")
     async def return_bases(symbol: str):
@@ -295,6 +323,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.notes.update, note_id, body.text, review, body.clear_review, body.archived, "ui")
 
     # -- analysis -------------------------------------------------------------------
+    @app.get("/api/watchlists/{name}/fundamentals")
+    async def get_watchlist_fundamentals(name: str):
+        return await run(argus.watchlist_fundamentals, name)
+
+    @app.get("/api/watchlists/{name}/dividends")
+    async def get_watchlist_dividends(name: str):
+        return await run(argus.watchlist_dividends, name, dict(hub.quotes))
+
+    @app.get("/api/watchlists/{name}/earnings")
+    async def get_watchlist_earnings(name: str):
+        return await run(argus.watchlist_earnings, name)
+
     @app.get("/api/portfolios/{ref}/fundamentals")
     async def get_portfolio_fundamentals(ref: str):
         return await run(argus.portfolio_fundamentals, ref)
@@ -306,6 +346,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/portfolios/{ref}/dividends")
     async def get_dividends(ref: str):
         return await run(argus.dividends, ref, dict(hub.quotes))
+
+    @app.get("/api/portfolios/{ref}/risk")
+    async def get_risk(ref: str):
+        return await run(argus.risk, ref, dict(hub.quotes))
 
     @app.get("/api/portfolios/{ref}/exposure")
     async def get_exposure(ref: str):

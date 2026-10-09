@@ -48,7 +48,7 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
     received = [{"ex_date": d.isoformat(), "per_share": a, "shares": q, "amount": q * a}
                 for d, a in pays if year_start <= d <= today and (q := qty_at(d)) > 0]
     projected = []
-    if not stale and qty > 0:
+    if not stale:  # with no shares (a watchlist) this still gives the expected dates, at $0
         # Same day of the month as the last ex-date, every 12/freq months (payers keep their rhythm).
         step, k = 12 // freq, 1
         while (nxt := add_months(last_d, step * k)) <= year_end:

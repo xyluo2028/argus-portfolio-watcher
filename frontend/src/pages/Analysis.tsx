@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DividendsCard } from "../components/DividendsCard";
+import { RiskCard } from "../components/RiskCard";
 import { ALL, ApiError, api, type Drift, type Exposure, type SimResult, type SimTrade } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { money, tone } from "../format";
@@ -200,6 +201,7 @@ export function Analysis({ portfolio }: { portfolio: string }) {
   return (
     <div className="stack">
       <ExposureSection portfolio={portfolio} />
+      <RiskCard portfolio={portfolio} />
       <DividendsCard portfolio={portfolio} />
       {portfolio === ALL ? (
         <p className="muted small">Targets and what-if trades work per portfolio; pick one in the header.</p>

@@ -257,6 +257,8 @@ class MarketService:
                     s.merge(RefreshLog(key=f"bars-first:{sym}", at=bars[0].ts))
 
     def _fetch_history(self, symbol, start, end, interval) -> list[Bar]:
+        if self.history_provider is None:
+            raise ArgusError("NOT_CONFIGURED", "No price history provider.")
         try:
             return self.history_provider.get_history(symbol, start, end, interval)
         except ProviderError as e:

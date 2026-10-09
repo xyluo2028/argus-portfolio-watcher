@@ -86,8 +86,10 @@ button { font: inherit; color: inherit; }
 }
 .brand { font-weight: 700; letter-spacing: 0.02em; display: flex; align-items: center; gap: 8px; }
 .brand-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: inset 0 0 0 4px var(--surface); outline: 2px solid var(--accent); }
-.nav { display: flex; gap: 4px; }
-.nav a { padding: 4px 10px; border-radius: 6px; color: var(--text-2); }
+.nav { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.nav a { padding: 4px 10px; border-radius: 6px; color: var(--text-2); white-space: nowrap; }
+/* Ten sections don't fit beside the brand and controls on narrower screens: give the nav its own row. */
+@media (max-width: 1150px) { .topbar { flex-wrap: wrap; row-gap: 6px; } .nav { order: 10; flex-basis: 100%; } }
 .nav a.active { background: var(--accent-wash); color: var(--text); }
 .spacer { flex: 1; }
 main { max-width: 1280px; margin: 0 auto; padding: 20px; }
@@ -157,6 +159,49 @@ select, .btn {
 /* company & peers */
 .clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 tr.self td { background: var(--accent-wash); }
+
+/* markets */
+.gauges { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.gauge .delta { line-height: 1.5; }
+.gauge .spark { display: block; width: 100%; height: 26px; margin-top: 6px; }
+table.heat td { min-width: 52px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+svg.curve { width: 100%; height: auto; display: block; }
+svg.curve .axis { font-size: 11px; fill: var(--muted); }
+svg.curve .end-label { font-size: 11.5px; fill: var(--text-2); }
+.curve-tip { position: absolute; top: 4px; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 9px; font-size: 12px; white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12); }
+
+/* screener */
+.filter-row select { min-width: 190px; }
+.filter-row .input { max-width: 120px; }
+th.sorted { color: var(--text); }
+
+/* research */
+.range-track { position: relative; height: 10px; margin: 8px 0 4px; border-radius: 5px; background: var(--grid); }
+.range-band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: color-mix(in srgb, var(--series-1) 30%, transparent); }
+.range-tick { position: absolute; top: -3px; width: 2px; height: 16px; margin-left: -1px; background: var(--text-2); }
+.range-dot { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); }
+.stacked { flex: 1; display: flex; gap: 2px; height: 12px; }
+.stacked > div { height: 100%; border-radius: 2px; }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { padding: 3px 0; font-size: 13px; }
+.news { list-style: none; margin: 0; padding: 0; }
+.news li { padding: 6px 0; border-bottom: 1px solid var(--grid); }
+.news .tag { margin-right: 8px; }
+.tag.up { color: var(--up); border-color: color-mix(in srgb, var(--up) 40%, transparent); }
+.tag.down { color: var(--down); border-color: color-mix(in srgb, var(--down) 40%, transparent); }
+
+/* risk panel */
+h3.sub { font-size: 12.5px; font-weight: 600; color: var(--text-2); margin: 0 0 8px; }
+.risk-bars { width: 100%; table-layout: fixed; }
+.risk-bars td { padding: 3px 6px; }
+.risk-bars .bar { height: 6px; border-radius: 0 3px 3px 0; min-width: 1px; }
+.risk-bars .bar.w { background: var(--axis); margin-bottom: 2px; }
+.risk-bars .bar.r { background: var(--series-1); }
+table.corr { width: auto; }
+table.corr th, table.corr td { padding: 4px 6px; font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; }
+table.corr td { min-width: 40px; border-radius: 3px; }
 
 /* chart ranges: label over its return */
 .seg.ranges button { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; padding: 3px 9px; }

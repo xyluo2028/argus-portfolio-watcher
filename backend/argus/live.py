@@ -47,7 +47,7 @@ class LiveHub:
         self.quotes: dict[str, Quote] = {}
         self.status: dict = market_status()
         self.streamed: list[str] = []
-        self.ws_state = "disabled" if not argus.settings.finnhub_api_key else "idle"
+        self.ws_state = "disabled" if not (argus.settings.finnhub_api_key and argus.settings.stream) else "idle"
         self.version = 0
         self._cond = asyncio.Condition()
         self._dirty: set[str] = set()

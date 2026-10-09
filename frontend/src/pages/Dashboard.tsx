@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
+import { HoldingsTable } from "../components/HoldingsTable";
 import { HoldingsTabs } from "../components/HoldingsTabs";
 import { extLabel, money, pct, tone } from "../format";
 
@@ -107,7 +108,8 @@ export function Dashboard({ portfolio, live }: Props) {
         <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />
       </Suspense>
 
-      <HoldingsTabs portfolio={portfolio} positions={summary.positions} />
+      <HoldingsTabs source={{ kind: "portfolio", name: portfolio }} rows={summary.positions}
+                    first={{ label: "Holdings", content: <HoldingsTable positions={summary.positions} /> }} />
 
       <EventsCard portfolio={portfolio} />
 
