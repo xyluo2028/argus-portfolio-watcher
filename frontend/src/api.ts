@@ -307,6 +307,12 @@ export interface EarningsRow {
           quarter?: number; year?: number } | null;
 }
 
+export interface ReturnBases {
+  symbol: string; anchor: string; session: string;
+  bases: Record<string, { date: string; close: number } | null>;
+  last_close: { date: string; close: number } | null;
+}
+
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
@@ -346,6 +352,7 @@ export const api = {
   watchRemove: (symbol: string, name = "Watchlist") => send<unknown>("DELETE", `/api/watchlists/${enc(name)}/${enc(symbol)}`),
   profile: (symbol: string) => get<CompanyProfile>(`/api/profile/${enc(symbol)}`),
   holdings: (symbol: string) => get<FundHoldings>(`/api/holdings/${enc(symbol)}`),
+  returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),

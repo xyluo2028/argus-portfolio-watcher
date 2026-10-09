@@ -158,6 +158,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def quotes(symbols: str = Query(..., description="Comma-separated")):
         return await run(argus.quotes, [s for s in symbols.split(",") if s.strip()])
 
+    @app.get("/api/returns/{symbol}")
+    async def return_bases(symbol: str):
+        return await run(argus.return_bases, symbol)
+
     @app.get("/api/history/{symbol}")
     async def history(symbol: str, period: str = "1y", interval: str = "1d", indicators: str | None = None):
         specs = [x for x in indicators.split(",") if x.strip()] if indicators else None

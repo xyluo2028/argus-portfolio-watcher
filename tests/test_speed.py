@@ -172,3 +172,25 @@ def test_a_failing_provider_keeps_its_last_values(make_argus):
     m = a.market.get_fundamentals("NVDA", refresh=True)
     assert m["metrics"]["return_1y_pct"] == 27.0 and m["sources"]["return_1y_pct"] == "finnhub"  # kept
     assert m["metrics"]["pe_ttm"] == 21.0 and m["metrics"]["sma50"] == 200.0  # fresh from Yahoo
+
+
+def test_return_bases(make_argus, monkeypatch):
+    from datetime import date
+
+    import argus.app as app_mod
+
+    days = [date(2025, 12, 29) + timedelta(days=i) for i in range(120)]
+    days = [d for d in days if d.weekday() < 5]
+    bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, 100 + i, 1) for i, d in enumerate(days)]
+    a = make_argus(history=PerSymbolHistory({"X": bars}))
+    monkeypatch.setattr(app_mod, "market_status", lambda: {"session": "closed", "last_session": "2026-04-17"})
+    r = a.return_bases("x")
+    closes = {d: 100 + i for i, d in enumerate(days)}
+    b = r["bases"]
+    assert r["anchor"] == "2026-04-17"
+    assert b["1D"] == {"date": "2026-04-16", "close": closes[date(2026, 4, 16)]}       # session before the anchor
+    assert b["5D"]["date"] == "2026-04-10"                                             # five sessions back
+    assert b["YTD"] == {"date": "2025-12-31", "close": closes[date(2025, 12, 31)]}     # last year's final close
+    assert b["1M"]["date"] == "2026-03-17" and b["3M"]["date"] == "2026-01-16"          # on or before the date
+    assert b["1Y"] is None and b["5Y"] is None                                         # longer than the history
+    assert b["Max"]["date"] == "2025-12-29"

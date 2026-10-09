@@ -183,10 +183,15 @@ class MarketService:
 
     # -- history --------------------------------------------------------------
     def get_history(self, symbol: str, period: str = "1y", interval: str = "1d") -> list[Bar]:
-        if period not in PERIODS and period != "max":
-            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.", hint=f"Use one of {', '.join(PERIODS)}, max")
+        if period not in PERIODS and period not in ("max", "ytd"):
+            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.", hint=f"Use one of {', '.join(PERIODS)}, ytd, max")
         now = datetime.now(UTC)
-        start = datetime(1970, 1, 2, tzinfo=UTC) if period == "max" else now - timedelta(days=PERIODS[period])
+        if period == "max":
+            start = datetime(1970, 1, 2, tzinfo=UTC)
+        elif period == "ytd":
+            start = datetime(now.astimezone(NY).year, 1, 1, tzinfo=NY).astimezone(UTC)
+        else:
+            start = now - timedelta(days=PERIODS[period])
         if interval != "1d":
             return self._fetch_history(symbol, start, None, interval)
         self._ensure_daily_bars([symbol], start)

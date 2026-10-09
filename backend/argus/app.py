@@ -158,6 +158,41 @@ class Argus:
             }
         return out
 
+    RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
+
+    def return_bases(self, symbol: str) -> dict:
+        """The price each chart range is measured from, so a client can show live returns:
+        1D the previous close, 5D the close five sessions back, 1M-5Y the close on or before that
+        calendar date, YTD last year's final close, Max the first close. Split-adjusted closes,
+        dividends not included (price return). A range longer than the history is null."""
+        from argus.services.dividends import add_months
+
+        sym = normalize_symbol(symbol)
+        bars = self.market.get_history(sym, "max", "1d")
+        status = market_status()
+        # "Now" is today's live price during the session; otherwise the last completed close.
+        anchor = datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+        closes = [(b.ts.astimezone(NY).date(), b.c) for b in bars]
+        before = [c for c in closes if c[0] < anchor]
+
+        def on_or_before(d: date) -> dict | None:
+            if not before or d < before[0][0]:
+                return None  # the range reaches back before the first bar
+            day, close = next(c for c in reversed(before) if c[0] <= d)
+            return {"date": day.isoformat(), "close": close}
+
+        bases: dict[str, dict | None] = {
+            "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
+            "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
+        }
+        for label, months in self.RETURN_MONTHS.items():
+            bases[label] = on_or_before(add_months(anchor, -months))
+        bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
+        bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
+        last = closes[-1] if closes else None
+        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"], "bases": bases,
+                "last_close": {"date": last[0].isoformat(), "close": last[1]} if last else None}
+
     COMPARE_FIELDS = ("pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "market_cap",
                       "revenue_growth_yoy_pct", "gross_margin_pct", "net_margin_pct", "roe_pct", "dividend_yield_pct",
                       "beta")

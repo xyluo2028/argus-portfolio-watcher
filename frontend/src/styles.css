@@ -158,6 +158,11 @@ select, .btn {
 .clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 tr.self td { background: var(--accent-wash); }
 
+/* chart ranges: label over its return */
+.seg.ranges button { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; padding: 3px 9px; }
+.seg.ranges .ret { font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.seg.ranges button[aria-pressed="true"] .ret { font-weight: 600; }
+
 /* holdings view tabs */
 .seg.tabs { max-width: 100%; overflow-x: auto; }
 .seg.tabs button { padding: 5px 12px; white-space: nowrap; }
@@ -172,7 +177,7 @@ tr.self td { background: var(--accent-wash); }
 
 /* ticker autocomplete */
 .combo { position: relative; flex: 1; min-width: 90px; display: flex; }
-.combo-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; margin: 0; padding: 4px;
+.combo-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; min-width: 300px; z-index: 20; margin: 0; padding: 4px;
   list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); }
 .combo-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api, type Txn, type TxnDraft, type TxnResult } from "../api";
+import { TickerInput } from "../components/TickerInput";
 import { money, price } from "../format";
 
 const TYPES = ["BUY", "SELL", "DIVIDEND", "SPLIT", "FEE"] as const;
@@ -75,7 +76,8 @@ export function Transactions({ portfolio }: { portfolio: string }) {
         <h2>Record a transaction <span className="muted small">· this records a trade you made; it never places an order</span></h2>
         <form className="row" onSubmit={(e) => { e.preventDefault(); submit(true); }}>
           <select value={form.type} onChange={set("type")} aria-label="Type">{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-          <input className="input" placeholder="Symbol" value={form.symbol} onChange={set("symbol")} aria-label="Symbol" required style={{ maxWidth: 110 }} />
+          <TickerInput placeholder="Symbol or company" value={form.symbol} aria-label="Symbol" required style={{ maxWidth: 170 }}
+                       onChange={(v) => { setForm((f) => ({ ...f, symbol: v })); setPreview(null); }} />
           {!cash && <input className="input" type="number" step="any" min="0" placeholder={form.type === "SPLIT" ? "Ratio (e.g. 4)" : "Shares"}
                            value={form.qty} onChange={set("qty")} aria-label="Quantity" required style={{ maxWidth: 130 }} />}
           {!cash && form.type !== "SPLIT" && <input className="input" type="number" step="any" min="0" placeholder="Price"
