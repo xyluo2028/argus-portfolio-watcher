@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import {
   ApiError,
   api,
-  type Financials,
   type Fundamentals,
   type HistoryResponse,
   type Position,
@@ -14,11 +13,11 @@ import {
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
 import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
+import { FinancialsCard } from "../components/FinancialsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
 import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
-import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
 import { big, extLabel, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
 
@@ -77,9 +76,6 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [historyErr, setHistoryErr] = useState<ApiError | null>(null);
   const [fund, setFund] = useState<Fundamentals | null>(null);
-  const [fin, setFin] = useState<Financials | null>(null);
-  const [finErr, setFinErr] = useState<ApiError | null>(null);
-  const [finPeriod, setFinPeriod] = useState<"quarterly" | "annual">("quarterly");
   const [position, setPosition] = useState<Position | null>(null);
   const [polled, setPolled] = useState<Quote | null>(null);
 
@@ -103,11 +99,6 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
     api.fundamentals(symbol).then(setFund, () => setFund(null));
   }, [symbol]);
   useEffect(loadPosition, [loadPosition]);
-
-  useEffect(() => {
-    setFinErr(null);
-    api.financials(symbol, finPeriod).then(setFin, (e) => { setFin(null); setFinErr(e); });
-  }, [symbol, finPeriod]);
 
   // Held/watched symbols arrive over the stream; anything else is polled.
   const streamed = live?.quotes[symbol];
@@ -238,38 +229,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />
 
-      <section className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>Reported financials {fin?.company ? <span className="muted small">· {fin.company} · SEC EDGAR</span> : null}</h2>
-          <div className="seg">
-            {(["quarterly", "annual"] as const).map((p) => (
-              <button key={p} aria-pressed={finPeriod === p} onClick={() => setFinPeriod(p)}>{p === "quarterly" ? "Quarterly" : "Annual"}</button>
-            ))}
-          </div>
-        </div>
-        {finErr ? <p className="muted">{finErr.message}</p> : fin ? (
-          <>
-            <RevenueColumns periods={fin.periods} />
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Period end</th><th>Revenue</th><th>Gross %</th><th>Operating %</th><th>Net income</th><th>EPS (dil.)</th><th>FCF</th></tr></thead>
-                <tbody>
-                  {fin.periods.map((p) => (
-                    <tr key={p.period_end} style={{ cursor: "default" }}>
-                      <td>{p.period_end}</td><td>{big(p.revenue)}</td>
-                      <td>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
-                      <td>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
-                      <td className={tone(p.net_income)}>{big(p.net_income)}</td>
-                      <td>{p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}</td>
-                      <td>{big(p.free_cash_flow)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : <p className="muted">Loading…</p>}
-      </section>
+      <FinancialsCard symbol={symbol} />
     </div>
   );
 }

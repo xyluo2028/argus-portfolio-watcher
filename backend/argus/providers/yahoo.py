@@ -272,6 +272,20 @@ class YahooProvider:
             raise ProviderError(f"yahoo calendar {symbol}: {e}") from e
         return cal if isinstance(cal, dict) else {}
 
+    def get_earnings_dates(self, symbol: str, limit: int = 16) -> list[dict]:
+        """Past and next earnings reports, newest first: {"at" (report time, aware), "eps_estimate",
+        "eps_actual", "surprise_pct"}. Yahoo's reported EPS is sometimes GAAP rather than the
+        adjusted figure analysts estimate."""
+        try:
+            df = _yf().Ticker(to_yahoo(symbol)).get_earnings_dates(limit=limit)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"yahoo earnings dates {symbol}: {e}") from e
+        if df is None or df.empty:
+            return []
+        return [{"at": ts.to_pydatetime(), "eps_estimate": _num(row.get("EPS Estimate")),
+                 "eps_actual": _num(row.get("Reported EPS")), "surprise_pct": _num(row.get("Surprise(%)"))}
+                for ts, row in df.iterrows()]
+
     def get_fund_profile(self, symbol: str) -> dict:
         """ETF sector weights (Yahoo sector names, fractions summing to ~1), top holdings (Yahoo
         symbols), asset classes and bond ratings (fractions). Empty for anything that isn't a fund."""

@@ -253,6 +253,11 @@ a.btn { text-decoration: none; display: inline-block; }
 .hero-value { font-size: 44px; font-weight: 600; line-height: 1.1; margin: 2px 0 4px; }
 .hero-delta { font-size: 15px; font-weight: 500; }
 .ext-hero { font-size: 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.verdict { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+.verdict.beat { color: var(--up); background: var(--flash-up); }
+.verdict.miss { color: var(--down); background: var(--flash-down); }
+.verdict.in_line { color: var(--text-2); background: var(--surface-2); }
+.ext-line .verdict { font-weight: 500; padding: 0 6px; margin-top: 2px; }
 .ext-line { display: block; font-size: 11px; color: var(--muted); line-height: 1.2; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }

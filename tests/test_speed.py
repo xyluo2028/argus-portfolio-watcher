@@ -38,14 +38,15 @@ def test_yahoo_falls_back_to_per_symbol_when_the_batch_fails(monkeypatch):
 
 
 def test_large_lookups_ask_the_batch_provider_first(make_argus):
-    finnhub = FakeQuotes("finnhub", {s: (10, 9) for s in "ABCDEF"})
-    batch = FakeQuotes("yahoo", {s: (11, 9) for s in "ABCDEF"})
+    finnhub = FakeQuotes("finnhub", {s: (10, 9) for s in "ABCDEFG"})
+    batch = FakeQuotes("yahoo", {s: (11, 9) for s in "ABCDEFG"})
     batch.batch_quotes = True
     a = make_argus([finnhub, batch])
     a.market.get_quotes(["A", "B"])
     assert (finnhub.calls, batch.calls) == ([["A", "B"]], [])        # small: Finnhub first
-    q, _ = a.market.get_quotes(list("CDEF") + ["A"], max_age_s=0)
-    assert batch.calls == [["C", "D", "E", "F", "A"]] and len(finnhub.calls) == 1 and q["C"].source == "yahoo"
+    # Uncached symbols only: while the market is closed a cached quote counts as the settled close.
+    q, _ = a.market.get_quotes(list("CDEFG"))
+    assert batch.calls == [["C", "D", "E", "F", "G"]] and len(finnhub.calls) == 1 and q["C"].source == "yahoo"
 
 
 def test_yahoo_info_is_cached(monkeypatch):

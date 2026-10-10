@@ -130,6 +130,23 @@ export interface FinancialPeriod {
   free_cash_flow?: number;
 }
 
+export type EarningsResult = "beat" | "miss" | "in_line" | null;
+export interface EarningsReport {
+  period_end: string; report_date: string; timing: "bmo" | "amc" | "dmh" | null;
+  eps_estimate: number | null; eps_actual: number | null; eps_basis: "adjusted" | "reported" | null;
+  eps_surprise_pct: number | null; eps_result: EarningsResult;
+  revenue_estimate: number | null; revenue_actual: number | null; revenue_surprise_pct: number | null;
+  revenue_result: EarningsResult;
+  reaction: {
+    base_date: string; base_close: number; date: string | null; open_pct: number | null; close_pct: number;
+    provisional: boolean; label: string | null;
+  } | null;
+}
+export interface EarningsHistory {
+  symbol: string; as_of: string; reports: EarningsReport[];
+  next: { date: string; timing: "bmo" | "amc" | "dmh" | null; eps_estimate: number | null; revenue_estimate: number | null } | null;
+}
+
 export interface Financials {
   symbol: string;
   company: string | null;
@@ -376,6 +393,7 @@ export const api = {
         (indicators.length ? `&indicators=${indicators.join(",")}` : ""),
     ),
   fundamentals: (symbol: string) => get<Fundamentals>(`/api/fundamentals/${enc(symbol)}`),
+  earningsHistory: (symbol: string) => get<EarningsHistory>(`/api/earnings/${enc(symbol)}`),
   financials: (symbol: string, period: "quarterly" | "annual") =>
     get<Financials>(`/api/financials/${enc(symbol)}?period=${period}&limit=8`),
   performance: (name: string, range: string) =>

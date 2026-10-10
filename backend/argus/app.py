@@ -30,6 +30,7 @@ from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
 from argus.services import dividends as dividends_mod
+from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
 from argus.services import screener as screener_mod
 from argus.services import risk as risk_mod
@@ -713,7 +714,8 @@ class Argus:
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
         today = datetime.now(NY).date()
         held = set(self.held_positions())
-        rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead))
+        rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead),
+                                   ["earnings", "ex_dividend", "dividend_pay"])
         for r in rows:
             r["held"] = r["symbol"] in held
         return {
@@ -888,6 +890,31 @@ class Argus:
 
     def watchlist_earnings(self, name: str = DEFAULT_WATCHLIST) -> dict:
         return {"watchlist": name, **self.earnings_for([i["symbol"] for i in self.watchlists.items(name)])}
+
+    def earnings_history(self, symbol: str, limit: int = 8) -> dict:
+        """Each reported quarter (SEC quarter ends) with its report date and timing, EPS and revenue
+        estimate vs actual, beat/miss, and the price reaction; plus the next scheduled report.
+        Estimates come from Finnhub (adjusted EPS, revenue) or Yahoo (EPS, `eps_basis` "reported")."""
+        sym = normalize_symbol(symbol)
+        try:
+            periods = [p["period_end"] for p in self.market.get_financials(sym, "quarterly", limit)["periods"]]
+        except ArgusError:
+            periods = []
+        today = datetime.now(NY).date()
+        yahoo = self.events.report_history(sym)
+        if not periods:  # no SEC data (foreign filer, not configured): use Yahoo's report dates
+            past = [date.fromisoformat(r["date"]) for r in yahoo if r["date"] <= today.isoformat()][-limit:]
+            periods = [(d - timedelta(days=30)).isoformat() for d in past]
+        self.events.refresh([sym])
+        calendar = self.events.between([sym], date(2000, 1, 1), today + timedelta(days=120), ["earnings"])
+        results = self.events.results_history(sym)
+        start = (date.fromisoformat(min(periods)) if periods else today) - timedelta(days=10)
+        bars = {b.ts.astimezone(NY).date(): (b.o, b.c) for b in self.market.get_history(sym, "5y")
+                if b.ts.astimezone(NY).date() >= start}
+        quotes, _ = self.market.get_quotes([sym])
+        status = market_status()
+        built = earnings_mod.build(periods, yahoo, calendar, results, bars, today, quotes.get(sym), status["session"])
+        return {"symbol": sym, "as_of": today.isoformat(), **built}
 
     def earnings_overview(self, ref: str) -> dict:
         """Per holding: the last reported quarter (EPS/revenue vs estimate) and the next report date."""
