@@ -638,24 +638,61 @@ class Argus:
     def watchlist_fundamentals(self, name: str = DEFAULT_WATCHLIST) -> dict:
         return {"watchlist": name, **self.symbol_fundamentals([i["symbol"] for i in self.watchlists.items(name)])}
 
-    def returns_1m(self, symbols: list[str]) -> dict[str, float | None]:
-        """Price return over the last month to the latest daily close (cached bars)."""
+    def price_stats(self, symbols: list[str]) -> dict[str, dict[str, float | None]]:
+        """From cached daily closes, to the latest close: the 1-month return and the 3- and 5-year
+        compound annual growth rate of the price (price only; null when the history is shorter)."""
         from argus.services.dividends import add_months
 
-        closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=45))
-        out: dict[str, float | None] = {}
+        closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=5 * 366 + 10))
+        out: dict[str, dict[str, float | None]] = {}
         for sym, by_day in closes.items():
             days = sorted(by_day)
-            if not days:
-                out[sym] = None
-                continue
-            target = add_months(days[-1], -1)
-            base = next((by_day[d] for d in reversed(days) if d <= target), None)
-            out[sym] = (by_day[days[-1]] / base - 1) * 100 if base else None
+            stats: dict[str, float | None] = {"return_1m_pct": None, "cagr_3y_pct": None, "cagr_5y_pct": None}
+            if days:
+                last_d, last = days[-1], by_day[days[-1]]
+
+                def base(months: int) -> float | None:
+                    target = add_months(last_d, -months)
+                    if target < days[0]:
+                        return None  # history doesn't reach back that far
+                    return next((by_day[d] for d in reversed(days) if d <= target), None)
+
+                b1 = base(1)
+                stats["return_1m_pct"] = (last / b1 - 1) * 100 if b1 else None
+                for years in (3, 5):
+                    b = base(12 * years)
+                    stats[f"cagr_{years}y_pct"] = ((last / b) ** (1 / years) - 1) * 100 if b else None
+            out[sym] = stats
         return out
 
+    @staticmethod
+    def _derived(m: dict) -> dict:
+        """Figures computed from other metrics, so every page shows the same value."""
+        fcf, rev = m.get("fcf_ttm"), m.get("revenue_ttm")
+        return {"fcf_margin_pct": fcf / rev * 100 if fcf is not None and rev else None}
+
+    def fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
+        """One symbol's fundamentals with the same computed figures the portfolio views add (1M return,
+        3Y/5Y price CAGR, FCF margin)."""
+        sym = normalize_symbol(symbol)
+        computed = {"return_1m_pct", "cagr_3y_pct", "cagr_5y_pct", "fcf_margin_pct"}
+        stored = [f for f in fields if f not in computed] if fields else None
+        out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
+        if fields and not stored:
+            out["metrics"] = {}
+        try:
+            stats = self.price_stats([sym]).get(sym, {})
+        except ArgusError as e:
+            log.warning("price stats %s: %s", sym, e.message)
+            stats = {}
+        full = self.market.cached_fundamentals([sym]).get(sym, {}).get("metrics", {}) or out["metrics"]
+        extra = stats | self._derived(full)
+        if fields:
+            extra = {k: v for k, v in extra.items() if k in fields}
+        return out | {"metrics": out["metrics"] | extra}
+
     def symbol_fundamentals(self, syms: list[str], wait: bool = False) -> dict:
-        """Cached fundamentals for many symbols in one call, plus the 1-month return. Missing or stale
+        """Cached fundamentals for many symbols in one call, plus price stats and derived figures. Missing or stale
         symbols are refreshed in the background (or now, with `wait`); `pending` lists them so a
         client can poll."""
         cached = self.market.cached_fundamentals(syms)
@@ -673,13 +710,13 @@ class Argus:
                 self._fund_attempted |= {s: now for s in todo}
                 self.run_background("fundamentals", lambda: self.market.refresh_fundamentals(todo))
         try:
-            r1m = self.returns_1m(syms)
+            stats = self.price_stats(syms)
         except ArgusError as e:  # history provider down: the rest still stands
-            log.warning("1M returns: %s", e.message)
-            r1m = {}
-        metrics = {s: dict(c["metrics"]) for s, c in cached.items()}
-        for s, v in r1m.items():
-            metrics.setdefault(s, {})["return_1m_pct"] = v
+            log.warning("price stats: %s", e.message)
+            stats = {}
+        metrics = {s: dict(c["metrics"]) | self._derived(c["metrics"]) for s, c in cached.items()}
+        for s, v in stats.items():
+            metrics.setdefault(s, {}).update(v)
         return {"symbols": syms, "pending": todo, "metrics": metrics,
                 "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()}}
 
@@ -1027,6 +1064,8 @@ class Argus:
             "insiders": (lambda: fh.insider_transactions(sym, today - timedelta(days=400))) if fh else None,
             "series": (lambda: fh.ratio_series(sym)) if fh else None,
             "news": lambda: self.events.news(sym, days=7, limit=25),
+            "quarterly": lambda: self.market.get_financials(sym, "quarterly", 12)["periods"],
+            "annual": lambda: self.market.get_financials(sym, "annual", 6)["periods"],
         }
         def run(item):
             name, fn = item
@@ -1043,6 +1082,10 @@ class Argus:
         fund = info.get("quoteType") in ("ETF", "MUTUALFUND")
         cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
         m = cached["metrics"] if cached else {}
+        try:
+            m = m | self.price_stats([sym]).get(sym, {})
+        except ArgusError:
+            pass
 
         analyst = got["analyst"][0] or {}
         analysts = None if fund else {
@@ -1082,6 +1125,7 @@ class Argus:
             "insiders": None if fund else research_mod.insider_summary(got["insiders"][0] or [], today=today),
             "ownership": ownership, "short_interest": short, "valuation": valuation, "quality": quality,
             "news": [{k: v for k, v in n.items() if k != "summary"} for n in news], "news_tone": counts,
+            "growth": None if fund else research_mod.growth_profile(got["quarterly"][0] or [], got["annual"][0] or [], m, analyst),
             "errors": errors,
         }
 

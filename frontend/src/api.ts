@@ -342,6 +342,19 @@ export interface RiskReport {
              loadings: { factor: string; label: string; beta: number; t: number }[] } | null;
 }
 
+export interface GrowthProfile {
+  quarters: { period_end: string; revenue: number | null; revenue_yoy_pct: number | null; net_income: number | null;
+              net_income_yoy_pct: number | null; gross_margin_pct: number | null; operating_margin_pct: number | null }[];
+  years: { period_end: string; revenue: number | null; net_income: number | null }[];
+  filed_cagr: Record<"revenue_3y" | "revenue_5y" | "net_income_3y" | "net_income_5y", number | null>;
+  reported: Record<"revenue_yoy" | "revenue_q_yoy" | "revenue_3y" | "revenue_5y" | "eps_yoy" | "eps_q_yoy" | "eps_3y" | "eps_5y", number | null>;
+  forward: { horizon: string; label: string; revenue: number | null; revenue_low: number | null; revenue_high: number | null;
+             revenue_growth_pct: number | null; revenue_analysts: number | null; eps: number | null; eps_low: number | null;
+             eps_high: number | null; year_ago_eps: number | null; eps_growth_pct: number | null; eps_analysts: number | null;
+             index_eps_growth_pct: number | null }[];
+  peg: number | null; price_cagr_3y: number | null; price_cagr_5y: number | null;
+}
+
 export interface Research {
   symbol: string; as_of: string; fund: boolean; price: number | null; errors: Record<string, string>;
   analysts: { count: number | null; rating: string | null; rating_mean: number | null; target_mean: number | null;
@@ -358,6 +371,7 @@ export interface Research {
   quality: { piotroski: { available: boolean; reason?: string; score: number; out_of: number; label: string; fiscal_years: string[];
                           tests: { test: string; group: string; pass: boolean | null }[] };
              altman: { available: boolean; reason?: string; z?: number; zone?: string; caveat?: string | null; parts: Record<string, number | null> } } | null;
+  growth: GrowthProfile | null;
   news: { ts: string; headline: string; source: string; url: string; tone: { score: number; label: string } }[];
   news_tone: { positive: number; neutral: number; negative: number };
 }

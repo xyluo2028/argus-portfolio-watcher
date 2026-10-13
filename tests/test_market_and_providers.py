@@ -167,3 +167,16 @@ def test_search_ranking(settings):
     assert syms("s") == ["S", "SOFI", "SB.PRC"]                 # exact first, preferreds last
     assert syms("s", prefer={"SOFI"})[:2] == ["S", "SOFI"] and syms("so", prefer={"SOFI"})[0] == "SOFI"
     assert syms("  ") == []
+
+
+def test_sec_prefers_report_filings_over_later_proxy_copies():
+    from argus.providers.sec_edgar import _duration_rows
+
+    rows = [{"start": "2024-01-29", "end": "2025-01-26", "val": 72.88, "form": "10-K", "filed": "2025-02-26"},
+            {"start": "2024-01-29", "end": "2025-01-26", "val": 72.88, "form": "DEF 14A", "filed": "2026-05-12"},
+            {"start": "2023-01-30", "end": "2024-01-28", "val": 29.0, "form": "10-K", "filed": "2024-02-21"},
+            {"start": "2023-01-30", "end": "2024-01-28", "val": 29.76, "form": "10-K/A", "filed": "2024-06-01"}]
+    d = _duration_rows(rows)
+    from datetime import date as D
+    assert d[(D(2024, 1, 29), D(2025, 1, 26))] == (72.88, "10-K")       # the proxy copy doesn't displace it
+    assert d[(D(2023, 1, 30), D(2024, 1, 28))] == (29.76, "10-K/A")     # a later report (restatement) still wins

@@ -78,3 +78,24 @@ def test_tone():
     assert r.tone("Nvidia beats estimates, shares surge on record growth")["label"] == "positive"
     assert r.tone("Shares plunge after guidance cut and SEC probe")["label"] == "negative"
     assert r.tone("Company to present at conference")["label"] == "neutral"
+
+
+def test_growth_profile_history_and_forward():
+    quarterly = [{"period_end": f"{y}-{m:02d}-28", "revenue": rev, "net_income": ni, "gross_margin_pct": 60.0}
+                 for (y, m), rev, ni in zip([(2025, 3), (2025, 6), (2025, 9), (2025, 12), (2026, 3), (2026, 6)],
+                                            [100, 110, 120, 130, 150, 165], [10, 11, 12, 13, 20, 22])]
+    annual = [{"period_end": f"{y}-12-31", "revenue": rev, "net_income": rev / 10}
+              for y, rev in [(2020, 100), (2021, 120), (2022, 150), (2023, 200), (2024, 260), (2025, 330)]]
+    analyst = {"revenue_estimate": {"0y": {"avg": 700.0, "low": 650.0, "high": 750.0, "growth": 0.4, "numberOfAnalysts": 9}},
+               "earnings_estimate": {"0y": {"avg": 2.0, "growth": 0.5, "numberOfAnalysts": 8, "yearAgoEps": 1.33}},
+               "growth_estimates": {"0y": {"stockTrend": 0.5, "indexTrend": 0.12}, "LTG": {"stockTrend": None, "indexTrend": 0.1}}}
+    g = r.growth_profile(quarterly, annual, {"eps_growth_5y_pct": 30.0, "peg": 0.8}, analyst)
+    q = g["quarters"][0]  # newest first
+    assert q["period_end"] == "2026-06-28" and q["revenue_yoy_pct"] == pytest.approx(50) and q["net_income_yoy_pct"] == pytest.approx(100)
+    assert g["quarters"][-1]["revenue_yoy_pct"] is None  # nothing a year before the oldest quarter
+    assert g["filed_cagr"]["revenue_5y"] == pytest.approx(((330 / 100) ** (1 / 5) - 1) * 100)
+    assert g["filed_cagr"]["revenue_3y"] == pytest.approx(((330 / 150) ** (1 / 3) - 1) * 100)
+    assert g["reported"]["eps_5y"] == 30.0 and g["peg"] == 0.8
+    fy = next(f for f in g["forward"] if f["horizon"] == "0y")
+    assert (fy["revenue_growth_pct"], fy["eps_growth_pct"], fy["index_eps_growth_pct"]) == pytest.approx((40, 50, 12))
+    assert [f["horizon"] for f in g["forward"]] == ["0y"]  # LTG has only the index's figure: skipped

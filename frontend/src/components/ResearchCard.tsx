@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Research } from "../api";
 import { big, money, nyTime, pct, price, tone } from "../format";
 
-const TABS = ["Analysts", "Estimates", "Insiders", "Ownership & short", "Valuation", "Quality", "News"] as const;
+const TABS = ["Analysts", "Growth", "Estimates", "Insiders", "Ownership & short", "Valuation", "Quality", "News"] as const;
 type Tab = (typeof TABS)[number];
 const FUND_TABS: Tab[] = ["Ownership & short", "News"];
 const TAB_KEY = "argus.researchTab";
@@ -51,6 +51,7 @@ export function ResearchCard({ symbol }: { symbol: string }) {
       {!r ? <p className="muted">Loading research…</p> : (
         <>
           {current === "Analysts" && <Analysts r={r} />}
+          {current === "Growth" && <Growth r={r} />}
           {current === "Estimates" && <Estimates r={r} />}
           {current === "Insiders" && <Insiders r={r} />}
           {current === "Ownership & short" && <Ownership r={r} />}
@@ -117,6 +118,124 @@ function Analysts({ r }: { r: Research }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const quarterLabel = (iso: string) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  return d.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", year: "2-digit" });
+};
+
+function RevenueBars({ quarters }: { quarters: NonNullable<Research["growth"]>["quarters"] }) {
+  const q = [...quarters].reverse().filter((x) => x.revenue != null);  // oldest -> newest
+  if (q.length < 2) return null;
+  const W = 640, H = 170, T = 22, B = 22, gap = 2;
+  const max = Math.max(...q.map((x) => x.revenue as number));
+  const bw = W / q.length;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="rev-bars" role="img"
+         aria-label={`Quarterly revenue: ${q.map((x) => `${quarterLabel(x.period_end)} ${big(x.revenue)}`).join(", ")}`}>
+      {q.map((x, i) => {
+        const h = ((x.revenue as number) / max) * (H - T - B);
+        const xPos = i * bw + gap;
+        return (
+          <g key={x.period_end}>
+            <title>{`${quarterLabel(x.period_end)}: revenue ${big(x.revenue)}${x.revenue_yoy_pct != null ? `, ${pct(x.revenue_yoy_pct, 1)} YoY` : ""}`}</title>
+            <path d={`M${xPos},${H - B} v${-(h - 4)} q0,-4 4,-4 h${bw - 2 * gap - 8} q4,0 4,4 v${h - 4} z`} fill="var(--series-1)" />
+            {x.revenue_yoy_pct != null && (
+              <text x={xPos + (bw - 2 * gap) / 2} y={H - B - h - 6} textAnchor="middle" className="bar-label">{pct(x.revenue_yoy_pct, 0)}</text>
+            )}
+            <text x={xPos + (bw - 2 * gap) / 2} y={H - 6} textAnchor="middle" className="axis">{quarterLabel(x.period_end)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function Growth({ r }: { r: Research }) {
+  const g = r.growth;
+  if (!g) return <p className="muted">No growth data.</p>;
+  const fy = g.forward.find((f) => f.horizon === "0y");
+  const tile = (label: string, v: number | null | undefined, note?: string) => (
+    <div className="tile"><div className="label">{label}</div><div className={`value ${tone(v)}`}>{pct(v, 1)}</div>{note && <div className="delta muted">{note}</div>}</div>
+  );
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <div className="tiles">
+        {tile("Revenue CAGR 3Y", g.reported.revenue_3y ?? g.filed_cagr.revenue_3y, `5Y ${pct(g.reported.revenue_5y ?? g.filed_cagr.revenue_5y, 1)}`)}
+        {tile("EPS CAGR 3Y", g.reported.eps_3y, `5Y ${pct(g.reported.eps_5y, 1)}`)}
+        {tile("Price CAGR 3Y", g.price_cagr_3y, `5Y ${pct(g.price_cagr_5y, 1)}`)}
+        {fy && tile("This year, expected", fy.revenue_growth_pct, `revenue · EPS ${pct(fy.eps_growth_pct, 1)} vs S&P ${pct(fy.index_eps_growth_pct, 1)}`)}
+        <div className="tile"><div className="label">PEG</div><div className="value">{g.peg?.toFixed(2) ?? "–"}</div>
+          <div className="delta muted">P/E ÷ expected growth; under 1 = growth priced cheaply</div></div>
+      </div>
+
+      {g.quarters.length > 0 && (
+        <div>
+          <h3 className="sub">Quarterly revenue <span className="muted small">· labels are growth vs the same quarter a year earlier</span></h3>
+          <RevenueBars quarters={g.quarters} />
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Quarter ended</th><th>Revenue</th><th>YoY</th><th>Net income</th><th>YoY</th><th>Gross margin</th><th>Operating margin</th></tr></thead>
+              <tbody>
+                {g.quarters.slice(0, 8).map((q) => (
+                  <tr key={q.period_end} style={{ cursor: "default" }}>
+                    <td>{q.period_end}</td><td>{big(q.revenue)}</td><td className={tone(q.revenue_yoy_pct)}>{pct(q.revenue_yoy_pct, 1)}</td>
+                    <td className={tone(q.net_income)}>{big(q.net_income)}</td><td className={tone(q.net_income_yoy_pct)}>{pct(q.net_income_yoy_pct, 1)}</td>
+                    <td>{q.gross_margin_pct == null ? "–" : `${q.gross_margin_pct.toFixed(1)}%`}</td>
+                    <td>{q.operating_margin_pct == null ? "–" : `${q.operating_margin_pct.toFixed(1)}%`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {g.forward.length > 0 && (
+        <div>
+          <h3 className="sub">What analysts expect</h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Period</th><th>Revenue est.</th><th>Range</th><th>Growth</th><th>EPS est.</th><th>Range</th><th>Growth</th><th>S&amp;P 500 EPS growth</th><th>Analysts</th></tr></thead>
+              <tbody>
+                {g.forward.map((f) => (
+                  <tr key={f.horizon} style={{ cursor: "default" }}>
+                    <td style={{ textAlign: "left" }}>{f.label}</td>
+                    <td>{big(f.revenue)}</td><td className="muted">{f.revenue_low != null ? `${big(f.revenue_low)}–${big(f.revenue_high)}` : "–"}</td>
+                    <td className={tone(f.revenue_growth_pct)}>{pct(f.revenue_growth_pct, 1)}</td>
+                    <td>{f.eps?.toFixed(2) ?? "–"}</td><td className="muted">{f.eps_low != null ? `${f.eps_low.toFixed(2)}–${f.eps_high?.toFixed(2)}` : "–"}</td>
+                    <td className={tone(f.eps_growth_pct)}>{pct(f.eps_growth_pct, 1)}</td>
+                    <td className="muted">{pct(f.index_eps_growth_pct, 1)}</td>
+                    <td className="muted">{f.revenue_analysts ?? f.eps_analysts ?? "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {g.years.length > 1 && (
+        <div>
+          <h3 className="sub">Annual <span className="muted small">· from 10-K filings; revenue CAGR {pct(g.filed_cagr.revenue_3y, 1)} (3Y) / {pct(g.filed_cagr.revenue_5y, 1)} (5Y), net income {pct(g.filed_cagr.net_income_3y, 1)} / {pct(g.filed_cagr.net_income_5y, 1)}</span></h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Fiscal year ended</th>{g.years.map((y) => <th key={y.period_end}>{y.period_end.slice(0, 7)}</th>)}</tr></thead>
+              <tbody>
+                <tr style={{ cursor: "default" }}><td style={{ textAlign: "left" }}>Revenue</td>{g.years.map((y) => <td key={y.period_end}>{big(y.revenue)}</td>)}</tr>
+                <tr style={{ cursor: "default" }}><td style={{ textAlign: "left" }}>Net income</td>{g.years.map((y) => <td key={y.period_end} className={tone(y.net_income)}>{big(y.net_income)}</td>)}</tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      <p className="small muted" style={{ margin: 0 }}>
+        History from SEC filings; CAGR = compound annual growth. EPS growth uses Finnhub's split-adjusted figures (SEC per-share history
+        isn't adjusted for splits, so the quarterly table shows net income). Estimates are analyst consensus via Yahoo.
+      </p>
     </div>
   );
 }

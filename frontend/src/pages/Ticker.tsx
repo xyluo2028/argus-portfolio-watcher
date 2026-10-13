@@ -19,7 +19,8 @@ import { PeersCard } from "../components/PeersCard";
 import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { SymbolNotes } from "../components/SymbolNotes";
-import { big, extLabel, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
+import { extLabel, nyTime, pct, price, quoteTime, tone } from "../format";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue, type GroupName } from "../metrics";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -41,30 +42,11 @@ const PANES: { key: Pane; label: string }[] = [
   { key: "volume", label: "Volume" }, { key: "rsi14", label: "RSI 14" }, { key: "macd", label: "MACD" },
 ];
 
-const STATS: { key: string; label: string; fmt: (v: number | null | undefined) => string }[] = [
-  { key: "market_cap", label: "Market cap", fmt: big },
-  { key: "pe_ttm", label: "P/E (TTM)", fmt: ratio },
-  { key: "pe_forward", label: "P/E (forward)", fmt: ratio },
-  { key: "peg", label: "PEG", fmt: ratio },
-  { key: "pb", label: "P/B", fmt: ratio },
-  { key: "ps_ttm", label: "P/S (TTM)", fmt: ratio },
-  { key: "ev_ebitda", label: "EV/EBITDA", fmt: ratio },
-  { key: "eps_ttm", label: "EPS (TTM)", fmt: (v) => money(v) },
-  { key: "revenue_ttm", label: "Revenue (TTM)", fmt: big },
-  { key: "revenue_growth_yoy_pct", label: "Revenue growth YoY", fmt: (v) => pct(v, 1) },
-  { key: "gross_margin_pct", label: "Gross margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "operating_margin_pct", label: "Operating margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "net_margin_pct", label: "Net margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "roe_pct", label: "ROE", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "fcf_ttm", label: "Free cash flow", fmt: big },
-  { key: "debt_to_equity", label: "Debt/Equity", fmt: ratio },
-  { key: "dividend_yield_pct", label: "Dividend yield", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
-  { key: "beta", label: "Beta", fmt: ratio },
-  { key: "expense_ratio_pct", label: "Expense ratio", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
-  { key: "net_assets", label: "Net assets", fmt: big },
-  { key: "ytd_return_pct", label: "YTD return", fmt: (v) => pct(v, 1) },
-  { key: "return_3y_pct", label: "3-year avg return", fmt: (v) => pct(v, 1) },
-  { key: "return_5y_pct", label: "5-year avg return", fmt: (v) => pct(v, 1) },
+// Same indicators, names and groups as the dashboard's tabs (src/metrics.ts).
+const SECTIONS: { group: GroupName; title: string }[] = [
+  { group: "Financials", title: "Valuation & size" }, { group: "Growth", title: "Growth" },
+  { group: "Profitability", title: "Profitability" }, { group: "Momentum", title: "Momentum" },
+  { group: "Dividends & risk", title: "Dividends & risk" }, { group: "Fund", title: "Fund" },
 ];
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
@@ -204,20 +186,35 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <CompanyCard symbol={symbol} />
       <HoldingsCard symbol={symbol} />
 
-      <section className="grid-2">
-        <div className="card">
-          <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)}</span>}</h2>
-          {fund ? (
-            <div className="stats">
-              {STATS.filter((s) => m[s.key] != null).map((s) => (
-                <div className="stat" key={s.key} title={fund.sources[s.key] ? `source: ${fund.sources[s.key]}` : undefined}>
-                  <div className="k">{s.label}</div>
-                  <div className="v">{s.fmt(m[s.key])}</div>
+      <section className="card">
+        <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)} · same figures as the dashboard tabs</span>}</h2>
+        {fund ? (
+          <div className="fund-groups">
+            {SECTIONS.map(({ group, title }) => {
+              const keys = GROUPS[group].filter((k) => metricValue(k, m, quote?.price) != null);
+              if (keys.length === 0) return null;
+              return (
+                <div key={group}>
+                  <h3 className="sub">{title}</h3>
+                  <dl className="kv">
+                    {keys.map((k) => {
+                      const v = metricValue(k, m, quote?.price), d = METRICS[k];
+                      const src = fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
+                      return (
+                        <div key={k} title={[d.title, src].filter(Boolean).join(" · ") || undefined}>
+                          <dt>{d.label}</dt><dd className={metricTone(k, v)}>{formatMetric(k, v)}</dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
                 </div>
-              ))}
-            </div>
-          ) : <p className="muted">Loading…</p>}
-        </div>
+              );
+            })}
+          </div>
+        ) : <p className="muted">Loading…</p>}
+      </section>
+
+      <section>
 
         <PositionCard symbol={symbol} portfolio={portfolio} position={position} lastPrice={quote?.price}
                       onChanged={loadPosition} />

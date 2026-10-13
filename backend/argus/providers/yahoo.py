@@ -212,7 +212,9 @@ class YahooProvider:
             t = _yf().Ticker(to_yahoo(symbol))
             out: dict = {}
             for name, get in (("recommendations", lambda: t.recommendations), ("eps_trend", lambda: t.eps_trend),
-                              ("eps_revisions", lambda: t.eps_revisions), ("institutions", lambda: t.institutional_holders)):
+                              ("eps_revisions", lambda: t.eps_revisions), ("institutions", lambda: t.institutional_holders),
+                              ("revenue_estimate", lambda: t.revenue_estimate), ("earnings_estimate", lambda: t.earnings_estimate),
+                              ("growth_estimates", lambda: t.growth_estimates)):
                 try:
                     df = get()
                 except Exception as e:  # noqa: BLE001 - each piece is optional
@@ -227,7 +229,7 @@ class YahooProvider:
                     out[name] = {str(h): {str(k): (_num(v) if not isinstance(v, str) else v) for k, v in vals.items()}
                                  for h, vals in df.to_dict("index").items()}
             return out
-        return self._memo(f"analyst:{symbol}", fetch)
+        return self._memo(f"analyst2:{symbol}", fetch)
 
     def get_statements(self, symbol: str) -> dict:
         """Annual statements, newest first: {"years": [...], "balance"|"income"|"cashflow": {row: [values]}}."""

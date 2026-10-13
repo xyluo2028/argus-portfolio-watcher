@@ -215,7 +215,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/fundamentals/{symbol}")
     async def fundamentals(symbol: str, fields: str | None = None, refresh: bool = False):
         f = [x.strip() for x in fields.split(",")] if fields else None
-        return await run(argus.market.get_fundamentals, normalize_symbol(symbol), f, refresh)
+        return await run(argus.fundamentals, symbol, f, refresh)
 
     @app.get("/api/earnings/{symbol}")
     async def earnings_history(symbol: str, limit: int = 8):

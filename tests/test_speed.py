@@ -195,3 +195,17 @@ def test_return_bases(make_argus, monkeypatch):
     assert b["1M"]["date"] == "2026-03-17" and b["3M"]["date"] == "2026-01-16"          # on or before the date
     assert b["1Y"] is None and b["5Y"] is None                                         # longer than the history
     assert b["Max"]["date"] == "2025-12-29"
+
+
+def test_single_symbol_fundamentals_add_price_cagr_and_fcf_margin(make_argus):
+    from datetime import date
+
+    days = [date.today() - timedelta(days=i) for i in range(4 * 365, -1, -1)]
+    bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, 100 * 1.0002 ** i, 1) for i, d in enumerate(days)]
+    a = make_argus(history=PerSymbolHistory({"X": bars}),
+                   fundamentals=[SlowFund("finnhub", {"fcf_ttm": 20.0, "revenue_ttm": 80.0, "pe_ttm": 30.0}, delay=0)])
+    m = a.fundamentals("x")["metrics"]
+    assert m["fcf_margin_pct"] == pytest.approx(25) and m["pe_ttm"] == 30.0
+    assert m["cagr_3y_pct"] == pytest.approx((1.0002 ** 365.25 - 1) * 100, rel=0.02)  # ~7.6% a year
+    assert m["cagr_5y_pct"] is None  # only 4 years of history
+    assert set(a.fundamentals("x", ["cagr_3y_pct"])["metrics"]) == {"cagr_3y_pct"}

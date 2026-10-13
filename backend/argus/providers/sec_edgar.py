@@ -55,6 +55,9 @@ CONCEPTS: tuple[Concept, ...] = (
 )
 
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+# Financial reports. The same fact also turns up in proxy statements (DEF 14A), 8-Ks and registration
+# statements filed later; those must not displace the report's copy.
+REPORT_FORMS = ANNUAL_FORMS | {"10-Q", "10-Q/A", "6-K", "6-K/A", "10-KT", "10-QT"}
 
 
 class SecEdgarProvider:
@@ -189,15 +192,16 @@ def _pick_series(facts: dict, concept: Concept) -> tuple[list[dict], str | None]
 
 
 def _duration_rows(rows: list[dict]) -> dict[tuple[date, date], tuple[float, str]]:
-    """Dedupe by (start, end), keeping the latest filing (restatements win)."""
-    best: dict[tuple[date, date], tuple[float, str, str]] = {}
+    """Dedupe by (start, end): financial reports over other filings, then the latest (restatements win)."""
+    best: dict[tuple[date, date], tuple[float, str, tuple[bool, str]]] = {}
     for r in rows:
         if "start" not in r:
             continue
         key = (date.fromisoformat(r["start"]), date.fromisoformat(r["end"]))
-        filed = r.get("filed", "")
-        if key not in best or filed > best[key][2]:
-            best[key] = (float(r["val"]), r.get("form", ""), filed)
+        form = r.get("form", "")
+        rank = (form in REPORT_FORMS, r.get("filed", ""))
+        if key not in best or rank > best[key][2]:
+            best[key] = (float(r["val"]), form, rank)
     return {k: (v[0], v[1]) for k, v in best.items()}
 
 

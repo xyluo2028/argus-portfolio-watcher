@@ -150,6 +150,10 @@ class FinnhubProvider:
         out: dict[str, float | None] = {}
         for field, candidates in _METRIC_MAP.items():
             out[field] = next((_num(raw[c]) for c in candidates if _num(raw.get(c)) is not None), None)
+        # ROIC comes from the quarterly ratio history (a fraction); Finnhub's "ROI" metric is the same
+        # measure in percent, used when the history is missing.
+        roic = next((_num(x.get("v")) for x in self._series[symbol][1].get("roicTTM") or [] if _num(x.get("v")) is not None), None)
+        out["roic_pct"] = roic * 100 if roic is not None else out.get("roi_pct")
         cap = _num(raw.get("marketCapitalization"))
         out["market_cap"] = cap * 1e6 if cap is not None else None
         return out

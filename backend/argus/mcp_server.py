@@ -155,9 +155,11 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_fundamentals(symbol: str, fields: list[str] | None = None) -> dict:
         """Valuation & profitability: pe_ttm, pe_forward, peg, pb, ps_ttm, ev_ebitda, eps_ttm,
         market_cap, revenue_ttm, revenue_growth_yoy_pct, gross/operating/net_margin_pct, roe_pct,
-        fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct.
+        fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct, roic_pct,
+        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns, return_1m_pct,
+        cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct.
         Cached 24h; `sources` says which provider supplied each value."""
-        return argus.market.get_fundamentals(normalize_symbol(symbol), fields)
+        return argus.fundamentals(symbol, fields)
 
     @mcp.tool(annotations=READ)
     @_tool
@@ -264,8 +266,10 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Research on one company: analyst consensus, price targets and monthly rating counts; EPS
         estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
         institutional and insider ownership, top 13F holders; short interest; 5-year valuation bands
-        (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; last week's
-        headlines with a keyword-based tone. Cached for an hour."""
+        (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; growth (quarterly
+        revenue and net income YoY from SEC filings, revenue/EPS/price CAGR 3Y and 5Y, analysts' forward
+        revenue and EPS growth vs the S&P 500, PEG); last week's headlines with a keyword-based tone.
+        Cached for an hour."""
         return argus.research(symbol, quotes_now())
 
     @mcp.tool(annotations=READ)
