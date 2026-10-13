@@ -189,7 +189,8 @@ export function HoldingsTabs({ source, rows, first }: {
     : tab === "Earnings" && earn === null ? "Loading earnings dates…"
     : needsMetrics && !fund ? "Loading metrics…"
     : needsMetrics && pendingCount ? `Updating metrics ${symbols.length - pendingCount}/${symbols.length}…` : null;
-  const cols = tab === "First" ? [] : COLUMNS[tab].filter((c) => source.kind === "portfolio" || !NEEDS_SHARES.has(c.label));
+  const cols = useMemo(() => (tab === "First" ? [] : COLUMNS[tab].filter((c) => source.kind === "portfolio" || !NEEDS_SHARES.has(c.label))),
+                       [tab, source.kind]);
 
   return (
     <section className="card">
@@ -204,7 +205,7 @@ export function HoldingsTabs({ source, rows, first }: {
         {waiting && <span className="small muted">{waiting}</span>}
       </div>
       {tab === "First" ? first.content : (
-        <MetricTable cols={cols} note={NOTES[tab]}
+        <MetricTable key={tab} cols={cols} note={NOTES[tab]}
                      rows={rows.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
       )}
     </section>
@@ -214,7 +215,8 @@ export function HoldingsTabs({ source, rows, first }: {
 function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: string }) {
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const navigate = useNavigate();
-  useEffect(() => setSort(null), [cols]);
+  // No reset effect: the parent keys this table by tab, so a new tab starts unsorted, while live
+  // price updates (a re-render every second or so) leave the chosen sort alone.
 
   const sorted = useMemo(() => {
     if (!sort) return rows; // portfolio order (by value)
