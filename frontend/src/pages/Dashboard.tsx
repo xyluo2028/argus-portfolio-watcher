@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
+import { ALL, ApiError, api, type Position, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
@@ -109,7 +109,7 @@ export function Dashboard({ portfolio, live }: Props) {
       </Suspense>
 
       <HoldingsTabs source={{ kind: "portfolio", name: portfolio }} rows={summary.positions}
-                    first={{ label: "Holdings", content: <HoldingsTable positions={summary.positions} /> }} />
+                    first={{ label: "Holdings", content: (rows) => <HoldingsTable positions={rows as Position[]} /> }} />
 
       <EventsCard portfolio={portfolio} />
 

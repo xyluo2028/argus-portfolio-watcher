@@ -9,7 +9,11 @@ type Tab = (typeof TABS)[number];
 type MetricTab = Exclude<Tab, "First">;
 
 /** What a metric row needs to know about a symbol. */
-export interface TabRow { symbol: string; name?: string | null; price?: number | null }
+export interface TabRow { symbol: string; name?: string | null; price?: number | null;
+  sector?: string | null; type?: string | null; market_value?: number | null }
+
+const isFund = (r: TabRow) => r.type === "ETP" || r.sector === "ETF";
+type Filter = { sector: string; noEtf: boolean };  // sector "" = all
 /** Where the rows come from; picks the endpoints. */
 export type TabSource = { kind: "portfolio"; name: string } | { kind: "watchlist"; name: string };
 const POLL_MS = 3000;
@@ -145,9 +149,34 @@ function useFundamentals(source: TabSource, enabled: boolean) {
 
 /** Tabbed per-symbol views. `first` is the caller's own tab (its label and content); the rest are
  * shared metric tables fed by the portfolio's or the watchlist's endpoints. */
-export function HoldingsTabs({ source, rows, first }: {
-  source: TabSource; rows: TabRow[]; first: { label: string; content: React.ReactNode };
+export function HoldingsTabs({ source, rows: allRows, first }: {
+  source: TabSource; rows: TabRow[];
+  /** The caller's own tab; `content` may take the filtered rows. */
+  first: { label: string; content: React.ReactNode | ((rows: TabRow[]) => React.ReactNode) };
 }) {
+  // -- filters (sector, exclude ETFs): only when the rows carry sectors -------------------------
+  const filterKey = `argus.filter.${source.kind}`;
+  const [filter, setFilter] = useState<Filter>(() => {
+    try { return { sector: "", noEtf: false, ...JSON.parse(localStorage.getItem(filterKey) ?? "{}") }; } catch { return { sector: "", noEtf: false }; }
+  });
+  const updateFilter = (f: Filter) => {
+    setFilter(f);
+    try { localStorage.setItem(filterKey, JSON.stringify(f)); } catch { /* ignore */ }
+  };
+  const sectors = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const r of allRows) if (r.sector && !(filter.noEtf && isFund(r))) n.set(r.sector, (n.get(r.sector) ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [allRows, filter.noEtf]);
+  const hasSectors = allRows.some((r) => r.sector);
+  // A remembered sector that's no longer held (or hidden by "exclude ETFs") counts as "all".
+  const sector = sectors.some(([k]) => k === filter.sector) ? filter.sector : "";
+  const rows = useMemo(() => allRows.filter((r) => (!filter.noEtf || !isFund(r)) && (!sector || r.sector === sector)),
+                       [allRows, filter.noEtf, sector]);
+  const filtered = rows.length !== allRows.length;
+  const totalValue = allRows.reduce((s, r) => s + (r.market_value ?? 0), 0);
+  const shownValue = rows.reduce((s, r) => s + (r.market_value ?? 0), 0);
+
   const tabKey = `argus.tabs.${source.kind}`;
   const [tab, setTab] = useState<Tab>(() => {
     try {
@@ -162,7 +191,8 @@ export function HoldingsTabs({ source, rows, first }: {
     try { localStorage.setItem(tabKey, t); } catch { /* ignore */ }
   };
 
-  const symbols = useMemo(() => rows.map((p) => p.symbol).sort(), [rows]);
+  // Data for every position (not just the filtered ones), so changing a filter never refetches.
+  const symbols = useMemo(() => allRows.map((p) => p.symbol).sort(), [allRows]);
   const needsMetrics = ["Financials", "Growth", "Dividends", "Profitability", "Momentum"].includes(tab);
   const fund = useFundamentals(source, needsMetrics);
   const metrics = fund?.metrics ?? {};
@@ -204,7 +234,25 @@ export function HoldingsTabs({ source, rows, first }: {
         </div>
         {waiting && <span className="small muted">{waiting}</span>}
       </div>
-      {tab === "First" ? first.content : (
+      {hasSectors && (
+        <div className="row filter-bar">
+          <select value={sector} onChange={(e) => updateFilter({ ...filter, sector: e.target.value })} aria-label="Sector">
+            <option value="">All sectors ({allRows.length - (filter.noEtf ? allRows.filter(isFund).length : 0)})</option>
+            {sectors.map(([k, n]) => <option key={k} value={k}>{k === "ETF" ? "ETFs" : k} ({n})</option>)}
+          </select>
+          <label className="small"><input type="checkbox" checked={filter.noEtf} onChange={(e) => updateFilter({ ...filter, noEtf: e.target.checked })} /> Exclude ETFs</label>
+          {filtered && (
+            <>
+              <span className="small muted">
+                Showing {rows.length} of {allRows.length}
+                {totalValue > 0 && <> · {money(shownValue, { whole: true })} ({((shownValue / totalValue) * 100).toFixed(1)}% of the portfolio)</>}
+              </span>
+              <button className="btn ghost small" onClick={() => updateFilter({ sector: "", noEtf: false })}>Clear</button>
+            </>
+          )}
+        </div>
+      )}
+      {tab === "First" ? (typeof first.content === "function" ? first.content(rows) : first.content) : (
         <MetricTable key={tab} cols={cols} note={NOTES[tab]}
                      rows={rows.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
       )}
