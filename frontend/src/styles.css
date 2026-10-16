@@ -330,5 +330,7 @@ textarea.input { resize: vertical; font: inherit; }
 .treemap .sym { font-weight: 600; white-space: nowrap; }
 .treemap .chg, .treemap .wt { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .treemap .wt { opacity: 0.8; }
+.portfolio-heatmap .sector-label { position: absolute; height: 18px; padding: 1px 6px; font-size: 11px; font-weight: 600;
+  color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heat-scale { display: inline-block; width: 120px; height: 8px; border-radius: 4px;
   background: linear-gradient(90deg, var(--heat-down), var(--heat-mid), var(--heat-up)); }
