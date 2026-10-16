@@ -201,6 +201,11 @@ const enc = encodeURIComponent;
 const send = <T>(method: string, path: string, body?: unknown) =>
   get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
 
+export interface PortfolioDeletion {
+  portfolio: PortfolioRef; dry_run: boolean; backup?: string;
+  counts: { transactions: number; open_positions: number; targets: number; nav_days: number };
+}
+
 export interface Txn {
   id: number; type: string; symbol: string; qty: number; price: number; fee: number; amount: number;
   ts: string; note: string | null; source: string; external_id: string | null; deleted: boolean;
@@ -430,6 +435,9 @@ export const api = {
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
+  deletePortfolio: (name: string, dryRun: boolean, confirm?: string) =>
+    send<PortfolioDeletion>("DELETE", `/api/portfolios/${enc(name)}?dry_run=${dryRun}` +
+      (confirm != null ? `&confirm=${enc(confirm)}` : "")),
   deleteTransaction: (id: number, dryRun: boolean) =>
     send<{ deleted: Txn; dry_run: boolean }>("DELETE", `/api/transactions/${id}?dry_run=${dryRun}`),
   watchlist: (name = "Watchlist") => get<{ watchlist: string; items: WatchItem[]; errors: Record<string, string> }>(`/api/watchlists/${enc(name)}`),

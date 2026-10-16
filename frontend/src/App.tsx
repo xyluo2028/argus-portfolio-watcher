@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
@@ -76,12 +76,14 @@ function Main() {
     }
   });
 
-  useEffect(() => {
+  // Also rerun after a portfolio is deleted, so the picker drops it and the selection moves on.
+  const loadPortfolios = useCallback(() => {
     api.portfolios().then((ps) => {
       setPortfolios(ps);
       setCurrent((c) => (ps.some((p) => p.name === c) || (c === ALL && ps.length > 1) ? c : ps[0]?.name ?? ""));
     }, () => setPortfolios([]));
   }, []);
+  useEffect(loadPortfolios, [loadPortfolios]);
 
   useEffect(() => {
     try {
@@ -123,7 +125,7 @@ function Main() {
         {portfolios === null ? <p className="muted">Loading…</p>
           : portfolios.length === 0 ? (
             <Routes>
-              <Route path="/data" element={<Data />} />
+              <Route path="/data" element={<Data onPortfoliosChanged={loadPortfolios} />} />
               <Route path="*" element={
                 <div className="card">
                   <h2>No portfolios yet</h2>
@@ -143,7 +145,7 @@ function Main() {
               <Route path="/markets" element={<Markets />} />
               <Route path="/screener" element={<Screener />} />
               <Route path="/alerts" element={<Alerts live={live} />} />
-              <Route path="/data" element={<Data />} />
+              <Route path="/data" element={<Data onPortfoliosChanged={loadPortfolios} />} />
             </Routes>
           )}
         </Suspense>

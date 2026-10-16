@@ -234,6 +234,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def portfolios():
         return await run(argus.portfolios.list_portfolios)
 
+    @app.delete("/api/portfolios/{ref}")
+    async def delete_portfolio(ref: str, dry_run: bool = True, confirm: str | None = None):
+        return await run(argus.delete_portfolio, ref, confirm, dry_run, "ui")
+
     @app.post("/api/portfolios", status_code=201)
     async def create_portfolio(body: PortfolioBody):
         return await run(argus.portfolios.create_portfolio, body.name, body.benchmark, "ui")

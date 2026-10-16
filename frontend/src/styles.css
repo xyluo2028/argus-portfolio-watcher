@@ -245,6 +245,10 @@ table.corr td { min-width: 40px; border-radius: 3px; }
 .btn.ghost:hover { color: var(--text); background: var(--surface-2); }
 .btn.danger { background: var(--down); border-color: var(--down); color: #fff; font-weight: 600; }
 a.btn { text-decoration: none; display: inline-block; }
+.danger-zone { border-color: color-mix(in srgb, var(--down) 45%, var(--border)); }
+.danger-zone h2 { color: var(--down); }
+.danger-text { color: var(--down); }
+.btn.danger:disabled { opacity: 0.45; cursor: not-allowed; }
 .warn-box { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .preview { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); }

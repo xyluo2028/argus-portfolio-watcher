@@ -928,6 +928,19 @@ class Argus:
     def watchlist_earnings(self, name: str = DEFAULT_WATCHLIST) -> dict:
         return {"watchlist": name, **self.earnings_for([i["symbol"] for i in self.watchlists.items(name)])}
 
+    def delete_portfolio(self, ref: str, confirm: str | None = None, dry_run: bool = True, actor: str = "cli") -> dict:
+        """Delete a portfolio and everything recorded in it. `confirm` must repeat its exact name; all
+        records are saved to a snapshot in data/snapshots/ first, so it can be restored."""
+        p = self.portfolios.get_portfolio(ref)
+        if not dry_run:
+            if confirm != p.name:
+                raise ArgusError("INVALID_ARG", f"Confirm by giving the portfolio's exact name, '{p.name}'.")
+            safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in p.name)
+            backup = self.snapshots.dump(self.settings.data_dir / "snapshots" /
+                                         f"argus-before-delete-{safe}-{datetime.now():%Y%m%d-%H%M%S}.json")["file"]
+        out = self.portfolios.delete_portfolio(p.id, actor, dry_run)
+        return out | ({} if dry_run else {"backup": backup})
+
     def earnings_history(self, symbol: str, limit: int = 8) -> dict:
         """Each reported quarter (SEC quarter ends) with its report date and timing, EPS and revenue
         estimate vs actual, beat/miss, and the price reaction; plus the next scheduled report.
