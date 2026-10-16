@@ -25,7 +25,7 @@ from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache
 from argus.providers.base import Bar, ProviderError, Quote
 
 METRIC_FIELDS = (
-    "pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
+    "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
     "revenue_ttm", "revenue_growth_yoy_pct", "gross_margin_pct", "operating_margin_pct", "net_margin_pct",
     "roe_pct", "fcf_ttm", "debt_to_equity", "dividend_yield_pct", "beta", "high_52w", "low_52w",
     "expense_ratio_pct", "net_assets", "ytd_return_pct", "return_3y_pct", "return_5y_pct",
@@ -44,7 +44,7 @@ PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_fo
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
-FUNDAMENTALS_VERSION = 5  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 6  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 

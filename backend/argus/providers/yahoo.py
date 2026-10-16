@@ -334,6 +334,7 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "pb": _num(i.get("priceToBook")),
         "ps_ttm": _num(i.get("priceToSalesTrailing12Months")),
         "ev_ebitda": _num(i.get("enterpriseToEbitda")),
+        # Despite the name, Yahoo's "PEG Ratio (5yr expected)": P/E ÷ analysts' expected EPS growth.
         "peg": _num(i.get("trailingPegRatio")),
         "eps_ttm": _num(i.get("trailingEps")),
         "eps_forward": _num(i.get("forwardEps")),

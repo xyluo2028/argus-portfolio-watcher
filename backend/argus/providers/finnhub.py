@@ -22,7 +22,6 @@ _METRIC_MAP: dict[str, tuple[str, ...]] = {
     "pb": ("pb", "pbQuarterly", "pbAnnual"),
     "ps_ttm": ("psTTM", "psAnnual"),
     "ev_ebitda": ("evEbitdaTTM", "currentEv/ebitdaTTM"),
-    "peg": ("pegTTM",),
     "eps_ttm": ("epsTTM", "epsExclExtraItemsTTM", "epsBasicExclExtraItemsTTM"),
     "beta": ("beta",),
     "dividend_yield_pct": ("currentDividendYieldTTM", "dividendYieldIndicatedAnnual"),
@@ -154,6 +153,11 @@ class FinnhubProvider:
         # measure in percent, used when the history is missing.
         roic = next((_num(x.get("v")) for x in self._series[symbol][1].get("roicTTM") or [] if _num(x.get("v")) is not None), None)
         out["roic_pct"] = roic * 100 if roic is not None else out.get("roi_pct")
+        # Finnhub's PEG is trailing: P/E ÷ last-12-months EPS growth, not the expected-growth PEG the
+        # "peg" field means (that comes from Yahoo). It explodes near zero growth and means nothing
+        # when growth is negative, so it's blank then.
+        peg, growth = _num(raw.get("pegTTM")), out.get("eps_growth_yoy_pct")
+        out["peg_ttm"] = peg if peg is not None and peg > 0 and growth is not None and growth > 0 else None
         cap = _num(raw.get("marketCapitalization"))
         out["market_cap"] = cap * 1e6 if cap is not None else None
         return out

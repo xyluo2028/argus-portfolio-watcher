@@ -27,7 +27,10 @@ const DEFS: MetricDef[] = [
   { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money" },
   { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", title: "Price ÷ trailing 12-month earnings" },
   { key: "pe_forward", short: "Fwd P/E", label: "P/E (forward)", kind: "ratio1", title: "Price ÷ next 12 months' estimated earnings" },
-  { key: "peg", short: "PEG", label: "PEG", kind: "ratio2", title: "P/E ÷ expected EPS growth; below 1 can mean growth is cheap" },
+  { key: "peg", short: "PEG", label: "PEG (expected)", kind: "ratio2",
+    title: "P/E ÷ analysts' expected EPS growth (Yahoo, 5-year); below 1 can mean growth is cheap" },
+  { key: "peg_ttm", short: "PEG TTM", label: "PEG (trailing)", kind: "ratio2",
+    title: "P/E ÷ the last 12 months' EPS growth vs a year earlier (Finnhub): historical, so it explodes when growth is near zero; blank when growth is zero or negative" },
   { key: "ps_ttm", short: "P/S", label: "P/S (TTM)", kind: "ratio1" },
   { key: "pb", short: "P/B", label: "P/B", kind: "ratio1" },
   { key: "ev_ebitda", short: "EV/EBITDA", label: "EV/EBITDA", kind: "ratio1" },
@@ -80,7 +83,7 @@ export const METRICS: Record<string, MetricDef> = Object.fromEntries(DEFS.map((d
 
 /** The same groups name the dashboard's tabs and the stock page's sections. */
 export const GROUPS = {
-  Financials: ["market_cap", "revenue_ttm", "eps_ttm", "pe_ttm", "pe_forward", "peg", "ps_ttm", "pb", "ev_ebitda", "debt_to_equity", "fcf_ttm"],
+  Financials: ["market_cap", "revenue_ttm", "eps_ttm", "pe_ttm", "pe_forward", "peg", "peg_ttm", "ps_ttm", "pb", "ev_ebitda", "debt_to_equity", "fcf_ttm"],
   Growth: ["revenue_growth_yoy_pct", "revenue_growth_q_yoy_pct", "revenue_growth_3y_pct", "revenue_growth_5y_pct",
            "eps_growth_yoy_pct", "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct"],
   Profitability: ["gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_margin_pct", "roe_pct", "roa_pct", "roic_pct"],

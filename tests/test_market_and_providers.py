@@ -67,6 +67,40 @@ def test_finnhub_metrics_mapping():
     assert m["ps_ttm"] is None
 
 
+@pytest.mark.parametrize("growth, peg_ttm", [(0.87, 112.93), (-21.7, None), (0.0, None), (None, None)])
+def test_finnhub_peg_is_trailing_and_kept_apart_from_the_expected_peg(growth, peg_ttm):
+    # NOW, Oct 2026: GAAP EPS growth of 0.87% makes the trailing PEG 112.93.
+    metric = {"peTTM": 86.67, "pegTTM": 112.93, "epsGrowthTTMYoy": growth}
+    client = httpx.Client(base_url="https://finnhub.test",
+                          transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"metric": metric})))
+    m = FinnhubProvider("k", client=client).get_metrics("NOW")
+    assert "peg" not in m  # "peg" is the expected-growth PEG, from Yahoo only
+    assert m["peg_ttm"] == peg_ttm
+
+
+def test_peg_column_never_falls_back_to_the_trailing_one(make_argus):
+    class Finnhub:
+        name = "finnhub"
+
+        def get_metrics(self, symbol):
+            return {"pe_ttm": 86.67, "peg_ttm": 112.93}
+
+    class Yahoo:
+        name = "yahoo"
+
+        def __init__(self, peg):
+            self.peg = peg
+
+        def get_metrics(self, symbol):
+            return {"pe_forward": 28.6, "peg": self.peg}
+
+    a = make_argus(fundamentals=[Finnhub(), Yahoo(1.01)])
+    m = a.market.get_fundamentals("NOW", ["peg", "peg_ttm"])
+    assert (m["metrics"], m["sources"]) == ({"peg": 1.01, "peg_ttm": 112.93}, {"peg": "yahoo", "peg_ttm": "finnhub"})
+    b = make_argus(fundamentals=[Finnhub(), Yahoo(None)])  # same database: use a fresh symbol
+    assert b.market.get_fundamentals("XYZ", ["peg"])["metrics"]["peg"] is None
+
+
 def _fact(start, end, val, form="10-Q", filed="2026-01-01"):
     return {"start": start, "end": end, "val": val, "form": form, "filed": filed}
 
