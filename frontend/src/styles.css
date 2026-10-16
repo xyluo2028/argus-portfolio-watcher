@@ -285,6 +285,7 @@ a.btn { text-decoration: none; display: inline-block; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
 th:first-child, td:first-child, th.left, td.left { text-align: left; }
+th.rank, td.rank { width: 1%; text-align: right; color: var(--muted); padding-right: 4px; cursor: default; }
 th { font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
 th[aria-sort] { color: var(--text); }
 tbody tr { cursor: pointer; }

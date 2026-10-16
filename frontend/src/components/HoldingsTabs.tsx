@@ -272,7 +272,7 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
         <table className="metric-table">
           <thead>
             <tr>
-              <th>Symbol</th><th>Price</th>
+              <th className="rank" title="Rank in the current sort order">#</th><th className="left">Symbol</th><th>Price</th>
               {cols.map((c, i) => (
                 <th key={c.label} title={c.title} onClick={() => setSort((s) => (s?.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: -1 }))}
                     aria-sort={sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
@@ -282,10 +282,11 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
+            {sorted.map((r, n) => (
               <tr key={r.p.symbol} tabIndex={0} onClick={() => navigate(`/t/${r.p.symbol}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${r.p.symbol}`)}>
-                <td><span className="sym">{r.p.symbol}</span><span className="name" title={r.p.name ?? undefined}>{r.p.name ?? ""}</span></td>
+                <td className="rank">{n + 1}</td>
+                <td className="left"><span className="sym">{r.p.symbol}</span><span className="name" title={r.p.name ?? undefined}>{r.p.name ?? ""}</span></td>
                 <td>{price(r.p.price)}</td>
                 {cols.map((c) => <td key={c.label}>{c.cell ? c.cell(r) : String(c.value(r) ?? "–")}</td>)}
               </tr>
