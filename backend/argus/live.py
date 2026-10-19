@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from argus.app import Argus
 from argus.db import session_scope
-from argus.market_calendar import market_status
+from argus.market_calendar import NY, market_status
 from argus.models import Portfolio, WatchlistItem
 from argus.providers.base import Quote
 
@@ -123,7 +123,10 @@ class LiveHub:
                 due = loop.time() - last_rest >= self.rest_interval_s
                 if symbols and (due or not self.quotes or set(symbols) - set(self.quotes)):
                     # Closed market: MarketService serves the settled close from cache.
-                    await self._rest_refresh(symbols, max_age_s=self.rest_interval_s - 5 if in_session else None)
+                    # In session: fetch fresh (one Yahoo batch request), not from the cache. Streamed
+                    # prices are flushed to the cache every few seconds, so a cache-age check would never
+                    # let REST in, and those symbols would keep yesterday's previous close.
+                    await self._rest_refresh(symbols, max_age_s=0 if in_session else None)
                     last_rest = loop.time()
                 if self.status["session"] == "regular":  # the open ends pre-market prices
                     for sym, q in list(self.quotes.items()):
@@ -145,10 +148,15 @@ class LiveHub:
         quotes, errors = await asyncio.to_thread(self.argus.market.get_quotes, symbols, max_age_s)
         for sym, q in quotes.items():
             live = self.quotes.get(sym)
-            # Never let a slower REST quote overwrite a newer streamed trade price.
+            # Never let a slower REST quote overwrite a newer streamed trade price, but take the day's
+            # reference figures (previous close, open, high, low) from REST when it's the same trading day.
             if live and live.source == "finnhub-ws" and live.as_of > q.as_of:
-                q = replace(live, prev_close=q.prev_close, open=q.open,
-                            ext_price=q.ext_price, ext_as_of=q.ext_as_of, ext_session=q.ext_session)
+                day_figures = {}
+                if q.as_of.astimezone(NY).date() == live.as_of.astimezone(NY).date():
+                    day_figures = {"prev_close": q.prev_close, "open": q.open,
+                                   "high": max(x for x in (q.high, live.price) if x is not None),
+                                   "low": min(x for x in (q.low, live.price) if x is not None)}
+                q = replace(live, ext_price=q.ext_price, ext_as_of=q.ext_as_of, ext_session=q.ext_session, **day_figures)
             # Same for a newer streamed pre/post-market print.
             if live and live.ext_as_of and (q.ext_as_of is None or live.ext_as_of > q.ext_as_of) \
                     and self.status["session"] in ("pre", "post"):
@@ -279,10 +287,18 @@ class LiveHub:
         else:
             if ts < base.as_of:
                 return
-            self.quotes[symbol] = replace(
-                base, price=price, as_of=ts, source="finnhub-ws", delayed=False,
-                high=max(base.high or price, price), low=min(base.low or price, price),
-            )
+            if ts.astimezone(NY).date() > base.as_of.astimezone(NY).date():
+                # First trade of a new session: the last price we had is the previous close, and
+                # open/high/low start over (the minute's REST refresh confirms them).
+                self.quotes[symbol] = replace(
+                    base, price=price, as_of=ts, source="finnhub-ws", delayed=False,
+                    prev_close=base.price, open=price, high=price, low=price,
+                )
+            else:
+                self.quotes[symbol] = replace(
+                    base, price=price, as_of=ts, source="finnhub-ws", delayed=False,
+                    high=max(base.high or price, price), low=min(base.low or price, price),
+                )
         self._dirty.add(symbol)
 
     # -- persistence ----------------------------------------------------------
