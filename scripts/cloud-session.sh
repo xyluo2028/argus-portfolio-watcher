@@ -2,7 +2,8 @@
 # SessionStart hook (.claude/settings.json). In a Claude Code cloud session: install dependencies,
 # build the UI, restore the improvement loop's model portfolios and start Argus. Does nothing locally.
 [ "$CLAUDE_CODE_REMOTE" = "true" ] || exit 0
-cd "$CLAUDE_PROJECT_DIR" || exit 1
+# The hook sets CLAUDE_PROJECT_DIR; run by hand (the round lead restarts Argus with it), use the repo root.
+cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/..}" || exit 1
 mkdir -p data
 export ARGUS_STREAM=off  # the WebSocket carries the key in its URL, where the network secret can't reach
 

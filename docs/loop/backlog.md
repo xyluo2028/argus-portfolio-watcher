@@ -29,6 +29,21 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: pages were mostly designed and checked at desktop width
 - status: open
 
+### B-003 Header badge says "no Finnhub key" when the stream is only switched off
+- kind: bug · severity: low
+- reported by: cloud smoke test (2026-10-21)
+- evidence: with `ARGUS_STREAM=off` and a working key (quotes come from Finnhub), the badge reads
+  "polling each minute (no Finnhub key)"; `frontend/src/components/LiveBadge.tsx` shows that text
+  for every `stream.state === "disabled"`, and `backend/argus/live.py` doesn't say why it's disabled
+- status: open
+
+### B-004 Markets, Screener and Watchlist are hidden until a portfolio exists
+- kind: ux · severity: medium
+- reported by: cloud smoke test (2026-10-21)
+- evidence: on a fresh instance `/markets` shows only "No portfolios yet" (`frontend/src/App.tsx`
+  routes every page except `/data` to that card); market data and the screener don't need a portfolio
+- status: open
+
 ## Blocked
 
 ## Done
