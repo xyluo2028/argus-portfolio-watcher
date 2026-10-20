@@ -60,3 +60,88 @@ def test_fomc_parsing(monkeypatch):
     m = p.fomc_meetings()
     assert [(x["date"], x["projections"]) for x in m] == [("2026-01-28", False), ("2026-03-18", True), ("2026-05-01", False),
                                                           ("2027-01-01", False)]
+
+
+def _row(sym, price, prev, hi, lo, a50, a200, hi52, lo52):
+    return {"symbol": sym, "regularMarketPrice": price, "regularMarketPreviousClose": prev, "regularMarketDayHigh": hi,
+            "regularMarketDayLow": lo, "fiftyDayAverage": a50, "twoHundredDayAverage": a200,
+            "fiftyTwoWeekHigh": hi52, "fiftyTwoWeekLow": lo52, "regularMarketTime": 1_792_440_000}
+
+
+def test_stock_breadth_counts():
+    rows = [
+        _row("UP", 110, 100, 111, 101, 100, 90, 111, 60),    # up, above both, at its 52-week high
+        _row("DN", 50, 55, 56, 49.99, 60, 70, 120, 50),       # down, below both, a hair from its 52-week low
+        _row("FLAT", 20, 20, 21, 19, 19, None, 30, 10),       # unchanged, no 200-day average yet
+        {"symbol": "BAD", "regularMarketPrice": None},          # no price: not counted
+    ]
+    s = mc.stock_breadth(rows)
+    assert (s["count"], s["advancers"], s["decliners"], s["unchanged"]) == (3, 1, 1, 1)
+    assert (s["above_50d"], s["below_50d"], s["above_200d"], s["below_200d"]) == (2, 1, 1, 1)
+    assert s["pct_above_50d"] == pytest.approx(200 / 3) and s["pct_above_200d"] == 50
+    assert (s["highs"], s["lows"], s["pct_new_highs"]) == (["UP"], ["DN"], pytest.approx(100 / 3))
+    assert s["as_of"].startswith("2026-10")
+    assert mc.stock_breadth([]) is None
+
+
+def test_fear_greed_scores_and_labels():
+    start = date(2024, 9, 1)
+    days = [start + timedelta(days=i) for i in range(500)]
+    rising = {d: 100 * 1.002 ** i for i, d in enumerate(days)}           # steady gains, then a jump
+    rising[days[-1]] = rising[days[-2]] * 1.05
+    calm = {d: 20.0 - (i == 499) * 6 for i, d in enumerate(days)}       # VIX drops on the last day
+    flat = {d: 100.0 for d in days}
+    closes = {"^GSPC": rising, "SPY": rising, "^VIX": calm, "^VIX3M": {d: 20.0 for d in days},
+              "TLT": flat, "HYG": rising, "LQD": flat}
+    stocks = {"count": 500, "new_highs": 30, "new_lows": 10, "pct_above_50d": 70.0}
+    fg = mc.fear_greed(closes, stocks)
+    by = {c["key"]: c for c in fg["components"]}
+    assert set(by) == {"momentum", "strength", "breadth", "volatility", "term", "safe_haven", "junk"}
+    assert by["momentum"]["score"] > 95 and by["volatility"]["score"] > 95 and by["term"]["score"] > 95
+    assert by["strength"]["score"] == 75 and by["breadth"]["score"] == 70
+    assert fg["score"] == pytest.approx(sum(c["score"] for c in fg["components"]) / 7, abs=0.1)
+    assert fg["rating"] == "Extreme greed" and by["breadth"]["rating"] == "Greed"
+    assert [mc.fg_label(v) for v in (0, 24.9, 25, 50, 60, 100)] == ["Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Extreme greed"]
+
+    # Only history: the snapshot-based readings drop out, the rest still score.
+    assert len(mc.fear_greed(closes, None)["components"]) == 5
+    assert mc.fear_greed({}, None) is None
+
+
+def test_market_context_counts_the_largest_stocks(make_argus, monkeypatch):
+    a = make_argus()
+    monkeypatch.setattr(a.screener, "largest", lambda n: ["AAA", "BBB"])
+    seen = {}
+
+    def quote_rows(symbols, fields):
+        seen["symbols"], seen["fields"] = symbols, fields
+        return [_row("AAA", 10, 9, 10, 9, 8, 7, 10, 5), _row("BBB", 10, 11, 11, 10, 12, 13, 20, 10)]
+
+    monkeypatch.setattr(a.macro, "quote_rows", quote_rows)
+    for name in ("closes", "treasury_curve", "fomc_meetings", "economic_events"):
+        monkeypatch.setattr(a.macro, name, lambda *_a, **_k: None)
+    out = a.market_context()
+    assert seen["symbols"] == ["AAA", "BBB"] and "fiftyDayAverage" in seen["fields"]
+    s = out["breadth"]["stocks"]
+    assert (s["advancers"], s["decliners"], s["new_highs"], s["new_lows"]) == (1, 1, 1, 1)
+    assert [c["key"] for c in out["fear_greed"]["components"]] == ["strength", "breadth"]
+
+    monkeypatch.setattr(a.screener, "largest", lambda n: [])  # universe not built yet
+    out = a.market_context()
+    assert out["breadth"]["stocks"] is None and "screener" in out["errors"]["breadth"]
+
+
+def test_breadth_universe_is_the_largest_listed_companies(tmp_path):
+    from argus.services.screener import ScreenerService
+
+    svc = ScreenerService(tmp_path, None, None)
+    assert svc.largest(2) == []
+    svc._mem = {"rows": [
+        {"symbol": "SMALL", "market_cap": 1e9, "otc": False, "quote_type": "EQUITY"},
+        {"symbol": "BIG", "market_cap": 9e11, "otc": False, "quote_type": "EQUITY"},
+        {"symbol": "OTCX", "market_cap": 5e11, "otc": True, "quote_type": "EQUITY"},
+        {"symbol": "FUND", "market_cap": 4e11, "otc": False, "quote_type": "ETF"},
+        {"symbol": "MID", "market_cap": 2e10, "otc": False, "quote_type": "EQUITY"},
+        {"symbol": "NOCAP", "market_cap": None, "otc": False, "quote_type": "EQUITY"},
+    ]}
+    assert svc.largest(2) == ["BIG", "MID"]

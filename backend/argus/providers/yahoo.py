@@ -18,8 +18,15 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 log = logging.getLogger("argus.yahoo")
 
 
+_IMPORT_LOCK = threading.Lock()
+
+
 def _yf():
-    import yfinance  # imported lazily: it is slow to import and not needed for most commands
+    """yfinance, imported lazily (slow, and not needed for most commands) and under a lock: two threads
+    importing it at once can see it half-initialized ("cannot import name 'YfData'")."""
+    with _IMPORT_LOCK:
+        import yfinance
+        import yfinance.data  # noqa: F401
 
     return yfinance
 
@@ -70,15 +77,19 @@ class YahooProvider:
     @staticmethod
     def _quote_rows(symbols: list[str], fields: str) -> list[dict]:
         """Yahoo's batch quote endpoint (the one its own site uses), 100 symbols per request."""
-        from yfinance.data import YfData
+        YfData = _yf().data.YfData
 
         rows: list[dict] = []
         for i in range(0, len(symbols), QUOTE_BATCH):
-            try:
-                r = YfData().get(QUOTE_URL, params={"symbols": ",".join(symbols[i:i + QUOTE_BATCH]), "fields": fields})
-                rows += r.json()["quoteResponse"]["result"]
-            except Exception as e:  # noqa: BLE001 - network, auth crumb, or a changed payload
-                raise ProviderError(f"yahoo quote batch: {e}") from e
+            params = {"symbols": ",".join(symbols[i:i + QUOTE_BATCH]), "fields": fields}
+            for attempt in (1, 2):  # once more: the first requests of a process can race for the auth crumb
+                try:
+                    rows += YfData().get(QUOTE_URL, params=params).json()["quoteResponse"]["result"]
+                    break
+                except Exception as e:  # noqa: BLE001 - network, auth crumb, or a changed payload
+                    if attempt == 2:
+                        raise ProviderError(f"yahoo quote batch: {e}") from e
+                    time.sleep(0.5)
         return rows
 
     def get_quotes(self, symbols: list[str], native: bool = False) -> dict[str, Quote]:

@@ -57,9 +57,9 @@ class MacroProvider:
     def closes(self, symbols: list[str], period: str = "13mo") -> dict[str, dict[date, float]]:
         """Daily closes for Yahoo symbols as given (^VIX, JPY=X, CL=F...), one batch download."""
         def fetch():
-            import yfinance as yf
+            from argus.providers.yahoo import _yf
 
-            df = yf.download(symbols, period=period, interval="1d", auto_adjust=False, group_by="ticker",
+            df = _yf().download(symbols, period=period, interval="1d", auto_adjust=False, group_by="ticker",
                              progress=False, threads=True)
             out: dict[str, dict[date, float]] = {}
             for s in symbols:
@@ -70,6 +70,13 @@ class MacroProvider:
                 out[s] = {ts.date(): float(v) for ts, v in col.items()}
             return out
         return self._memo(f"closes:{','.join(symbols)}:{period}", 15 * 60, fetch)
+
+    def quote_rows(self, symbols: list[str], fields: str, ttl: float = 5 * 60) -> list[dict]:
+        """Yahoo batch quote rows (100 symbols per request) for a fixed list, e.g. the breadth universe."""
+        from argus.providers.yahoo import YahooProvider
+
+        return self._memo(f"quotes:{len(symbols)}:{hash(tuple(symbols))}:{fields}", ttl,
+                          lambda: YahooProvider._quote_rows(symbols, fields))
 
     # -- Treasury curve ----------------------------------------------------------------------
     def treasury_curve(self) -> dict[date, dict[str, float]]:

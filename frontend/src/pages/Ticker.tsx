@@ -134,15 +134,13 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               </div>
             )}
           </div>
-          {high52 != null && low52 != null && quote && (
-            <div className="small text-2" style={{ minWidth: 220 }}>
-              52-week range
-              <div style={{ position: "relative", height: 6, background: "var(--grid)", borderRadius: 3, margin: "6px 0" }}>
-                <div style={{ position: "absolute", top: -3, width: 12, height: 12, borderRadius: "50%", background: "var(--series-1)",
-                  boxShadow: "0 0 0 2px var(--surface)",
-                  left: `calc(${Math.min(100, Math.max(0, ((quote.price - low52) / (high52 - low52)) * 100))}% - 6px)` }} />
-              </div>
-              <div className="row num" style={{ justifyContent: "space-between" }}><span>{price(low52)}</span><span>{price(high52)}</span></div>
+          {quote && ((quote.low != null && quote.high != null) || (high52 != null && low52 != null)) && (
+            <div className="hero-ranges">
+              {quote.low != null && quote.high != null && (
+                <RangeBar label="Day range" lo={quote.low} hi={quote.high} at={quote.price}
+                          tick={quote.open} tickTitle={quote.open != null ? `Open ${price(quote.open)}` : undefined} />
+              )}
+              {high52 != null && low52 != null && <RangeBar label="52-week range" lo={low52} hi={high52} at={quote.price} />}
             </div>
           )}
         </div>
@@ -227,6 +225,23 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <EventsCard symbol={symbol} />
 
       <FinancialsCard symbol={symbol} />
+    </div>
+  );
+}
+
+/** Low–high bar with the price as a dot (and an optional tick, e.g. the open). */
+function RangeBar({ label, lo, hi, at, tick, tickTitle }: {
+  label: string; lo: number; hi: number; at: number; tick?: number | null; tickTitle?: string;
+}) {
+  const pos = (v: number) => `${hi > lo ? Math.min(100, Math.max(0, ((v - lo) / (hi - lo)) * 100)) : 50}%`;
+  return (
+    <div className="small text-2">
+      {label}
+      <div className="range-track" role="img" aria-label={`${label} ${price(lo)} to ${price(hi)}, now ${price(at)}${tickTitle ? `, ${tickTitle.toLowerCase()}` : ""}`}>
+        {tick != null && <div className="range-tick" style={{ left: pos(tick) }} title={tickTitle} />}
+        <div className="range-dot" style={{ left: pos(at) }} />
+      </div>
+      <div className="row num" style={{ justifyContent: "space-between" }}><span>{price(lo)}</span><span>{price(hi)}</span></div>
     </div>
   );
 }

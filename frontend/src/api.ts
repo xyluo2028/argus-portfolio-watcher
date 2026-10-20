@@ -383,13 +383,23 @@ export interface Research {
 
 export interface EconEvent { date: string; time_et: string | null; event: string; actual: string | null; consensus: string | null; previous: string | null }
 
+export interface StockBreadth {
+  count: number; as_of: string | null; advancers: number; decliners: number; unchanged: number;
+  above_50d: number; below_50d: number; pct_above_50d: number | null;
+  above_200d: number; below_200d: number; pct_above_200d: number | null;
+  new_highs: number; new_lows: number; pct_new_highs: number | null; pct_new_lows: number | null;
+  highs: string[]; lows: string[];
+}
+
 export interface MarketContext {
   as_of: string; periods: string[]; errors: Record<string, string>;
   gauges: { symbol: string; label: string; kind: string; last: number; as_of: string; change: number | null;
             returns: Record<string, number | null>; spark: number[] }[];
   sectors: { symbol: string; name: string; returns: Record<string, number | null>; above_50d: boolean; above_200d: boolean }[];
   breadth: { equal_vs_cap: Record<string, number | null>; small_vs_large: Record<string, number | null>;
-             sectors_above_50d: number; sectors_above_200d: number; sectors: number };
+             sectors_above_50d: number; sectors_above_200d: number; sectors: number; stocks: StockBreadth | null };
+  fear_greed: { score: number; rating: string;
+                components: { key: string; label: string; score: number; rating: string; detail: string }[] } | null;
   yield_curve: { as_of: string; spread_10y_2y: number | null; spread_10y_3m: number | null;
                  lines: { label: string; date: string; points: { tenor: string; yield: number | null }[] }[] } | null;
   calendar: { fomc: { date: string; days: string; month: string; projections: boolean }[];

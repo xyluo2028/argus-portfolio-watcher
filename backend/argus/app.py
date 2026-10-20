@@ -1029,12 +1029,17 @@ class Argus:
         return self.screener_status()
 
     def market_context(self) -> dict:
-        """Indices, VIX, rates, USD/JPY, oil, gold, bitcoin; a sector heatmap; breadth proxies; the
-        Treasury yield curve; FOMC meetings and major US economic releases. Sources fetch in
-        parallel and fail independently (`errors`)."""
-        jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS),
+        """Indices, VIX, rates, USD/JPY, oil, gold, bitcoin; fear & greed; a sector heatmap; breadth
+        over the 500 largest US stocks plus proxies; the Treasury yield curve; FOMC meetings and major
+        US economic releases. Sources fetch in parallel and fail independently (`errors`)."""
+        def stocks():
+            universe = self.screener.largest(context_mod.BREADTH_UNIVERSE)
+            if not universe:
+                raise RuntimeError("needs the screener's universe (Screener page → Build)")
+            return context_mod.stock_breadth(self.macro.quote_rows(universe, context_mod.BREADTH_FIELDS))
+        jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS, context_mod.HISTORY),
                 "curve": self.macro.treasury_curve, "fomc": self.macro.fomc_meetings,
-                "events": lambda: self.macro.economic_events(21)}
+                "events": lambda: self.macro.economic_events(21), "breadth": stocks}
         def run(item):
             name, fn = item
             try:
@@ -1044,7 +1049,7 @@ class Argus:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             got = {n: (v, e) for n, v, e in pool.map(run, jobs.items())}
         out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], got["events"][0],
-                                datetime.now(NY).date())
+                                datetime.now(NY).date(), got["breadth"][0])
         return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
 
     RESEARCH_TTL_S = 3600

@@ -277,7 +277,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_market_context() -> dict:
         """The market backdrop: S&P 500, Nasdaq 100, Russell 2000, VIX, 10-year yield, USD/JPY,
         oil, gold, bitcoin (levels and 1D/1W/1M/3M/YTD/1Y returns); the 11 sector ETFs with returns and
-        50/200-day trend; breadth proxies (RSP vs SPY, IWM vs SPY, sectors above their averages); the
+        50/200-day trend; a fear & greed score (0-100) with its seven components; breadth over the 500
+        largest US stocks (advancers/decliners, % above the 50- and 200-day averages, new 52-week highs
+        and lows) plus proxies (RSP vs SPY, IWM vs SPY, sectors above their averages); the
         Treasury yield curve today, a month and a year ago with 10Y-2Y and 10Y-3M spreads; upcoming
         FOMC meetings and major US economic releases (times ET, consensus and previous)."""
         return argus.market_context()
