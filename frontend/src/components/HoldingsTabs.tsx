@@ -2,14 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type DividendHolding, type EarningsRow } from "../api";
 import { big, money, pct, price, ratio, tone } from "../format";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue } from "../metrics";
 
-// The first tab is the caller's own view ("Holdings" on a portfolio, "Overview" on the watchlist).
-const TABS = ["First", "Financials", "Growth", "Dividends", "Earnings", "Profitability", "Momentum"] as const;
-type Tab = (typeof TABS)[number];
-type MetricTab = Exclude<Tab, "First">;
+// The first tab is the caller's own view ("Holdings" on a portfolio, "Overview" on the watchlist);
+// callers may add more of their own (e.g. "Heatmap") before the metric tabs.
+const METRIC_TABS = ["Financials", "Growth", "Dividends", "Earnings", "Profitability", "Momentum"] as const;
+type MetricTab = (typeof METRIC_TABS)[number];
+type Tab = "First" | MetricTab | `view:${string}`;
+const isMetricTab = (t: Tab): t is MetricTab => (METRIC_TABS as readonly string[]).includes(t);
 
 /** What a metric row needs to know about a symbol. */
-export interface TabRow { symbol: string; name?: string | null; price?: number | null }
+export interface TabRow { symbol: string; name?: string | null; price?: number | null;
+  sector?: string | null; type?: string | null; market_value?: number | null }
+
+const isFund = (r: TabRow) => r.type === "ETP" || r.sector === "ETF";
+type Kind = "all" | "stocks" | "etfs";
+const KINDS: [Kind, string][] = [["all", "All"], ["stocks", "Stocks"], ["etfs", "ETFs"]];
+const ofKind = (r: TabRow, kind: Kind) => kind === "all" || (kind === "etfs") === isFund(r);
+type Filter = { sector: string; kind: Kind };  // sector "" = all
 /** Where the rows come from; picks the endpoints. */
 export type TabSource = { kind: "portfolio"; name: string } | { kind: "watchlist"; name: string };
 const POLL_MS = 3000;
@@ -19,52 +29,37 @@ type Metrics = Record<string, number | null>;
 type Row = { p: TabRow; m?: Metrics; div?: DividendHolding; earn?: EarningsRow };
 type Col = { label: string; title?: string; value: (r: Row) => number | string | null | undefined; cell?: (r: Row) => React.ReactNode };
 
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-const rel = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? (a / b - 1) * 100 : null);
-/** Signed percent, colored by direction. */
-const signed = (key: string): Col["cell"] => (r) => { const v = num(r.m?.[key]); return <span className={tone(v)}>{pct(v, 1)}</span>; };
-/** Unsigned percent; negatives still read red. */
-const plain = (v: number | null) => (v == null ? "–" : <span className={v < 0 ? "down" : undefined}>{v.toFixed(1)}%</span>);
-const metric = (key: string) => (r: Row) => num(r.m?.[key]);
 
 const day = (iso: string | null | undefined) =>
   iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" }) : "–";
 const HOUR: Record<string, string> = { bmo: "pre", amc: "post", dmh: "mid" };
 
+/** A metric column straight from the shared definitions (same label, format and color as the stock page). */
+function fromDef(key: string): Col {
+  const d = METRICS[key];
+  return {
+    label: d.short, title: d.title ?? (d.label !== d.short ? d.label : undefined),
+    value: (r) => metricValue(key, r.m, r.p.price),
+    cell: (r) => { const v = metricValue(key, r.m, r.p.price); return <span className={metricTone(key, v)}>{formatMetric(key, v)}</span>; },
+  };
+}
+
 // Watchlists hold no shares: no income or yield on cost.
 const NEEDS_SHARES = new Set(["Yield on cost", "Annual income"]);
 
 const COLUMNS: Record<MetricTab, Col[]> = {
-  Financials: [
-    { label: "Mkt cap", value: metric("market_cap"), cell: (r) => big(num(r.m?.market_cap)) },
-    { label: "P/E", title: "Trailing 12 months", value: metric("pe_ttm"), cell: (r) => ratio(num(r.m?.pe_ttm), 1) },
-    { label: "Fwd P/E", value: metric("pe_forward"), cell: (r) => ratio(num(r.m?.pe_forward), 1) },
-    { label: "PEG", value: metric("peg"), cell: (r) => ratio(num(r.m?.peg)) },
-    { label: "P/S", value: metric("ps_ttm"), cell: (r) => ratio(num(r.m?.ps_ttm), 1) },
-    { label: "P/B", value: metric("pb"), cell: (r) => ratio(num(r.m?.pb), 1) },
-    { label: "EV/EBITDA", value: metric("ev_ebitda"), cell: (r) => ratio(num(r.m?.ev_ebitda), 1) },
-    { label: "Debt/Eq", value: metric("debt_to_equity"), cell: (r) => ratio(num(r.m?.debt_to_equity)) },
-    { label: "FCF (TTM)", value: metric("fcf_ttm"), cell: (r) => big(num(r.m?.fcf_ttm)) },
-  ],
-  Growth: [
-    { label: "Rev YoY", title: "Revenue, trailing 12 months vs a year earlier", value: metric("revenue_growth_yoy_pct"), cell: signed("revenue_growth_yoy_pct") },
-    { label: "Rev Q YoY", title: "Latest quarter vs the same quarter a year earlier", value: metric("revenue_growth_q_yoy_pct"), cell: signed("revenue_growth_q_yoy_pct") },
-    { label: "Rev 3Y", title: "3-year annual growth rate", value: metric("revenue_growth_3y_pct"), cell: signed("revenue_growth_3y_pct") },
-    { label: "Rev 5Y", title: "5-year annual growth rate", value: metric("revenue_growth_5y_pct"), cell: signed("revenue_growth_5y_pct") },
-    { label: "EPS YoY", value: metric("eps_growth_yoy_pct"), cell: signed("eps_growth_yoy_pct") },
-    { label: "EPS Q YoY", value: metric("eps_growth_q_yoy_pct"), cell: signed("eps_growth_q_yoy_pct") },
-    { label: "EPS 3Y", value: metric("eps_growth_3y_pct"), cell: signed("eps_growth_3y_pct") },
-    { label: "EPS 5Y", value: metric("eps_growth_5y_pct"), cell: signed("eps_growth_5y_pct") },
-  ],
+  Financials: GROUPS.Financials.map(fromDef),
+  Growth: GROUPS.Growth.map(fromDef),
   Dividends: [
-    { label: "Yield", value: (r) => (r.div?.pays ? r.div.yield_pct : null), cell: (r) => (r.div?.pays && r.div.yield_pct != null ? `${r.div.yield_pct.toFixed(2)}%` : "–") },
+    { label: "Fwd yield", title: "Latest payment × payments per year ÷ live price", value: (r) => (r.div?.pays ? r.div.yield_pct : null),
+      cell: (r) => (r.div?.pays && r.div.yield_pct != null ? `${r.div.yield_pct.toFixed(2)}%` : "–") },
     { label: "Annual / sh", title: "Latest payment × payments per year", value: (r) => (r.div?.pays ? r.div.rate : null),
       cell: (r) => (r.div?.pays ? `$${r.div.rate.toFixed(r.div.rate < 1 ? 3 : 2)}` : "–") },
     { label: "Frequency", value: (r) => r.div?.frequency ?? null, cell: (r) => r.div?.frequency ?? "–" },
     { label: "Yield on cost", value: (r) => (r.div?.pays ? r.div.yield_on_cost_pct : null),
       cell: (r) => (r.div?.pays && r.div.yield_on_cost_pct != null ? `${r.div.yield_on_cost_pct.toFixed(2)}%` : "–") },
-    { label: "Payout", title: "Dividends as a share of earnings (TTM)", value: metric("payout_ratio_pct"), cell: (r) => plain(num(r.m?.payout_ratio_pct)) },
-    { label: "Div growth 5Y", title: "5-year annual dividend growth", value: metric("dividend_growth_5y_pct"), cell: signed("dividend_growth_5y_pct") },
+    fromDef("payout_ratio_pct"),
+    fromDef("dividend_growth_5y_pct"),
     { label: "Next ex-date", title: "Estimated from the payment rhythm", value: (r) => r.div?.next_ex_date_est ?? null,
       cell: (r) => (r.div?.next_ex_date_est ? `~${day(r.div.next_ex_date_est)}` : "–") },
     { label: "Annual income", value: (r) => (r.div?.pays ? r.div.annual_income : null), cell: (r) => (r.div?.pays ? money(r.div.annual_income) : "–") },
@@ -82,32 +77,8 @@ const COLUMNS: Record<MetricTab, Col[]> = {
     { label: "EPS est.", value: (r) => r.earn?.next?.epsEstimate ?? null, cell: (r) => ratio(r.earn?.next?.epsEstimate) },
     { label: "Rev est.", value: (r) => r.earn?.next?.revenueEstimate ?? null, cell: (r) => big(r.earn?.next?.revenueEstimate) },
   ],
-  Profitability: [
-    { label: "Gross", value: metric("gross_margin_pct"), cell: (r) => plain(num(r.m?.gross_margin_pct)) },
-    { label: "Operating", value: metric("operating_margin_pct"), cell: (r) => plain(num(r.m?.operating_margin_pct)) },
-    { label: "Net", value: metric("net_margin_pct"), cell: (r) => plain(num(r.m?.net_margin_pct)) },
-    { label: "FCF margin", title: "Free cash flow ÷ revenue (TTM)",
-      value: (r) => { const f = num(r.m?.fcf_ttm), rev = num(r.m?.revenue_ttm); return f != null && rev ? (f / rev) * 100 : null; },
-      cell: (r) => { const f = num(r.m?.fcf_ttm), rev = num(r.m?.revenue_ttm); return plain(f != null && rev ? (f / rev) * 100 : null); } },
-    { label: "ROE", value: metric("roe_pct"), cell: (r) => plain(num(r.m?.roe_pct)) },
-    { label: "ROA", value: metric("roa_pct"), cell: (r) => plain(num(r.m?.roa_pct)) },
-    { label: "ROI", title: "Return on invested capital", value: metric("roi_pct"), cell: (r) => plain(num(r.m?.roi_pct)) },
-  ],
-  Momentum: [
-    { label: "1W", value: metric("return_1w_pct"), cell: signed("return_1w_pct") },
-    { label: "1M", title: "Last month, to the latest daily close", value: metric("return_1m_pct"), cell: signed("return_1m_pct") },
-    { label: "3M", value: metric("return_3m_pct"), cell: signed("return_3m_pct") },
-    { label: "6M", value: metric("return_6m_pct"), cell: signed("return_6m_pct") },
-    { label: "YTD", value: metric("return_ytd_price_pct"), cell: signed("return_ytd_price_pct") },
-    { label: "1Y", value: metric("return_1y_pct"), cell: signed("return_1y_pct") },
-    { label: "vs S&P 1Y", title: "1-year return relative to the S&P 500", value: metric("rel_sp500_1y_pct"), cell: signed("rel_sp500_1y_pct") },
-    { label: "From 52W high", value: (r) => rel(r.p.price, num(r.m?.high_52w)),
-      cell: (r) => { const v = rel(r.p.price, num(r.m?.high_52w)); return <span className={tone(v)}>{pct(v, 1)}</span>; } },
-    { label: "vs 50D avg", value: (r) => rel(r.p.price, num(r.m?.sma50)),
-      cell: (r) => { const v = rel(r.p.price, num(r.m?.sma50)); return <span className={tone(v)}>{pct(v, 1)}</span>; } },
-    { label: "vs 200D avg", value: (r) => rel(r.p.price, num(r.m?.sma200)),
-      cell: (r) => { const v = rel(r.p.price, num(r.m?.sma200)); return <span className={tone(v)}>{pct(v, 1)}</span>; } },
-  ],
+  Profitability: GROUPS.Profitability.map(fromDef),
+  Momentum: GROUPS.Momentum.map(fromDef),
 };
 
 const NOTES: Partial<Record<Tab, string>> = {
@@ -145,14 +116,50 @@ function useFundamentals(source: TabSource, enabled: boolean) {
 
 /** Tabbed per-symbol views. `first` is the caller's own tab (its label and content); the rest are
  * shared metric tables fed by the portfolio's or the watchlist's endpoints. */
-export function HoldingsTabs({ source, rows, first }: {
-  source: TabSource; rows: TabRow[]; first: { label: string; content: React.ReactNode };
+export function HoldingsTabs({ source, rows: allRows, first, views = [] }: {
+  source: TabSource; rows: TabRow[];
+  /** The caller's own tab; `content` may take the filtered rows. */
+  first: { label: string; content: React.ReactNode | ((rows: TabRow[]) => React.ReactNode) };
+  /** More caller tabs after the first, also given the filtered rows. */
+  views?: { label: string; content: (rows: TabRow[]) => React.ReactNode }[];
 }) {
+  // -- filters (sector; all / stocks / ETFs): only when the rows carry sectors -------------------
+  const filterKey = `argus.filter.${source.kind}`;
+  const [filter, setFilter] = useState<Filter>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(filterKey) ?? "{}");
+      // Before the 3-way choice there was an "Exclude ETFs" checkbox (noEtf).
+      const kind: Kind = KINDS.some(([k]) => k === saved.kind) ? saved.kind : saved.noEtf ? "stocks" : "all";
+      return { sector: typeof saved.sector === "string" ? saved.sector : "", kind };
+    } catch {
+      return { sector: "", kind: "all" };
+    }
+  });
+  const updateFilter = (f: Filter) => {
+    setFilter(f);
+    try { localStorage.setItem(filterKey, JSON.stringify(f)); } catch { /* ignore */ }
+  };
+  const sectors = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const r of allRows) if (r.sector && ofKind(r, filter.kind)) n.set(r.sector, (n.get(r.sector) ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [allRows, filter.kind]);
+  const hasSectors = allRows.some((r) => r.sector);
+  const hasBoth = allRows.some(isFund) && allRows.some((r) => !isFund(r));
+  // A remembered sector that's no longer held (or outside the chosen kind) counts as "all".
+  const sector = sectors.some(([k]) => k === filter.sector) ? filter.sector : "";
+  const kindCount = allRows.filter((r) => ofKind(r, filter.kind)).length;
+  const rows = useMemo(() => allRows.filter((r) => ofKind(r, filter.kind) && (!sector || r.sector === sector)),
+                       [allRows, filter.kind, sector]);
+  const filtered = rows.length !== allRows.length;
+  const totalValue = allRows.reduce((s, r) => s + (r.market_value ?? 0), 0);
+  const shownValue = rows.reduce((s, r) => s + (r.market_value ?? 0), 0);
+
   const tabKey = `argus.tabs.${source.kind}`;
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const t = localStorage.getItem(tabKey) as Tab | null;
-      return t && TABS.includes(t) ? t : "First";
+      return t && (t === "First" || isMetricTab(t) || views.some((v) => `view:${v.label}` === t)) ? t : "First";
     } catch {
       return "First";
     }
@@ -162,8 +169,9 @@ export function HoldingsTabs({ source, rows, first }: {
     try { localStorage.setItem(tabKey, t); } catch { /* ignore */ }
   };
 
-  const symbols = useMemo(() => rows.map((p) => p.symbol).sort(), [rows]);
-  const needsMetrics = ["Financials", "Growth", "Dividends", "Profitability", "Momentum"].includes(tab);
+  // Data for every position (not just the filtered ones), so changing a filter never refetches.
+  const symbols = useMemo(() => allRows.map((p) => p.symbol).sort(), [allRows]);
+  const needsMetrics = isMetricTab(tab) && tab !== "Earnings";
   const fund = useFundamentals(source, needsMetrics);
   const metrics = fund?.metrics ?? {};
 
@@ -189,22 +197,53 @@ export function HoldingsTabs({ source, rows, first }: {
     : tab === "Earnings" && earn === null ? "Loading earnings dates…"
     : needsMetrics && !fund ? "Loading metrics…"
     : needsMetrics && pendingCount ? `Updating metrics ${symbols.length - pendingCount}/${symbols.length}…` : null;
-  const cols = tab === "First" ? [] : COLUMNS[tab].filter((c) => source.kind === "portfolio" || !NEEDS_SHARES.has(c.label));
+  const cols = useMemo(() => (!isMetricTab(tab) ? [] : COLUMNS[tab].filter((c) => source.kind === "portfolio" || !NEEDS_SHARES.has(c.label))),
+                       [tab, source.kind]);
+  const view = views.find((v) => `view:${v.label}` === tab);
 
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
         <div className="seg tabs" role="tablist" aria-label="Views">
-          {TABS.map((t) => (
+          {(["First", ...views.map((v) => `view:${v.label}` as Tab), ...METRIC_TABS] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} aria-pressed={tab === t} onClick={() => pick(t)}>
-              {t === "First" ? first.label : t}
+              {t === "First" ? first.label : t.startsWith("view:") ? t.slice(5) : t}
             </button>
           ))}
         </div>
         {waiting && <span className="small muted">{waiting}</span>}
       </div>
-      {tab === "First" ? first.content : (
-        <MetricTable cols={cols} note={NOTES[tab]}
+      {hasSectors && (
+        <div className="row filter-bar">
+          {hasBoth && (
+            <div className="seg" role="group" aria-label="Stocks or ETFs">
+              {KINDS.map(([k, label]) => (
+                <button key={k} aria-pressed={filter.kind === k} onClick={() => updateFilter({ ...filter, kind: k })}>
+                  {label}{k !== "all" ? ` (${allRows.filter((r) => ofKind(r, k)).length})` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+          {sectors.length > 1 && (
+            <select value={sector} onChange={(e) => updateFilter({ ...filter, sector: e.target.value })} aria-label="Sector">
+              <option value="">All sectors ({kindCount})</option>
+              {sectors.map(([k, n]) => <option key={k} value={k}>{k === "ETF" ? "ETFs" : k} ({n})</option>)}
+            </select>
+          )}
+          {filtered && (
+            <>
+              <span className="small muted">
+                Showing {rows.length} of {allRows.length}
+                {totalValue > 0 && <> · {money(shownValue, { whole: true })} ({((shownValue / totalValue) * 100).toFixed(1)}% of the portfolio)</>}
+              </span>
+              <button className="btn ghost small" onClick={() => updateFilter({ sector: "", kind: "all" })}>Clear</button>
+            </>
+          )}
+        </div>
+      )}
+      {tab === "First" ? (typeof first.content === "function" ? first.content(rows) : first.content)
+        : view ? view.content(rows) : !isMetricTab(tab) ? null : (
+        <MetricTable key={tab} cols={cols} note={NOTES[tab]}
                      rows={rows.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
       )}
     </section>
@@ -214,7 +253,8 @@ export function HoldingsTabs({ source, rows, first }: {
 function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: string }) {
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const navigate = useNavigate();
-  useEffect(() => setSort(null), [cols]);
+  // No reset effect: the parent keys this table by tab, so a new tab starts unsorted, while live
+  // price updates (a re-render every second or so) leave the chosen sort alone.
 
   const sorted = useMemo(() => {
     if (!sort) return rows; // portfolio order (by value)
@@ -232,7 +272,7 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
         <table className="metric-table">
           <thead>
             <tr>
-              <th>Symbol</th><th>Price</th>
+              <th className="rank" title="Rank in the current sort order">#</th><th className="left">Symbol</th><th>Price</th>
               {cols.map((c, i) => (
                 <th key={c.label} title={c.title} onClick={() => setSort((s) => (s?.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: -1 }))}
                     aria-sort={sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
@@ -242,10 +282,11 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
+            {sorted.map((r, n) => (
               <tr key={r.p.symbol} tabIndex={0} onClick={() => navigate(`/t/${r.p.symbol}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${r.p.symbol}`)}>
-                <td><span className="sym">{r.p.symbol}</span><span className="name" title={r.p.name ?? undefined}>{r.p.name ?? ""}</span></td>
+                <td className="rank">{n + 1}</td>
+                <td className="left"><span className="sym">{r.p.symbol}</span><span className="name" title={r.p.name ?? undefined}>{r.p.name ?? ""}</span></td>
                 <td>{price(r.p.price)}</td>
                 {cols.map((c) => <td key={c.label}>{c.cell ? c.cell(r) : String(c.value(r) ?? "–")}</td>)}
               </tr>

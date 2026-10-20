@@ -155,9 +155,11 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_fundamentals(symbol: str, fields: list[str] | None = None) -> dict:
         """Valuation & profitability: pe_ttm, pe_forward, peg, pb, ps_ttm, ev_ebitda, eps_ttm,
         market_cap, revenue_ttm, revenue_growth_yoy_pct, gross/operating/net_margin_pct, roe_pct,
-        fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct.
+        fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct, roic_pct,
+        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns, return_1m_pct,
+        cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct.
         Cached 24h; `sources` says which provider supplied each value."""
-        return argus.market.get_fundamentals(normalize_symbol(symbol), fields)
+        return argus.fundamentals(symbol, fields)
 
     @mcp.tool(annotations=READ)
     @_tool
@@ -165,8 +167,14 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Reported financials from SEC EDGAR (revenue, gross/operating/net income and margins,
         diluted EPS, operating cash flow, capex, free cash flow). period: quarterly | annual.
         Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals.
-        ETFs have none."""
-        return argus.market.get_financials(normalize_symbol(symbol), period, limit)
+        ETFs have none. Quarterly results also carry `earnings`: per quarter the report date and
+        timing (bmo/amc), EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted"
+        from Finnhub or "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-
+        close across the report; `provisional` until that session closes); plus the next report."""
+        out = argus.market.get_financials(normalize_symbol(symbol), period, limit)
+        if period == "quarterly":
+            out["earnings"] = argus.earnings_history(symbol, limit)
+        return out
 
     @mcp.tool(annotations=READ)
     @_tool
@@ -258,8 +266,10 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Research on one company: analyst consensus, price targets and monthly rating counts; EPS
         estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
         institutional and insider ownership, top 13F holders; short interest; 5-year valuation bands
-        (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; last week's
-        headlines with a keyword-based tone. Cached for an hour."""
+        (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; growth (quarterly
+        revenue and net income YoY from SEC filings, revenue/EPS/price CAGR 3Y and 5Y, analysts' forward
+        revenue and EPS growth vs the S&P 500, PEG); last week's headlines with a keyword-based tone.
+        Cached for an hour."""
         return argus.research(symbol, quotes_now())
 
     @mcp.tool(annotations=READ)
@@ -267,7 +277,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_market_context() -> dict:
         """The market backdrop: S&P 500, Nasdaq 100, Russell 2000, VIX, 10-year yield, USD/JPY,
         oil, gold, bitcoin (levels and 1D/1W/1M/3M/YTD/1Y returns); the 11 sector ETFs with returns and
-        50/200-day trend; breadth proxies (RSP vs SPY, IWM vs SPY, sectors above their averages); the
+        50/200-day trend; a fear & greed score (0-100) with its seven components; breadth over the 500
+        largest US stocks (advancers/decliners, % above the 50- and 200-day averages, new 52-week highs
+        and lows) plus proxies (RSP vs SPY, IWM vs SPY, sectors above their averages); the
         Treasury yield curve today, a month and a year ago with 10Y-2Y and 10Y-3M spreads; upcoming
         FOMC meetings and major US economic releases (times ET, consensus and previous)."""
         return argus.market_context()

@@ -130,6 +130,23 @@ export interface FinancialPeriod {
   free_cash_flow?: number;
 }
 
+export type EarningsResult = "beat" | "miss" | "in_line" | null;
+export interface EarningsReport {
+  period_end: string; report_date: string; timing: "bmo" | "amc" | "dmh" | null;
+  eps_estimate: number | null; eps_actual: number | null; eps_basis: "adjusted" | "reported" | null;
+  eps_surprise_pct: number | null; eps_result: EarningsResult;
+  revenue_estimate: number | null; revenue_actual: number | null; revenue_surprise_pct: number | null;
+  revenue_result: EarningsResult;
+  reaction: {
+    base_date: string; base_close: number; date: string | null; open_pct: number | null; close_pct: number;
+    provisional: boolean; label: string | null;
+  } | null;
+}
+export interface EarningsHistory {
+  symbol: string; as_of: string; reports: EarningsReport[];
+  next: { date: string; timing: "bmo" | "amc" | "dmh" | null; eps_estimate: number | null; revenue_estimate: number | null } | null;
+}
+
 export interface Financials {
   symbol: string;
   company: string | null;
@@ -183,6 +200,11 @@ async function get<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 const send = <T>(method: string, path: string, body?: unknown) =>
   get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+
+export interface PortfolioDeletion {
+  portfolio: PortfolioRef; dry_run: boolean; backup?: string;
+  counts: { transactions: number; open_positions: number; targets: number; nav_days: number };
+}
 
 export interface Txn {
   id: number; type: string; symbol: string; qty: number; price: number; fee: number; amount: number;
@@ -325,6 +347,19 @@ export interface RiskReport {
              loadings: { factor: string; label: string; beta: number; t: number }[] } | null;
 }
 
+export interface GrowthProfile {
+  quarters: { period_end: string; revenue: number | null; revenue_yoy_pct: number | null; net_income: number | null;
+              net_income_yoy_pct: number | null; gross_margin_pct: number | null; operating_margin_pct: number | null }[];
+  years: { period_end: string; revenue: number | null; net_income: number | null }[];
+  filed_cagr: Record<"revenue_3y" | "revenue_5y" | "net_income_3y" | "net_income_5y", number | null>;
+  reported: Record<"revenue_yoy" | "revenue_q_yoy" | "revenue_3y" | "revenue_5y" | "eps_yoy" | "eps_q_yoy" | "eps_3y" | "eps_5y", number | null>;
+  forward: { horizon: string; label: string; revenue: number | null; revenue_low: number | null; revenue_high: number | null;
+             revenue_growth_pct: number | null; revenue_analysts: number | null; eps: number | null; eps_low: number | null;
+             eps_high: number | null; year_ago_eps: number | null; eps_growth_pct: number | null; eps_analysts: number | null;
+             index_eps_growth_pct: number | null }[];
+  peg: number | null; price_cagr_3y: number | null; price_cagr_5y: number | null;
+}
+
 export interface Research {
   symbol: string; as_of: string; fund: boolean; price: number | null; errors: Record<string, string>;
   analysts: { count: number | null; rating: string | null; rating_mean: number | null; target_mean: number | null;
@@ -341,11 +376,20 @@ export interface Research {
   quality: { piotroski: { available: boolean; reason?: string; score: number; out_of: number; label: string; fiscal_years: string[];
                           tests: { test: string; group: string; pass: boolean | null }[] };
              altman: { available: boolean; reason?: string; z?: number; zone?: string; caveat?: string | null; parts: Record<string, number | null> } } | null;
+  growth: GrowthProfile | null;
   news: { ts: string; headline: string; source: string; url: string; tone: { score: number; label: string } }[];
   news_tone: { positive: number; neutral: number; negative: number };
 }
 
 export interface EconEvent { date: string; time_et: string | null; event: string; actual: string | null; consensus: string | null; previous: string | null }
+
+export interface StockBreadth {
+  count: number; as_of: string | null; advancers: number; decliners: number; unchanged: number;
+  above_50d: number; below_50d: number; pct_above_50d: number | null;
+  above_200d: number; below_200d: number; pct_above_200d: number | null;
+  new_highs: number; new_lows: number; pct_new_highs: number | null; pct_new_lows: number | null;
+  highs: string[]; lows: string[];
+}
 
 export interface MarketContext {
   as_of: string; periods: string[]; errors: Record<string, string>;
@@ -353,7 +397,9 @@ export interface MarketContext {
             returns: Record<string, number | null>; spark: number[] }[];
   sectors: { symbol: string; name: string; returns: Record<string, number | null>; above_50d: boolean; above_200d: boolean }[];
   breadth: { equal_vs_cap: Record<string, number | null>; small_vs_large: Record<string, number | null>;
-             sectors_above_50d: number; sectors_above_200d: number; sectors: number };
+             sectors_above_50d: number; sectors_above_200d: number; sectors: number; stocks: StockBreadth | null };
+  fear_greed: { score: number; rating: string;
+                components: { key: string; label: string; score: number; rating: string; detail: string }[] } | null;
   yield_curve: { as_of: string; spread_10y_2y: number | null; spread_10y_3m: number | null;
                  lines: { label: string; date: string; points: { tenor: string; yield: number | null }[] }[] } | null;
   calendar: { fomc: { date: string; days: string; month: string; projections: boolean }[];
@@ -376,6 +422,7 @@ export const api = {
         (indicators.length ? `&indicators=${indicators.join(",")}` : ""),
     ),
   fundamentals: (symbol: string) => get<Fundamentals>(`/api/fundamentals/${enc(symbol)}`),
+  earningsHistory: (symbol: string) => get<EarningsHistory>(`/api/earnings/${enc(symbol)}`),
   financials: (symbol: string, period: "quarterly" | "annual") =>
     get<Financials>(`/api/financials/${enc(symbol)}?period=${period}&limit=8`),
   performance: (name: string, range: string) =>
@@ -398,6 +445,9 @@ export const api = {
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
+  deletePortfolio: (name: string, dryRun: boolean, confirm?: string) =>
+    send<PortfolioDeletion>("DELETE", `/api/portfolios/${enc(name)}?dry_run=${dryRun}` +
+      (confirm != null ? `&confirm=${enc(confirm)}` : "")),
   deleteTransaction: (id: number, dryRun: boolean) =>
     send<{ deleted: Txn; dry_run: boolean }>("DELETE", `/api/transactions/${id}?dry_run=${dryRun}`),
   watchlist: (name = "Watchlist") => get<{ watchlist: string; items: WatchItem[]; errors: Record<string, string> }>(`/api/watchlists/${enc(name)}`),

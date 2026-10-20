@@ -9,7 +9,7 @@ const LABELS: Record<string, [string, (v: number | null) => string]> = {
   market_cap: ["Market cap", big],
   pe_ttm: ["P/E (TTM)", (v) => ratio(v, 1)],
   pe_forward: ["P/E (forward)", (v) => ratio(v, 1)],
-  peg: ["PEG", ratio],
+  peg: ["PEG (expected)", ratio],
   pb: ["P/B", (v) => ratio(v, 1)],
   ps_ttm: ["P/S (TTM)", (v) => ratio(v, 1)],
   ev_ebitda: ["EV/EBITDA", (v) => ratio(v, 1)],

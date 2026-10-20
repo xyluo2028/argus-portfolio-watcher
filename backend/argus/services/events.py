@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import Engine, delete, select
 
 from argus.db import session_scope
+from argus.market_calendar import NY
 from argus.models import Event, RefreshLog
 from argus.providers.base import ProviderError
 
@@ -142,6 +143,43 @@ class EventsService:
                                .order_by(Event.d)):
                 out[e.symbol] = {"period": e.d.isoformat(), **(e.data or {})}
         return out
+
+    def results_history(self, symbol: str) -> list[dict]:
+        """Finnhub's EPS history for one symbol (last ~4 quarters, adjusted), refreshed ~daily."""
+        self.latest_results([symbol])
+        with session_scope(self.engine) as s:
+            return [{"period": e.d.isoformat(), **(e.data or {})}
+                    for e in s.scalars(select(Event).where(Event.symbol == symbol, Event.kind == "eps_result"))]
+
+    def report_history(self, symbol: str) -> list[dict]:
+        """Yahoo's earnings report dates with timing and EPS estimate/actual (years back, plus the next
+        one), refreshed ~daily. Kept as `eps_report` events so they survive provider outages."""
+        now = datetime.now(UTC)
+        key = f"epsdates:{symbol}"
+        with session_scope(self.engine) as s:
+            last = s.get(RefreshLog, key)
+            fresh = last is not None and now - last.at < REFRESH_EVERY
+        if not fresh and self.yahoo is not None and hasattr(self.yahoo, "get_earnings_dates"):
+            try:
+                rows = self.yahoo.get_earnings_dates(symbol, limit=24)
+            except ProviderError as e:
+                log.warning("earnings dates %s: %s", symbol, e)
+                rows = None
+            if rows is not None:
+                from argus.services.earnings import timing
+                with session_scope(self.engine) as s:
+                    s.execute(delete(Event).where(Event.symbol == symbol, Event.kind == "eps_report"))
+                    for r in rows:
+                        at = r["at"]
+                        s.merge(Event(symbol=symbol, kind="eps_report", d=at.astimezone(NY).date(),
+                                      hour=timing(at, None), source="yahoo",
+                                      data={"eps_estimate": r.get("eps_estimate"), "eps_actual": r.get("eps_actual"),
+                                            "surprise_pct": r.get("surprise_pct")}))
+                    s.merge(RefreshLog(key=key, at=now))
+        with session_scope(self.engine) as s:
+            return [{"date": e.d.isoformat(), "hour": e.hour, **(e.data or {})}
+                    for e in s.scalars(select(Event).where(Event.symbol == symbol, Event.kind == "eps_report")
+                                       .order_by(Event.d))]
 
     def between(self, symbols: list[str], start: date, end: date, kinds: list[str] | None = None) -> list[dict]:
         with session_scope(self.engine) as s:

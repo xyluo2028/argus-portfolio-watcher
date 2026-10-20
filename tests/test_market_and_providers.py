@@ -67,6 +67,40 @@ def test_finnhub_metrics_mapping():
     assert m["ps_ttm"] is None
 
 
+@pytest.mark.parametrize("growth, peg_ttm", [(0.87, 112.93), (-21.7, None), (0.0, None), (None, None)])
+def test_finnhub_peg_is_trailing_and_kept_apart_from_the_expected_peg(growth, peg_ttm):
+    # NOW, Oct 2026: GAAP EPS growth of 0.87% makes the trailing PEG 112.93.
+    metric = {"peTTM": 86.67, "pegTTM": 112.93, "epsGrowthTTMYoy": growth}
+    client = httpx.Client(base_url="https://finnhub.test",
+                          transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"metric": metric})))
+    m = FinnhubProvider("k", client=client).get_metrics("NOW")
+    assert "peg" not in m  # "peg" is the expected-growth PEG, from Yahoo only
+    assert m["peg_ttm"] == peg_ttm
+
+
+def test_peg_column_never_falls_back_to_the_trailing_one(make_argus):
+    class Finnhub:
+        name = "finnhub"
+
+        def get_metrics(self, symbol):
+            return {"pe_ttm": 86.67, "peg_ttm": 112.93}
+
+    class Yahoo:
+        name = "yahoo"
+
+        def __init__(self, peg):
+            self.peg = peg
+
+        def get_metrics(self, symbol):
+            return {"pe_forward": 28.6, "peg": self.peg}
+
+    a = make_argus(fundamentals=[Finnhub(), Yahoo(1.01)])
+    m = a.market.get_fundamentals("NOW", ["peg", "peg_ttm"])
+    assert (m["metrics"], m["sources"]) == ({"peg": 1.01, "peg_ttm": 112.93}, {"peg": "yahoo", "peg_ttm": "finnhub"})
+    b = make_argus(fundamentals=[Finnhub(), Yahoo(None)])  # same database: use a fresh symbol
+    assert b.market.get_fundamentals("XYZ", ["peg"])["metrics"]["peg"] is None
+
+
 def _fact(start, end, val, form="10-Q", filed="2026-01-01"):
     return {"start": start, "end": end, "val": val, "form": form, "filed": filed}
 
@@ -167,3 +201,16 @@ def test_search_ranking(settings):
     assert syms("s") == ["S", "SOFI", "SB.PRC"]                 # exact first, preferreds last
     assert syms("s", prefer={"SOFI"})[:2] == ["S", "SOFI"] and syms("so", prefer={"SOFI"})[0] == "SOFI"
     assert syms("  ") == []
+
+
+def test_sec_prefers_report_filings_over_later_proxy_copies():
+    from argus.providers.sec_edgar import _duration_rows
+
+    rows = [{"start": "2024-01-29", "end": "2025-01-26", "val": 72.88, "form": "10-K", "filed": "2025-02-26"},
+            {"start": "2024-01-29", "end": "2025-01-26", "val": 72.88, "form": "DEF 14A", "filed": "2026-05-12"},
+            {"start": "2023-01-30", "end": "2024-01-28", "val": 29.0, "form": "10-K", "filed": "2024-02-21"},
+            {"start": "2023-01-30", "end": "2024-01-28", "val": 29.76, "form": "10-K/A", "filed": "2024-06-01"}]
+    d = _duration_rows(rows)
+    from datetime import date as D
+    assert d[(D(2024, 1, 29), D(2025, 1, 26))] == (72.88, "10-K")       # the proxy copy doesn't displace it
+    assert d[(D(2023, 1, 30), D(2024, 1, 28))] == (29.76, "10-K/A")     # a later report (restatement) still wins

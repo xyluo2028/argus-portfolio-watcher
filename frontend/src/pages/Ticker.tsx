@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import {
   ApiError,
   api,
-  type Financials,
   type Fundamentals,
   type HistoryResponse,
   type Position,
@@ -14,13 +13,14 @@ import {
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
 import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
+import { FinancialsCard } from "../components/FinancialsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
 import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
-import { RevenueColumns } from "../components/RevenueColumns";
 import { SymbolNotes } from "../components/SymbolNotes";
-import { big, extLabel, money, nyTime, pct, price, quoteTime, ratio, tone } from "../format";
+import { extLabel, nyTime, pct, price, quoteTime, tone } from "../format";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue, type GroupName } from "../metrics";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -42,30 +42,11 @@ const PANES: { key: Pane; label: string }[] = [
   { key: "volume", label: "Volume" }, { key: "rsi14", label: "RSI 14" }, { key: "macd", label: "MACD" },
 ];
 
-const STATS: { key: string; label: string; fmt: (v: number | null | undefined) => string }[] = [
-  { key: "market_cap", label: "Market cap", fmt: big },
-  { key: "pe_ttm", label: "P/E (TTM)", fmt: ratio },
-  { key: "pe_forward", label: "P/E (forward)", fmt: ratio },
-  { key: "peg", label: "PEG", fmt: ratio },
-  { key: "pb", label: "P/B", fmt: ratio },
-  { key: "ps_ttm", label: "P/S (TTM)", fmt: ratio },
-  { key: "ev_ebitda", label: "EV/EBITDA", fmt: ratio },
-  { key: "eps_ttm", label: "EPS (TTM)", fmt: (v) => money(v) },
-  { key: "revenue_ttm", label: "Revenue (TTM)", fmt: big },
-  { key: "revenue_growth_yoy_pct", label: "Revenue growth YoY", fmt: (v) => pct(v, 1) },
-  { key: "gross_margin_pct", label: "Gross margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "operating_margin_pct", label: "Operating margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "net_margin_pct", label: "Net margin", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "roe_pct", label: "ROE", fmt: (v) => (v == null ? "–" : `${v.toFixed(1)}%`) },
-  { key: "fcf_ttm", label: "Free cash flow", fmt: big },
-  { key: "debt_to_equity", label: "Debt/Equity", fmt: ratio },
-  { key: "dividend_yield_pct", label: "Dividend yield", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
-  { key: "beta", label: "Beta", fmt: ratio },
-  { key: "expense_ratio_pct", label: "Expense ratio", fmt: (v) => (v == null ? "–" : `${v.toFixed(2)}%`) },
-  { key: "net_assets", label: "Net assets", fmt: big },
-  { key: "ytd_return_pct", label: "YTD return", fmt: (v) => pct(v, 1) },
-  { key: "return_3y_pct", label: "3-year avg return", fmt: (v) => pct(v, 1) },
-  { key: "return_5y_pct", label: "5-year avg return", fmt: (v) => pct(v, 1) },
+// Same indicators, names and groups as the dashboard's tabs (src/metrics.ts).
+const SECTIONS: { group: GroupName; title: string }[] = [
+  { group: "Financials", title: "Valuation & size" }, { group: "Growth", title: "Growth" },
+  { group: "Profitability", title: "Profitability" }, { group: "Momentum", title: "Momentum" },
+  { group: "Dividends & risk", title: "Dividends & risk" }, { group: "Fund", title: "Fund" },
 ];
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
@@ -77,9 +58,6 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [historyErr, setHistoryErr] = useState<ApiError | null>(null);
   const [fund, setFund] = useState<Fundamentals | null>(null);
-  const [fin, setFin] = useState<Financials | null>(null);
-  const [finErr, setFinErr] = useState<ApiError | null>(null);
-  const [finPeriod, setFinPeriod] = useState<"quarterly" | "annual">("quarterly");
   const [position, setPosition] = useState<Position | null>(null);
   const [polled, setPolled] = useState<Quote | null>(null);
 
@@ -103,11 +81,6 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
     api.fundamentals(symbol).then(setFund, () => setFund(null));
   }, [symbol]);
   useEffect(loadPosition, [loadPosition]);
-
-  useEffect(() => {
-    setFinErr(null);
-    api.financials(symbol, finPeriod).then(setFin, (e) => { setFin(null); setFinErr(e); });
-  }, [symbol, finPeriod]);
 
   // Held/watched symbols arrive over the stream; anything else is polled.
   const streamed = live?.quotes[symbol];
@@ -161,15 +134,13 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               </div>
             )}
           </div>
-          {high52 != null && low52 != null && quote && (
-            <div className="small text-2" style={{ minWidth: 220 }}>
-              52-week range
-              <div style={{ position: "relative", height: 6, background: "var(--grid)", borderRadius: 3, margin: "6px 0" }}>
-                <div style={{ position: "absolute", top: -3, width: 12, height: 12, borderRadius: "50%", background: "var(--series-1)",
-                  boxShadow: "0 0 0 2px var(--surface)",
-                  left: `calc(${Math.min(100, Math.max(0, ((quote.price - low52) / (high52 - low52)) * 100))}% - 6px)` }} />
-              </div>
-              <div className="row num" style={{ justifyContent: "space-between" }}><span>{price(low52)}</span><span>{price(high52)}</span></div>
+          {quote && ((quote.low != null && quote.high != null) || (high52 != null && low52 != null)) && (
+            <div className="hero-ranges">
+              {quote.low != null && quote.high != null && (
+                <RangeBar label="Day range" lo={quote.low} hi={quote.high} at={quote.price}
+                          tick={quote.open} tickTitle={quote.open != null ? `Open ${price(quote.open)}` : undefined} />
+              )}
+              {high52 != null && low52 != null && <RangeBar label="52-week range" lo={low52} hi={high52} at={quote.price} />}
             </div>
           )}
         </div>
@@ -213,20 +184,35 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <CompanyCard symbol={symbol} />
       <HoldingsCard symbol={symbol} />
 
-      <section className="grid-2">
-        <div className="card">
-          <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)}</span>}</h2>
-          {fund ? (
-            <div className="stats">
-              {STATS.filter((s) => m[s.key] != null).map((s) => (
-                <div className="stat" key={s.key} title={fund.sources[s.key] ? `source: ${fund.sources[s.key]}` : undefined}>
-                  <div className="k">{s.label}</div>
-                  <div className="v">{s.fmt(m[s.key])}</div>
+      <section className="card">
+        <h2>Valuation &amp; fundamentals {fund && <span className="muted small">· as of {nyTime(fund.as_of)} · same figures as the dashboard tabs</span>}</h2>
+        {fund ? (
+          <div className="fund-groups">
+            {SECTIONS.map(({ group, title }) => {
+              const keys = GROUPS[group].filter((k) => metricValue(k, m, quote?.price) != null);
+              if (keys.length === 0) return null;
+              return (
+                <div key={group}>
+                  <h3 className="sub">{title}</h3>
+                  <dl className="kv">
+                    {keys.map((k) => {
+                      const v = metricValue(k, m, quote?.price), d = METRICS[k];
+                      const src = fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
+                      return (
+                        <div key={k} title={[d.title, src].filter(Boolean).join(" · ") || undefined}>
+                          <dt>{d.label}</dt><dd className={metricTone(k, v)}>{formatMetric(k, v)}</dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
                 </div>
-              ))}
-            </div>
-          ) : <p className="muted">Loading…</p>}
-        </div>
+              );
+            })}
+          </div>
+        ) : <p className="muted">Loading…</p>}
+      </section>
+
+      <section>
 
         <PositionCard symbol={symbol} portfolio={portfolio} position={position} lastPrice={quote?.price}
                       onChanged={loadPosition} />
@@ -238,38 +224,24 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <SymbolNotes symbol={symbol} />
       <EventsCard symbol={symbol} />
 
-      <section className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>Reported financials {fin?.company ? <span className="muted small">· {fin.company} · SEC EDGAR</span> : null}</h2>
-          <div className="seg">
-            {(["quarterly", "annual"] as const).map((p) => (
-              <button key={p} aria-pressed={finPeriod === p} onClick={() => setFinPeriod(p)}>{p === "quarterly" ? "Quarterly" : "Annual"}</button>
-            ))}
-          </div>
-        </div>
-        {finErr ? <p className="muted">{finErr.message}</p> : fin ? (
-          <>
-            <RevenueColumns periods={fin.periods} />
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Period end</th><th>Revenue</th><th>Gross %</th><th>Operating %</th><th>Net income</th><th>EPS (dil.)</th><th>FCF</th></tr></thead>
-                <tbody>
-                  {fin.periods.map((p) => (
-                    <tr key={p.period_end} style={{ cursor: "default" }}>
-                      <td>{p.period_end}</td><td>{big(p.revenue)}</td>
-                      <td>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
-                      <td>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
-                      <td className={tone(p.net_income)}>{big(p.net_income)}</td>
-                      <td>{p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}</td>
-                      <td>{big(p.free_cash_flow)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : <p className="muted">Loading…</p>}
-      </section>
+      <FinancialsCard symbol={symbol} />
+    </div>
+  );
+}
+
+/** Low–high bar with the price as a dot (and an optional tick, e.g. the open). */
+function RangeBar({ label, lo, hi, at, tick, tickTitle }: {
+  label: string; lo: number; hi: number; at: number; tick?: number | null; tickTitle?: string;
+}) {
+  const pos = (v: number) => `${hi > lo ? Math.min(100, Math.max(0, ((v - lo) / (hi - lo)) * 100)) : 50}%`;
+  return (
+    <div className="small text-2">
+      {label}
+      <div className="range-track" role="img" aria-label={`${label} ${price(lo)} to ${price(hi)}, now ${price(at)}${tickTitle ? `, ${tickTitle.toLowerCase()}` : ""}`}>
+        {tick != null && <div className="range-tick" style={{ left: pos(tick) }} title={tickTitle} />}
+        <div className="range-dot" style={{ left: pos(at) }} />
+      </div>
+      <div className="row num" style={{ justifyContent: "space-between" }}><span>{price(lo)}</span><span>{price(hi)}</span></div>
     </div>
   );
 }

@@ -92,3 +92,43 @@ def test_portfolio_summary_reports_the_extended_move(a):
     t = s["totals"]
     assert (t["ext_pnl"], t["ext_session"]) == (10.0, "pre")
     assert t["ext_pnl_pct"] == pytest.approx(10 / 1600 * 100) and t["ext_coverage_pct"] == pytest.approx(1500 / 1600 * 100)
+
+
+def test_first_trade_of_a_new_day_rolls_the_previous_close(make_argus):
+    hub = LiveHub(make_argus())
+    hub.status = {"session": "regular", "last_close": "2026-10-16T20:00:00+00:00"}
+    friday = datetime(2026, 10, 16, 19, 59, tzinfo=UTC)
+    # Friday's streamed quote: prev_close is Thursday's close (539.44), last trade 529.05
+    hub.quotes["MSFT"] = Quote("MSFT", 529.05, 539.44, 535.0, 541.0, 528.0, friday, "finnhub-ws")
+    monday = datetime(2026, 10, 19, 13, 31, tzinfo=UTC)
+    hub.apply_trade("MSFT", 531.0, monday)
+    q = hub.quotes["MSFT"]
+    assert (q.prev_close, q.open, q.high, q.low) == (529.05, 531.0, 531.0, 531.0)
+    hub.apply_trade("MSFT", 533.0, monday + timedelta(minutes=1))
+    assert (hub.quotes["MSFT"].prev_close, hub.quotes["MSFT"].high) == (529.05, 533.0)  # same day: no roll
+
+
+def test_session_refresh_bypasses_the_cache_and_fixes_day_figures(make_argus):
+    import asyncio
+
+    monday = datetime(2026, 10, 19, 14, 30, tzinfo=UTC)
+    rest = Quote("MSFT", 533.0, 529.05, 528.74, 534.0, 528.48, monday - timedelta(minutes=2), "yahoo")
+
+    class Rest:
+        name, batch_quotes, calls = "yahoo", True, 0
+
+        def get_quotes(self, symbols):
+            Rest.calls += 1
+            return {"MSFT": rest}
+
+    a = make_argus([Rest()])
+    hub = LiveHub(a)
+    hub.status = {"session": "regular", "last_close": "2026-10-16T20:00:00+00:00"}
+    stale = Quote("MSFT", 533.19, 539.44, 535.0, 541.0, 528.0, monday, "finnhub-ws")  # streamed, newer price
+    hub.quotes["MSFT"] = stale
+    a.market.store_quotes([stale])  # the flush makes the cache look fresh
+    asyncio.run(hub._rest_refresh(["MSFT"], max_age_s=0))
+    q = hub.quotes["MSFT"]
+    assert Rest.calls == 1  # fetched despite the fresh-looking cache
+    assert q.price == 533.19 and q.source == "finnhub-ws"  # the newer streamed price stays
+    assert (q.prev_close, q.open, q.low, q.high) == (529.05, 528.74, 528.48, 534.0)  # day figures from REST

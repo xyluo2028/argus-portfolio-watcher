@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type FundHolding, type FundHoldings } from "../api";
 import { big, pct, price, tone } from "../format";
+import { heatFill, squarify, type Rect } from "../treemap";
 import { BarList } from "./BarList";
 
 const GAP = 2;
@@ -9,49 +10,7 @@ const TABLE_ROWS = 15;
 const FULL_AT = 3; // a ±3% day is full color
 
 type Named = FundHolding & { symbol: string };
-interface Tile { h: Named; x: number; y: number; w: number; h_: number }
-
-/** Squarified treemap: rows of tiles kept as close to square as possible. */
-function squarify(items: Named[], width: number, height: number): Tile[] {
-  const total = items.reduce((s, i) => s + i.weight_pct, 0) || 1;
-  const scale = (width * height) / total;
-  const out: Tile[] = [];
-  let rest = items.map((h) => ({ h, area: h.weight_pct * scale }));
-  let x = 0, y = 0, w = width, hgt = height;
-  const worst = (row: { area: number }[], side: number) => {
-    const sum = row.reduce((s, r) => s + r.area, 0);
-    const max = Math.max(...row.map((r) => r.area)), min = Math.min(...row.map((r) => r.area));
-    return Math.max((side * side * max) / (sum * sum), (sum * sum) / (side * side * min));
-  };
-  while (rest.length) {
-    const side = Math.min(w, hgt);
-    let row = [rest[0]];
-    let i = 1;
-    while (i < rest.length && worst([...row, rest[i]], side) <= worst(row, side)) row = [...row, rest[i++]];
-    rest = rest.slice(i);
-    const sum = row.reduce((s, r) => s + r.area, 0);
-    if (w >= hgt) { // lay the row as a column on the left
-      const cw = sum / hgt;
-      let cy = y;
-      for (const r of row) { const th = r.area / cw; out.push({ h: r.h, x, y: cy, w: cw, h_: th }); cy += th; }
-      x += cw; w -= cw;
-    } else { // as a row on top
-      const rh = sum / w;
-      let cx = x;
-      for (const r of row) { const tw = r.area / rh; out.push({ h: r.h, x: cx, y, w: tw, h_: rh }); cx += tw; }
-      y += rh; hgt -= rh;
-    }
-  }
-  return out;
-}
-
-/** Diverging fill: gray at 0, up/down hue growing with the size of the move. */
-function fill(change: number | null): { bg: string; strong: boolean } {
-  if (change == null) return { bg: "var(--surface-2)", strong: false };
-  const t = Math.min(Math.abs(change) / FULL_AT, 1);
-  const hue = change >= 0 ? "var(--heat-up)" : "var(--heat-down)";
-  return { bg: `color-mix(in oklab, ${hue} ${change === 0 ? 0 : Math.round(15 + t * 85)}%, var(--heat-mid))`, strong: t > 0.45 };
-}
+type Tile = Rect<Named>;
 
 const RATINGS: [string, string][] = [["aaa", "AAA"], ["aa", "AA"], ["a", "A"], ["bbb", "BBB"], ["bb", "BB"],
   ["b", "B"], ["below_b", "Below B"], ["other", "Other"]];
@@ -99,7 +58,7 @@ export function HoldingsCard({ symbol }: { symbol: string }) {
 
   if (!data || !data.fund) return null;
   const height = heat.length > 12 ? 400 : 260;
-  const tiles = width ? squarify(heat, width, height) : [];
+  const tiles: Tile[] = width ? squarify(heat, (h) => h.weight_pct, 0, 0, width, height) : [];
   const heatWeight = heat.reduce((s, h) => s + h.weight_pct, 0);
   const shown = (m: Record<string, number>, keys: [string, string][]) =>  // drop rows that round to 0.0%
     keys.filter(([k]) => (m[k] ?? 0) >= 0.05).map(([k, label]) => ({ label, value: m[k] }));
@@ -130,19 +89,19 @@ export function HoldingsCard({ symbol }: { symbol: string }) {
           <div ref={box} className="treemap" style={{ height }} role="list" aria-label="Largest holdings"
                onMouseLeave={() => setHover(null)}>
             {tiles.map((t) => {
-              const { bg, strong } = fill(t.h.change_pct);
-              const tiny = t.w < 34 || t.h_ < 20;
-              const small = t.w < 64 || t.h_ < 40;
+              const { bg, strong } = heatFill(t.item.change_pct, FULL_AT);
+              const tiny = t.w < 34 || t.h < 20;
+              const small = t.w < 64 || t.h < 40;
               return (
-                <div key={t.h.symbol} role="listitem" className={`tile ${strong ? "strong" : ""} ${t.h.us_listed ? "link" : ""}`}
-                     style={{ left: t.x, top: t.y, width: Math.max(t.w - GAP, 0), height: Math.max(t.h_ - GAP, 0), background: bg,
+                <div key={t.item.symbol} role="listitem" className={`tile ${strong ? "strong" : ""} ${t.item.us_listed ? "link" : ""}`}
+                     style={{ left: t.x, top: t.y, width: Math.max(t.w - GAP, 0), height: Math.max(t.h - GAP, 0), background: bg,
                               padding: small ? 2 : undefined }}
-                     aria-label={`${t.h.symbol} ${t.h.weight_pct.toFixed(2)}% of fund, ${pct(t.h.change_pct)} today`}
-                     onMouseMove={(e) => setHover({ h: t.h, x: e.clientX, y: e.clientY })}
-                     onClick={() => t.h.us_listed && navigate(`/t/${t.h.symbol}`)}>
-                  {!tiny && <div className="sym" style={{ fontSize: small ? 10 : t.w > 140 && t.h_ > 80 ? 16 : 13 }}>{t.h.symbol}</div>}
-                  {!small && <div className="chg">{pct(t.h.change_pct)}</div>}
-                  {!small && t.h_ > 64 && <div className="wt">{t.h.weight_pct.toFixed(1)}%</div>}
+                     aria-label={`${t.item.symbol} ${t.item.weight_pct.toFixed(2)}% of fund, ${pct(t.item.change_pct)} today`}
+                     onMouseMove={(e) => setHover({ h: t.item, x: e.clientX, y: e.clientY })}
+                     onClick={() => t.item.us_listed && navigate(`/t/${t.item.symbol}`)}>
+                  {!tiny && <div className="sym" style={{ fontSize: small ? 10 : t.w > 140 && t.h > 80 ? 16 : 13 }}>{t.item.symbol}</div>}
+                  {!small && <div className="chg">{pct(t.item.change_pct)}</div>}
+                  {!small && t.h > 64 && <div className="wt">{t.item.weight_pct.toFixed(1)}%</div>}
                 </div>
               );
             })}

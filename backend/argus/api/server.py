@@ -215,7 +215,11 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/fundamentals/{symbol}")
     async def fundamentals(symbol: str, fields: str | None = None, refresh: bool = False):
         f = [x.strip() for x in fields.split(",")] if fields else None
-        return await run(argus.market.get_fundamentals, normalize_symbol(symbol), f, refresh)
+        return await run(argus.fundamentals, symbol, f, refresh)
+
+    @app.get("/api/earnings/{symbol}")
+    async def earnings_history(symbol: str, limit: int = 8):
+        return await run(argus.earnings_history, symbol, limit)
 
     @app.get("/api/financials/{symbol}")
     async def financials(symbol: str, period: str = "quarterly", limit: int = 8):
@@ -229,6 +233,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.get("/api/portfolios")
     async def portfolios():
         return await run(argus.portfolios.list_portfolios)
+
+    @app.delete("/api/portfolios/{ref}")
+    async def delete_portfolio(ref: str, dry_run: bool = True, confirm: str | None = None):
+        return await run(argus.delete_portfolio, ref, confirm, dry_run, "ui")
 
     @app.post("/api/portfolios", status_code=201)
     async def create_portfolio(body: PortfolioBody):

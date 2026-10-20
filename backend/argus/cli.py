@@ -226,6 +226,36 @@ def portfolio_create(name: str, benchmark: str = "SPY", as_json: JsonOpt = False
          lambda d: console.print(f"Created portfolio [bold]{d['name']}[/bold] (id {d['id']}, benchmark {d['benchmark']})"))
 
 
+@portfolio_app.command("delete")
+def portfolio_delete(ref: Annotated[str, typer.Argument(help="Portfolio name or id")],
+                     yes: Annotated[bool, typer.Option("--yes", help="Skip the type-the-name prompt")] = False,
+                     dry_run: DryRunOpt = False,
+                     as_json: JsonOpt = False):
+    """Permanently delete a portfolio with its transactions, targets and history (backed up first)."""
+    def counts(d):
+        c = d["counts"]
+        return (f"{c['transactions']} transactions ({c['open_positions']} open positions), {c['targets']} targets, "
+                f"{c['nav_days']} days of history")
+
+    def go():
+        a = _argus()
+        name = a.portfolios.get_portfolio(ref).name
+        if not dry_run and not yes:
+            if as_json:
+                raise ArgusError("INVALID_ARG", "Deleting needs --yes with --json.")
+            console.print(f"[bold]{name}[/bold]: {counts(a.delete_portfolio(name))}")
+            if typer.prompt(f"This permanently deletes it. Type {name} to confirm", default="") != name:
+                raise ArgusError("INVALID_ARG", "Not deleted: the name didn't match.")
+        return a.delete_portfolio(name, confirm=name, dry_run=dry_run, actor="cli")
+
+    def render(d):
+        if d["dry_run"]:
+            console.print(f"Would delete [bold]{d['portfolio']['name']}[/bold]: {counts(d)}")
+        else:
+            console.print(f"[red]Deleted {d['portfolio']['name']}[/red]: {counts(d)}\nBackup: {d['backup']}")
+    _run(as_json, go, render)
+
+
 @portfolio_app.command("show")
 def portfolio_show(ref: Annotated[str, typer.Argument(help="Portfolio name or id")],
                    no_quotes: Annotated[bool, typer.Option("--no-quotes", help="Skip market data.")] = False,

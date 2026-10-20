@@ -161,6 +161,76 @@ def valuation_bands(series: dict[str, list[dict]], current: dict[str, float | No
     return out
 
 
+# -- growth ------------------------------------------------------------------------------------
+
+HORIZONS = {"0q": "This quarter", "+1q": "Next quarter", "0y": "This fiscal year", "+1y": "Next fiscal year", "LTG": "Long term (5y, per year)"}
+
+
+def _yoy(rows: list[dict], key: str) -> list[float | None]:
+    """Each quarter vs the one about a year before it (matched by date, not position: SEC data can skip
+    a quarter, and Q4 is often derived)."""
+    dates = [date.fromisoformat(r["period_end"]) for r in rows]
+    out = []
+    for i, r in enumerate(rows):
+        prior = next((rows[j] for j in range(len(rows)) if 330 <= (dates[i] - dates[j]).days <= 400), None)
+        now, then = r.get(key), (prior or {}).get(key)
+        out.append((now / then - 1) * 100 if now is not None and then not in (None, 0) and then > 0 else None)
+    return out
+
+
+def cagr(values: list[tuple[date, float | None]], years: int) -> float | None:
+    """Compound annual growth between the latest value and the one `years` earlier (positive values only)."""
+    vals = sorted((d, v) for d, v in values if v is not None)
+    if not vals:
+        return None
+    last_d, last = vals[-1]
+    base = next((v for d, v in reversed(vals) if 365 * years - 45 <= (last_d - d).days <= 365 * years + 45), None)
+    if base is None or base <= 0 or last <= 0:
+        return None
+    return ((last / base) ** (1 / years) - 1) * 100
+
+
+def growth_profile(quarterly: list[dict], annual: list[dict], metrics: dict, analyst: dict) -> dict:
+    """History (SEC quarterly and annual filings), the rates Finnhub reports, and analysts' forward
+    estimates (Yahoo), for one company."""
+    q = sorted(quarterly, key=lambda r: r["period_end"])
+    # Net income, not EPS: SEC keeps each EPS as originally filed, so across a stock split the per-share
+    # history jumps (NVDA's 2021 EPS is on a 40x larger share basis). EPS growth comes from Finnhub,
+    # which is split-adjusted.
+    rev_yoy, ni_yoy = _yoy(q, "revenue"), _yoy(q, "net_income")
+    quarters = [{"period_end": r["period_end"], "revenue": r.get("revenue"), "revenue_yoy_pct": rv,
+                 "net_income": r.get("net_income"), "net_income_yoy_pct": nv, "gross_margin_pct": r.get("gross_margin_pct"),
+                 "operating_margin_pct": r.get("operating_margin_pct")}
+                for r, rv, nv in zip(q, rev_yoy, ni_yoy)][::-1]
+    a = [(date.fromisoformat(r["period_end"]), r) for r in annual]
+    rev_a = [(d, r.get("revenue")) for d, r in a]
+    ni_a = [(d, r.get("net_income")) for d, r in a]
+    filed = {"revenue_3y": cagr(rev_a, 3), "revenue_5y": cagr(rev_a, 5),
+             "net_income_3y": cagr(ni_a, 3), "net_income_5y": cagr(ni_a, 5)}
+    reported = {"revenue_yoy": metrics.get("revenue_growth_yoy_pct"), "revenue_q_yoy": metrics.get("revenue_growth_q_yoy_pct"),
+                "revenue_3y": metrics.get("revenue_growth_3y_pct"), "revenue_5y": metrics.get("revenue_growth_5y_pct"),
+                "eps_yoy": metrics.get("eps_growth_yoy_pct"), "eps_q_yoy": metrics.get("eps_growth_q_yoy_pct"),
+                "eps_3y": metrics.get("eps_growth_3y_pct"), "eps_5y": metrics.get("eps_growth_5y_pct")}
+    rev_est, eps_est = analyst.get("revenue_estimate") or {}, analyst.get("earnings_estimate") or {}
+    trend = analyst.get("growth_estimates") or {}
+    pct = lambda v: v * 100 if isinstance(v, (int, float)) else None  # noqa: E731
+    forward = []
+    for h, label in HORIZONS.items():
+        r, e, g = rev_est.get(h) or {}, eps_est.get(h) or {}, trend.get(h) or {}
+        if not (r or e or g.get("stockTrend") is not None):
+            continue
+        forward.append({"horizon": h, "label": label,
+                        "revenue": r.get("avg"), "revenue_low": r.get("low"), "revenue_high": r.get("high"),
+                        "revenue_growth_pct": pct(r.get("growth")), "revenue_analysts": r.get("numberOfAnalysts"),
+                        "eps": e.get("avg"), "eps_low": e.get("low"), "eps_high": e.get("high"), "year_ago_eps": e.get("yearAgoEps"),
+                        "eps_growth_pct": pct(e.get("growth")) if e else pct(g.get("stockTrend")),
+                        "eps_analysts": e.get("numberOfAnalysts"), "index_eps_growth_pct": pct(g.get("indexTrend"))})
+    years = [{"period_end": d.isoformat(), "revenue": r.get("revenue"), "net_income": r.get("net_income")}
+             for d, r in sorted(a, key=lambda x: x[0])][::-1]
+    return {"quarters": quarters, "years": years, "filed_cagr": filed, "reported": reported, "forward": forward,
+            "peg": metrics.get("peg"), "price_cagr_3y": metrics.get("cagr_3y_pct"), "price_cagr_5y": metrics.get("cagr_5y_pct")}
+
+
 # -- headline tone -----------------------------------------------------------------------------
 
 POSITIVE = set("""beat beats beating surge surges surged soar soars soared jump jumps jumped rally rallies rallied gain gains

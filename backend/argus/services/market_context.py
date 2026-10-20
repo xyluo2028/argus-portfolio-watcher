@@ -1,15 +1,21 @@
-"""Market context: the big gauges (indices, volatility, rates, USD/JPY, oil, gold, bitcoin), a sector
-heatmap, breadth proxies, the Treasury yield curve and the US economic calendar.
+"""Market context: the big gauges (indices, volatility, rates, USD/JPY, oil, gold, bitcoin), a fear &
+greed meter, a sector heatmap, market breadth, the Treasury yield curve and the US economic calendar.
 
-Breadth here is measured with proxies, not with all 500 S&P members: equal- vs cap-weighted S&P
-(RSP vs SPY), small vs large caps (IWM vs SPY), and how many of the 11 sectors are above their
-50- and 200-day averages.
+Breadth counts the 500 largest US-listed stocks (from the screener's universe, close to the S&P 500):
+advancers vs decliners, above/below the 50- and 200-day averages, new 52-week highs and lows. Proxies
+sit beside it: equal- vs cap-weighted S&P (RSP vs SPY), small vs large caps (IWM vs SPY), sectors
+above their averages.
+
+Fear & greed follows CNN's recipe with free data: seven readings, each scored 0 (fear) to 100 (greed),
+averaged. Readings with a history are scored by where today falls in the last year (a percentile);
+the two that come from today's breadth snapshot are shares (highs among highs + lows, stocks above
+their 50-day average). CNN's put/call ratio is replaced by the VIX term structure (VIX ÷ VIX3M).
 """
 
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from argus.services.dividends import add_months
 
@@ -23,7 +29,14 @@ SECTORS = [("XLK", "Technology"), ("XLC", "Communication Services"), ("XLY", "Co
            ("XLF", "Financials"), ("XLV", "Health Care"), ("XLI", "Industrials"), ("XLE", "Energy"),
            ("XLB", "Materials"), ("XLU", "Utilities"), ("XLP", "Consumer Staples"), ("XLRE", "Real Estate")]
 BREADTH = ["RSP", "SPY", "IWM"]
-ALL_SYMBOLS = sorted({s for s, *_ in GAUGES} | {s for s, _ in SECTORS} | set(BREADTH))
+FEAR_GREED = ["^VIX3M", "TLT", "HYG", "LQD"]  # with ^GSPC, ^VIX, SPY from the lists above
+ALL_SYMBOLS = sorted({s for s, *_ in GAUGES} | {s for s, _ in SECTORS} | set(BREADTH) | set(FEAR_GREED))
+HISTORY = "2y"  # a year of 125-day averages to rank today's reading against
+BREADTH_UNIVERSE = 500
+# Fields for the breadth snapshot (Yahoo's batch quote)
+BREADTH_FIELDS = ("regularMarketPrice,regularMarketPreviousClose,regularMarketDayHigh,regularMarketDayLow,"
+                  "fiftyDayAverage,twoHundredDayAverage,fiftyTwoWeekHigh,fiftyTwoWeekLow,regularMarketTime")
+FG_LABELS = [(25, "Extreme fear"), (45, "Fear"), (55, "Neutral"), (75, "Greed"), (101, "Extreme greed")]
 
 PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 # Releases that move markets, matched as whole words. Fed speakers are left out except the Chair.
@@ -63,8 +76,142 @@ def sma(closes: dict[date, float], n: int) -> float | None:
     return sum(vals) / n if len(vals) == n else None
 
 
+def _num(v) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and v == v and v > 0 else None
+
+
+def stock_breadth(rows: list[dict]) -> dict | None:
+    """Counts over Yahoo quote rows (largest company first). A new 52-week high is a session high at
+    the 52-week high; the averages are Yahoo's 50- and 200-day averages of the close."""
+    n = adv = dec = 0
+    above = {50: 0, 200: 0}
+    have = {50: 0, 200: 0}
+    highs, lows, seen = [], [], 0
+    last_t = None
+    for r in rows:
+        price, prev = _num(r.get("regularMarketPrice")), _num(r.get("regularMarketPreviousClose"))
+        if not price:
+            continue
+        n += 1
+        if prev:
+            adv += price > prev
+            dec += price < prev
+        for days, key in ((50, "fiftyDayAverage"), (200, "twoHundredDayAverage")):
+            avg = _num(r.get(key))
+            if avg:
+                have[days] += 1
+                above[days] += price > avg
+        hi52, lo52 = _num(r.get("fiftyTwoWeekHigh")), _num(r.get("fiftyTwoWeekLow"))
+        day_hi, day_lo = _num(r.get("regularMarketDayHigh")) or price, _num(r.get("regularMarketDayLow")) or price
+        if hi52 and lo52:
+            seen += 1
+            if day_hi >= hi52 * 0.9995:
+                highs.append(r["symbol"])
+            elif day_lo <= lo52 * 1.0005:
+                lows.append(r["symbol"])
+        t = r.get("regularMarketTime")
+        if isinstance(t, (int, float)) and (last_t is None or t > last_t):
+            last_t = t
+    if not n:
+        return None
+    share = lambda k, of: k / of * 100 if of else None  # noqa: E731
+    return {
+        "count": n,
+        "as_of": datetime.fromtimestamp(last_t, UTC).isoformat() if last_t else None,
+        "advancers": adv, "decliners": dec, "unchanged": n - adv - dec,
+        "above_50d": above[50], "below_50d": have[50] - above[50], "pct_above_50d": share(above[50], have[50]),
+        "above_200d": above[200], "below_200d": have[200] - above[200], "pct_above_200d": share(above[200], have[200]),
+        "new_highs": len(highs), "new_lows": len(lows),
+        "pct_new_highs": share(len(highs), seen), "pct_new_lows": share(len(lows), seen),
+        "highs": highs[:12], "lows": lows[:12],
+    }
+
+
+def _series(c: dict[date, float]) -> tuple[list[date], list[float]]:
+    days = sorted(c)
+    return days, [c[d] for d in days]
+
+
+def _rank(values: list[float], window: int = 252) -> float | None:
+    """Where the last value falls among the last `window` (0-100, ties count half)."""
+    hist = values[-window:]
+    if len(hist) < 60:
+        return None
+    cur = hist[-1]
+    return (sum(v < cur for v in hist) + 0.5 * sum(v == cur for v in hist)) / len(hist) * 100
+
+
+def _ratio_series(a: dict[date, float], b: dict[date, float]) -> list[float]:
+    return [a[d] / b[d] for d in sorted(a.keys() & b.keys()) if b[d]]
+
+
+def _vs_average(values: list[float], n: int) -> list[float]:
+    """Each close vs its own trailing n-day average (as a ratio minus one)."""
+    out, run = [], sum(values[:n - 1]) if len(values) >= n else 0.0
+    for i in range(n - 1, len(values)):
+        run += values[i]
+        out.append(values[i] / (run / n) - 1)
+        run -= values[i - n + 1]
+    return out
+
+
+def _spread_20d(a: dict[date, float], b: dict[date, float]) -> list[float]:
+    """20-day return of a minus 20-day return of b, in percentage points, over their shared days."""
+    days = sorted(a.keys() & b.keys())
+    return [((a[d] / a[p] - 1) - (b[d] / b[p] - 1)) * 100 for p, d in zip(days, days[20:]) if a[p] and b[p]]
+
+
+def fg_label(score: float) -> str:
+    return next(label for top, label in FG_LABELS if score < top)
+
+
+def fear_greed(closes: dict[str, dict[date, float]], breadth: dict | None) -> dict | None:
+    parts: list[dict] = []
+
+    def add(key, label, score, detail):
+        if score is not None:
+            parts.append({"key": key, "label": label, "score": round(score, 1), "detail": detail})
+
+    spx = closes.get("^GSPC") or {}
+    if spx:
+        dev = _vs_average(_series(spx)[1], 125)
+        if dev:
+            add("momentum", "Market momentum", _rank(dev),
+                f"S&P 500 {abs(dev[-1]) * 100:.1f}% {'above' if dev[-1] >= 0 else 'below'} its 125-day average")
+    if breadth and breadth["new_highs"] + breadth["new_lows"]:
+        h, lo = breadth["new_highs"], breadth["new_lows"]
+        add("strength", "Price strength", h / (h + lo) * 100, f"{h} new 52-week highs vs {lo} new lows")
+    if breadth and breadth["pct_above_50d"] is not None:
+        add("breadth", "Price breadth", breadth["pct_above_50d"],
+            f"{breadth['pct_above_50d']:.0f}% of the {breadth['count']} largest stocks above their 50-day average")
+    vix = closes.get("^VIX") or {}
+    if vix:
+        dev = _vs_average(_series(vix)[1], 50)
+        r = _rank(dev)
+        if r is not None:
+            add("volatility", "Volatility", 100 - r,
+                f"VIX {_series(vix)[1][-1]:.1f}, {abs(dev[-1]) * 100:.0f}% {'above' if dev[-1] >= 0 else 'below'} its 50-day average")
+    term = _ratio_series(vix, closes.get("^VIX3M") or {})
+    r = _rank(term)
+    if r is not None:
+        add("term", "Volatility term structure", 100 - r,
+            f"VIX ÷ 3-month VIX {term[-1]:.2f}" + (" (inverted: near-term fear)" if term[-1] > 1 else ""))
+    for key, label, a, b, what in (("safe_haven", "Safe-haven demand", "SPY", "TLT", "Stocks vs Treasuries"),
+                                   ("junk", "Junk bond demand", "HYG", "LQD", "Junk vs investment-grade bonds")):
+        sp = _spread_20d(closes.get(a) or {}, closes.get(b) or {})
+        r = _rank(sp)
+        if r is not None:
+            add(key, label, r, f"{what} {'+' if sp[-1] >= 0 else '−'}{abs(sp[-1]):.1f} pp over 20 days")
+    if not parts:
+        return None
+    score = sum(p["score"] for p in parts) / len(parts)
+    for p in parts:
+        p["rating"] = fg_label(p["score"])
+    return {"score": round(score, 1), "rating": fg_label(score), "components": parts}
+
+
 def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, float]] | None,
-          fomc: list[dict] | None, events: list[dict] | None, today: date) -> dict:
+          fomc: list[dict] | None, events: list[dict] | None, today: date, stocks: dict | None = None) -> dict:
     gauges = []
     for sym, label, kind in GAUGES:
         c = closes.get(sym) or {}
@@ -96,6 +243,7 @@ def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, floa
         "sectors_above_50d": sum(s["above_50d"] for s in sectors),
         "sectors_above_200d": sum(s["above_200d"] for s in sectors),
         "sectors": len(sectors),
+        "stocks": stocks,
     }
 
     yc = None
@@ -132,4 +280,4 @@ def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, floa
         }
 
     return {"as_of": today.isoformat(), "gauges": gauges, "sectors": sectors, "periods": PERIODS,
-            "breadth": breadth, "yield_curve": yc, "calendar": calendar}
+            "breadth": breadth, "fear_greed": fear_greed(closes, stocks), "yield_curve": yc, "calendar": calendar}

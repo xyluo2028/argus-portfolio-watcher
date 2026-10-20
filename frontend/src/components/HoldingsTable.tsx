@@ -48,8 +48,9 @@ export function HoldingsTable({ positions }: { positions: Position[] }) {
       <table>
         <thead>
           <tr>
+            <th className="rank" title="Rank in the current sort order">#</th>
             {COLS.map((c) => (
-              <th key={c.key} onClick={() => onSort(c.key)}
+              <th key={c.key} onClick={() => onSort(c.key)} className={c.key === "symbol" ? "left" : undefined}
                   aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
                 {c.label}{sort.key === c.key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
               </th>
@@ -57,12 +58,13 @@ export function HoldingsTable({ positions }: { positions: Position[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((p) => (
+          {rows.map((p, i) => (
             // Keyed by symbol+price so the flash animation restarts on each change.
             <tr key={`${p.symbol}-${p.price}`} className={flashes[p.symbol]} tabIndex={0}
                 onClick={() => navigate(`/t/${p.symbol}`)}
                 onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${p.symbol}`)}>
-              <td><span className="sym">{p.symbol}</span><span className="name">{p.name ?? ""}</span></td>
+              <td className="rank">{i + 1}</td>
+              <td className="left"><span className="sym">{p.symbol}</span><span className="name">{p.name ?? ""}</span></td>
               <td>{p.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
               <td>{price(p.avg_cost)}</td>
               <td>{price(p.price)}</td>

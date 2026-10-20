@@ -1,10 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ALL, ApiError, api, type StreamUpdate, type Summary } from "../api";
+import { ALL, ApiError, api, type Position, type StreamUpdate, type Summary } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
 import { HoldingsTabs } from "../components/HoldingsTabs";
+import { PortfolioHeatmap } from "../components/PortfolioHeatmap";
 import { extLabel, money, pct, tone } from "../format";
 
 // The chart library is the biggest dependency: let the numbers render first.
@@ -109,7 +110,8 @@ export function Dashboard({ portfolio, live }: Props) {
       </Suspense>
 
       <HoldingsTabs source={{ kind: "portfolio", name: portfolio }} rows={summary.positions}
-                    first={{ label: "Holdings", content: <HoldingsTable positions={summary.positions} /> }} />
+                    first={{ label: "Holdings", content: (rows) => <HoldingsTable positions={rows as Position[]} /> }}
+                    views={[{ label: "Heatmap", content: (rows) => <PortfolioHeatmap positions={rows as Position[]} /> }]} />
 
       <EventsCard portfolio={portfolio} />
 

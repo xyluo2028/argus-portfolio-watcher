@@ -89,7 +89,7 @@ button { font: inherit; color: inherit; }
 .nav { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .nav a { padding: 4px 10px; border-radius: 6px; color: var(--text-2); white-space: nowrap; }
 /* Ten sections don't fit beside the brand and controls on narrower screens: give the nav its own row. */
-@media (max-width: 1150px) { .topbar { flex-wrap: wrap; row-gap: 6px; } .nav { order: 10; flex-basis: 100%; } }
+@media (max-width: 1400px) { .topbar { flex-wrap: wrap; row-gap: 6px; } .nav { order: 10; flex-basis: 100%; } }
 .nav a.active { background: var(--accent-wash); color: var(--text); }
 .spacer { flex: 1; }
 main { max-width: 1280px; margin: 0 auto; padding: 20px; }
@@ -164,6 +164,17 @@ tr.self td { background: var(--accent-wash); }
 .gauges { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .gauge .delta { line-height: 1.5; }
 .gauge .spark { display: block; width: 100%; height: 26px; margin-top: 6px; }
+svg.fg-dial { display: block; width: 100%; max-width: 300px; margin: 0 auto; }
+svg.fg-dial .axis { font-size: 10px; fill: var(--muted); }
+svg.fg-dial .fg-score { font-size: 34px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
+.fg-rating { text-align: center; font-weight: 600; font-size: 16px; margin: 0 0 12px; }
+.fg-parts { display: grid; gap: 10px; }
+.fg-part-head, .split-head, .split-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.fg-part .range-track { height: 6px; margin: 4px 0 3px; }
+.fg-part .range-dot { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+.split { margin: 10px 0; }
+.split .stacked { margin: 4px 0 2px; }
+h3.sub { font-size: 13px; color: var(--text-2); margin: 16px 0 6px; font-weight: 600; }
 table.heat td { min-width: 52px; border-radius: 3px; font-variant-numeric: tabular-nums; }
 svg.curve { width: 100%; height: auto; display: block; }
 svg.curve .axis { font-size: 11px; fill: var(--muted); }
@@ -176,12 +187,23 @@ svg.curve .end-label { font-size: 11.5px; fill: var(--text-2); }
 .filter-row .input { max-width: 120px; }
 th.sorted { color: var(--text); }
 
+/* stock page fundamentals, grouped like the dashboard tabs */
+.fund-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px 28px; }
+.kv { margin: 0; }
+.kv > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+
 /* research */
+svg.rev-bars { width: 100%; max-width: 720px; height: auto; display: block; margin-bottom: 8px; }
+svg.rev-bars .axis { font-size: 10.5px; fill: var(--muted); }
+svg.rev-bars .bar-label { font-size: 10.5px; fill: var(--text-2); font-variant-numeric: tabular-nums; }
 .range-track { position: relative; height: 10px; margin: 8px 0 4px; border-radius: 5px; background: var(--grid); }
 .range-band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: color-mix(in srgb, var(--series-1) 30%, transparent); }
 .range-tick { position: absolute; top: -3px; width: 2px; height: 16px; margin-left: -1px; background: var(--text-2); }
 .range-dot { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
   background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); }
+.hero-ranges { display: grid; gap: 8px; min-width: 240px; }
 .stacked { flex: 1; display: flex; gap: 2px; height: 12px; }
 .stacked > div { height: 100%; border-radius: 2px; }
 .checks { list-style: none; margin: 0; padding: 0; }
@@ -209,6 +231,7 @@ table.corr td { min-width: 40px; border-radius: 3px; }
 .seg.ranges button[aria-pressed="true"] .ret { font-weight: 600; }
 
 /* holdings view tabs */
+.filter-bar { gap: 12px; margin: -2px 0 10px; }
 .seg.tabs { max-width: 100%; overflow-x: auto; }
 .seg.tabs button { padding: 5px 12px; white-space: nowrap; }
 .metric-table .name { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis;
@@ -234,6 +257,10 @@ table.corr td { min-width: 40px; border-radius: 3px; }
 .btn.ghost:hover { color: var(--text); background: var(--surface-2); }
 .btn.danger { background: var(--down); border-color: var(--down); color: #fff; font-weight: 600; }
 a.btn { text-decoration: none; display: inline-block; }
+.danger-zone { border-color: color-mix(in srgb, var(--down) 45%, var(--border)); }
+.danger-zone h2 { color: var(--down); }
+.danger-text { color: var(--down); }
+.btn.danger:disabled { opacity: 0.45; cursor: not-allowed; }
 .warn-box { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .preview { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); }
@@ -253,6 +280,11 @@ a.btn { text-decoration: none; display: inline-block; }
 .hero-value { font-size: 44px; font-weight: 600; line-height: 1.1; margin: 2px 0 4px; }
 .hero-delta { font-size: 15px; font-weight: 500; }
 .ext-hero { font-size: 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.verdict { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+.verdict.beat { color: var(--up); background: var(--flash-up); }
+.verdict.miss { color: var(--down); background: var(--flash-down); }
+.verdict.in_line { color: var(--text-2); background: var(--surface-2); }
+.ext-line .verdict { font-weight: 500; padding: 0 6px; margin-top: 2px; }
 .ext-line { display: block; font-size: 11px; color: var(--muted); line-height: 1.2; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
@@ -265,6 +297,7 @@ a.btn { text-decoration: none; display: inline-block; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
 th:first-child, td:first-child, th.left, td.left { text-align: left; }
+th.rank, td.rank { width: 1%; text-align: right; color: var(--muted); padding-right: 4px; cursor: default; }
 th { font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
 th[aria-sort] { color: var(--text); }
 tbody tr { cursor: pointer; }
@@ -310,5 +343,7 @@ textarea.input { resize: vertical; font: inherit; }
 .treemap .sym { font-weight: 600; white-space: nowrap; }
 .treemap .chg, .treemap .wt { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .treemap .wt { opacity: 0.8; }
+.portfolio-heatmap .sector-label { position: absolute; height: 18px; padding: 1px 6px; font-size: 11px; font-weight: 600;
+  color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heat-scale { display: inline-block; width: 120px; height: 8px; border-radius: 4px;
   background: linear-gradient(90deg, var(--heat-down), var(--heat-mid), var(--heat-up)); }

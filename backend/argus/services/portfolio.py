@@ -7,12 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, func, select
 
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status, session_date
-from argus.models import AuditLog, Instrument, Portfolio, Transaction, TxnType
+from argus.models import AuditLog, Instrument, NavDaily, Portfolio, Target, Transaction, TxnType
 from argus.providers.base import Quote
 from argus.services.lots import EPS, PositionState, build_positions
 from argus.symbols import is_plausible_symbol, normalize_symbol
@@ -91,6 +91,26 @@ class PortfolioService:
             s.add(AuditLog(actor=actor, action="create", entity="portfolio", entity_id=str(p.id),
                            after={"name": p.name, "benchmark": p.benchmark}))
             return {"id": p.id, "name": p.name, "benchmark": p.benchmark}
+
+    def delete_portfolio(self, ref: str | int, actor: str = "cli", dry_run: bool = True) -> dict:
+        """Permanently delete a portfolio with its transactions (soft-deleted ones too), targets and
+        performance history. Watchlists, notes and alerts are per symbol and stay. A dry run only counts."""
+        p = self.get_portfolio(ref)
+        with session_scope(self.engine) as s:
+            count = lambda model: s.scalar(select(func.count()).select_from(model).where(model.portfolio_id == p.id))  # noqa: E731
+            counts = {"transactions": count(Transaction), "targets": count(Target), "nav_days": count(NavDaily)}
+        counts["open_positions"] = sum(1 for pos in self.positions(p.id).values() if pos.is_open)
+        out = {"portfolio": {"id": p.id, "name": p.name, "benchmark": p.benchmark}, "counts": counts, "dry_run": dry_run}
+        if dry_run:
+            return out
+        with session_scope(self.engine) as s:
+            for model in (Transaction, Target, NavDaily):
+                s.execute(delete(model).where(model.portfolio_id == p.id))
+            s.execute(delete(Portfolio).where(Portfolio.id == p.id))
+            s.add(AuditLog(actor=actor, action="delete", entity="portfolio", entity_id=str(p.id),
+                           before=out["portfolio"] | {"counts": counts}))
+        self.revision += 1
+        return out
 
     def list_portfolios(self) -> list[dict]:
         with session_scope(self.engine) as s:

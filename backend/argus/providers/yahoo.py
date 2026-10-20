@@ -18,8 +18,15 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 log = logging.getLogger("argus.yahoo")
 
 
+_IMPORT_LOCK = threading.Lock()
+
+
 def _yf():
-    import yfinance  # imported lazily: it is slow to import and not needed for most commands
+    """yfinance, imported lazily (slow, and not needed for most commands) and under a lock: two threads
+    importing it at once can see it half-initialized ("cannot import name 'YfData'")."""
+    with _IMPORT_LOCK:
+        import yfinance
+        import yfinance.data  # noqa: F401
 
     return yfinance
 
@@ -70,15 +77,19 @@ class YahooProvider:
     @staticmethod
     def _quote_rows(symbols: list[str], fields: str) -> list[dict]:
         """Yahoo's batch quote endpoint (the one its own site uses), 100 symbols per request."""
-        from yfinance.data import YfData
+        YfData = _yf().data.YfData
 
         rows: list[dict] = []
         for i in range(0, len(symbols), QUOTE_BATCH):
-            try:
-                r = YfData().get(QUOTE_URL, params={"symbols": ",".join(symbols[i:i + QUOTE_BATCH]), "fields": fields})
-                rows += r.json()["quoteResponse"]["result"]
-            except Exception as e:  # noqa: BLE001 - network, auth crumb, or a changed payload
-                raise ProviderError(f"yahoo quote batch: {e}") from e
+            params = {"symbols": ",".join(symbols[i:i + QUOTE_BATCH]), "fields": fields}
+            for attempt in (1, 2):  # once more: the first requests of a process can race for the auth crumb
+                try:
+                    rows += YfData().get(QUOTE_URL, params=params).json()["quoteResponse"]["result"]
+                    break
+                except Exception as e:  # noqa: BLE001 - network, auth crumb, or a changed payload
+                    if attempt == 2:
+                        raise ProviderError(f"yahoo quote batch: {e}") from e
+                    time.sleep(0.5)
         return rows
 
     def get_quotes(self, symbols: list[str], native: bool = False) -> dict[str, Quote]:
@@ -212,7 +223,9 @@ class YahooProvider:
             t = _yf().Ticker(to_yahoo(symbol))
             out: dict = {}
             for name, get in (("recommendations", lambda: t.recommendations), ("eps_trend", lambda: t.eps_trend),
-                              ("eps_revisions", lambda: t.eps_revisions), ("institutions", lambda: t.institutional_holders)):
+                              ("eps_revisions", lambda: t.eps_revisions), ("institutions", lambda: t.institutional_holders),
+                              ("revenue_estimate", lambda: t.revenue_estimate), ("earnings_estimate", lambda: t.earnings_estimate),
+                              ("growth_estimates", lambda: t.growth_estimates)):
                 try:
                     df = get()
                 except Exception as e:  # noqa: BLE001 - each piece is optional
@@ -227,7 +240,7 @@ class YahooProvider:
                     out[name] = {str(h): {str(k): (_num(v) if not isinstance(v, str) else v) for k, v in vals.items()}
                                  for h, vals in df.to_dict("index").items()}
             return out
-        return self._memo(f"analyst:{symbol}", fetch)
+        return self._memo(f"analyst2:{symbol}", fetch)
 
     def get_statements(self, symbol: str) -> dict:
         """Annual statements, newest first: {"years": [...], "balance"|"income"|"cashflow": {row: [values]}}."""
@@ -271,6 +284,20 @@ class YahooProvider:
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"yahoo calendar {symbol}: {e}") from e
         return cal if isinstance(cal, dict) else {}
+
+    def get_earnings_dates(self, symbol: str, limit: int = 16) -> list[dict]:
+        """Past and next earnings reports, newest first: {"at" (report time, aware), "eps_estimate",
+        "eps_actual", "surprise_pct"}. Yahoo's reported EPS is sometimes GAAP rather than the
+        adjusted figure analysts estimate."""
+        try:
+            df = _yf().Ticker(to_yahoo(symbol)).get_earnings_dates(limit=limit)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"yahoo earnings dates {symbol}: {e}") from e
+        if df is None or df.empty:
+            return []
+        return [{"at": ts.to_pydatetime(), "eps_estimate": _num(row.get("EPS Estimate")),
+                 "eps_actual": _num(row.get("Reported EPS")), "surprise_pct": _num(row.get("Surprise(%)"))}
+                for ts, row in df.iterrows()]
 
     def get_fund_profile(self, symbol: str) -> dict:
         """ETF sector weights (Yahoo sector names, fractions summing to ~1), top holdings (Yahoo
@@ -318,6 +345,7 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "pb": _num(i.get("priceToBook")),
         "ps_ttm": _num(i.get("priceToSalesTrailing12Months")),
         "ev_ebitda": _num(i.get("enterpriseToEbitda")),
+        # Despite the name, Yahoo's "PEG Ratio (5yr expected)": P/E ÷ analysts' expected EPS growth.
         "peg": _num(i.get("trailingPegRatio")),
         "eps_ttm": _num(i.get("trailingEps")),
         "eps_forward": _num(i.get("forwardEps")),

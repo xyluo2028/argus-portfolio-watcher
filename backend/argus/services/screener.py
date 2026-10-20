@@ -153,6 +153,14 @@ class ScreenerService:
             self._mem = json.loads(self.path.read_text())
         return self._mem
 
+    def largest(self, n: int) -> list[str]:
+        """The n largest listed (not OTC) operating companies by market cap, largest first."""
+        u = self.load()
+        if not u:
+            return []
+        rows = [r for r in u["rows"] if r.get("market_cap") and not r.get("otc") and r.get("quote_type") == "EQUITY"]
+        return [r["symbol"] for r in sorted(rows, key=lambda r: -r["market_cap"])[:n]]
+
     def status(self) -> dict:
         u = self.load()
         if not u:

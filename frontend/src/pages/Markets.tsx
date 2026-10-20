@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type EconEvent, type MarketContext } from "../api";
-import { pct, tone } from "../format";
+import { api, type EconEvent, type MarketContext, type StockBreadth } from "../api";
+import { nyTime, pct, tone } from "../format";
 
 const CURVE_STYLE = [
   { stroke: "var(--series-1)", dash: undefined, width: 2.5 },  // today
@@ -97,7 +97,39 @@ export function Markets() {
         })}
       </section>
 
-      <section className="stack">
+      <section className="grid-2">
+        {m.fear_greed ? <FearGreed fg={m.fear_greed} /> : <div className="card"><h2>Fear &amp; greed</h2><p className="muted">No data.</p></div>}
+        <div className="card">
+          <h2>Breadth <span className="muted small">· is the rally broad or narrow?</span></h2>
+          {b.stocks ? <StockCounts s={b.stocks} /> : (
+            <p className="muted small">Counts over the 500 largest US stocks appear once the screener's universe is built (Screener page).</p>
+          )}
+          <h3 className="sub">Proxies</h3>
+          <div className="table-wrap">
+          <table>
+            <thead><tr><th>Gauge</th><th>1M</th><th>3M</th><th>YTD</th><th>1Y</th></tr></thead>
+            <tbody>
+              {[["Equal- vs cap-weighted (RSP − SPY)", b.equal_vs_cap], ["Small vs large caps (IWM − SPY)", b.small_vs_large]].map(([label, r]) => (
+                <tr key={label as string} style={{ cursor: "default" }}>
+                  <td style={{ textAlign: "left" }}>{label as string}</td>
+                  {(["1M", "3M", "YTD", "1Y"] as const).map((p) => {
+                    const v = (r as Record<string, number | null>)[p];
+                    return <td key={p} className={tone(v)}>{v == null ? "–" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)} pp`}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+          <p className="small" style={{ margin: "10px 0 0" }}>
+            Sectors above their 50-day average: <strong>{b.sectors_above_50d}/{b.sectors}</strong> · above their 200-day: <strong>{b.sectors_above_200d}/{b.sectors}</strong>
+          </p>
+          <p className="small muted" style={{ margin: "6px 0 0" }}>
+            Negative spreads mean the average stock trails the index: gains rest on a few large companies.
+          </p>
+        </div>
+      </section>
+
         <div className="card">
           <h2>Sectors <span className="muted small">· SPDR sector ETFs, price return</span></h2>
           <div className="table-wrap">
@@ -124,31 +156,6 @@ export function Markets() {
           <p className="small muted" style={{ margin: "6px 0 0" }}>Shading is relative to each column's biggest move. ▲ above / ▼ below the 50- and 200-day averages.</p>
         </div>
 
-        <div className="card">
-          <h2>Breadth <span className="muted small">· is the rally broad or narrow?</span></h2>
-          <table>
-            <thead><tr><th>Gauge</th><th>1M</th><th>3M</th><th>YTD</th><th>1Y</th></tr></thead>
-            <tbody>
-              {[["Equal- vs cap-weighted S&P 500 (RSP − SPY)", b.equal_vs_cap], ["Small vs large caps (IWM − SPY)", b.small_vs_large]].map(([label, r]) => (
-                <tr key={label as string} style={{ cursor: "default" }}>
-                  <td style={{ textAlign: "left" }}>{label as string}</td>
-                  {(["1M", "3M", "YTD", "1Y"] as const).map((p) => {
-                    const v = (r as Record<string, number | null>)[p];
-                    return <td key={p} className={tone(v)}>{v == null ? "–" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)} pp`}</td>;
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="tiles" style={{ marginTop: 12 }}>
-            <div className="tile"><div className="label">Sectors above 50-day</div><div className="value">{b.sectors_above_50d}/{b.sectors}</div></div>
-            <div className="tile"><div className="label">Sectors above 200-day</div><div className="value">{b.sectors_above_200d}/{b.sectors}</div></div>
-          </div>
-          <p className="small muted" style={{ margin: "8px 0 0" }}>
-            Negative spreads mean the average stock trails the index: gains rest on a few large companies. These are proxies, not a count of all 500 members.
-          </p>
-        </div>
-      </section>
 
       {m.yield_curve && <YieldCurve yc={m.yield_curve} />}
 
@@ -191,6 +198,109 @@ export function Markets() {
         </section>
       )}
     </div>
+  );
+}
+
+// Fear & greed bands (CNN's): the arc's colors run from the down color through neutral to the up color.
+const FG_BANDS: [number, number, string][] = [
+  [0, 25, "var(--down)"], [25, 45, "color-mix(in srgb, var(--down) 50%, var(--surface))"], [45, 55, "var(--muted)"],
+  [55, 75, "color-mix(in srgb, var(--up) 50%, var(--surface))"], [75, 100, "var(--up)"],
+];
+const fgColor = (v: number) => (FG_BANDS.find(([lo, hi]) => v >= lo && v < hi) ?? FG_BANDS[4])[2];
+// Text needs full-strength colors to stay readable
+const fgText = (v: number) => (v < 45 ? "var(--down)" : v >= 55 ? "var(--up)" : "var(--text-2)");
+
+function FearGreed({ fg }: { fg: NonNullable<MarketContext["fear_greed"]> }) {
+  const cx = 130, cy = 124, r = 100;
+  const at = (v: number, rad = r) => {
+    const a = Math.PI * (1 - v / 100);
+    return [cx + rad * Math.cos(a), cy - rad * Math.sin(a)];
+  };
+  const arc = (lo: number, hi: number) => {
+    const [x1, y1] = at(lo + 0.6), [x2, y2] = at(hi - 0.6);
+    return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
+  };
+  const [nx, ny] = at(fg.score, r - 22);
+  return (
+    <div className="card">
+      <h2>Fear &amp; greed <span className="muted small">· 0 extreme fear, 100 extreme greed</span></h2>
+      <svg viewBox="0 0 260 172" className="fg-dial" role="img" aria-label={`Fear and greed ${fg.score.toFixed(0)}: ${fg.rating}`}>
+        {FG_BANDS.map(([lo, hi, c]) => <path key={lo} d={arc(lo, hi)} stroke={c} strokeWidth={18} fill="none" />)}
+        {[0, 25, 50, 75, 100].map((v) => {
+          const [x, y] = at(v, r + 17);
+          return <text key={v} x={x} y={y + 4} textAnchor="middle" className="axis">{v}</text>;
+        })}
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="var(--text)" strokeWidth={3} strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r={6} fill="var(--text)" />
+        <text x={cx} y={cy + 44} textAnchor="middle" className="fg-score">{fg.score.toFixed(0)}</text>
+      </svg>
+      <div className="fg-rating" style={{ color: fgText(fg.score) }}>{fg.rating}</div>
+      <div className="fg-parts">
+        {fg.components.map((c) => (
+          <div key={c.key} className="fg-part">
+            <div className="fg-part-head"><span>{c.label}</span><span className="num">{c.score.toFixed(0)} · {c.rating}</span></div>
+            <div className="range-track" aria-hidden>
+              <div className="range-dot" style={{ left: `${c.score}%`, background: fgColor(c.score) }} />
+            </div>
+            <div className="small muted">{c.detail}</div>
+          </div>
+        ))}
+      </div>
+      <p className="small muted" style={{ margin: "8px 0 0" }}>
+        The average of {fg.components.length} readings, in the spirit of CNN's index. History-based ones are ranked against the last
+        year (50 = a typical day); price strength and breadth come from today's counts. A contrarian gauge: extremes tend to fade.
+      </p>
+    </div>
+  );
+}
+
+/** One split bar: the share above (left, up color) vs below (right, down color), with the numbers in words. */
+function Split({ label, left, right, mid = 0, leftLabel, rightLabel }: {
+  label: string; left: number; right: number; mid?: number; leftLabel: string; rightLabel: string;
+}) {
+  const total = left + right + mid || 1;
+  return (
+    <div className="split">
+      <div className="split-head">
+        <span>{label}</span>
+        <span className="num"><span className="up">{leftLabel}</span> · <span className="down">{rightLabel}</span></span>
+      </div>
+      <div className="stacked" role="img" aria-label={`${label}: ${leftLabel}, ${rightLabel}`}>
+        <div style={{ flex: left, background: "var(--up)" }} />
+        {mid > 0 && <div style={{ flex: mid, background: "var(--grid)" }} />}
+        <div style={{ flex: right, background: "var(--down)" }} />
+      </div>
+      <div className="split-foot small muted"><span>{(left / total * 100).toFixed(0)}%</span><span>{(right / total * 100).toFixed(0)}%</span></div>
+    </div>
+  );
+}
+
+function StockCounts({ s }: { s: StockBreadth }) {
+  const names = (list: string[], more: number) => (
+    <>{list.map((t, i) => <Fragment key={t}>{i > 0 && ", "}<Link to={`/t/${t}`}>{t}</Link></Fragment>)}{more > list.length && ` +${more - list.length} more`}</>
+  );
+  return (
+    <>
+      <p className="small muted" style={{ marginTop: 0 }}>{s.count} largest US-listed stocks{s.as_of ? ` · ${nyTime(s.as_of)}` : ""}</p>
+      <Split label="Advancers vs decliners" left={s.advancers} right={s.decliners} mid={s.unchanged}
+             leftLabel={`${s.advancers} up`} rightLabel={`${s.decliners} down${s.unchanged ? ` (${s.unchanged} flat)` : ""}`} />
+      <Split label="vs 50-day average" left={s.above_50d} right={s.below_50d}
+             leftLabel={`${s.above_50d} above`} rightLabel={`${s.below_50d} below`} />
+      <Split label="vs 200-day average" left={s.above_200d} right={s.below_200d}
+             leftLabel={`${s.above_200d} above`} rightLabel={`${s.below_200d} below`} />
+      <div className="tiles" style={{ marginTop: 12 }}>
+        <div className="tile">
+          <div className="label">New 52-week highs</div>
+          <div className="value up">{s.new_highs} <span className="small muted">{pct(s.pct_new_highs, 1).replace("+", "")}</span></div>
+          {s.new_highs > 0 && <div className="delta">{names(s.highs, s.new_highs)}</div>}
+        </div>
+        <div className="tile">
+          <div className="label">New 52-week lows</div>
+          <div className="value down">{s.new_lows} <span className="small muted">{pct(s.pct_new_lows, 1).replace("+", "")}</span></div>
+          {s.new_lows > 0 && <div className="delta">{names(s.lows, s.new_lows)}</div>}
+        </div>
+      </div>
+    </>
   );
 }
 
