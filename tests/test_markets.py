@@ -62,6 +62,65 @@ def test_fomc_parsing(monkeypatch):
                                                           ("2027-01-01", False)]
 
 
+# Raw rows as Nasdaq serves them (checked Oct 2026): `?date=D` holds the day before D, clock at fixed UTC-4,
+# except some dates that answer with their own day.
+US = "United States"
+NASDAQ_ROWS = {
+    "2026-10-20": [{"gmt": "11:30", "country": US, "eventName": "3-Month Bill Auction"}],  # yesterday: dropped
+    "2026-10-21": [{"gmt": "08:30", "country": US, "eventName": "Housing Starts", "actual": "1.221M"},
+                   {"gmt": "02:00", "country": "United Kingdom", "eventName": "Claimant Count Change"}],
+    "2026-10-26": [{"gmt": "08:30", "country": US, "eventName": "Chicago Fed National Activity"}],  # Monday's own
+    "2026-10-27": [{"gmt": "10:00", "country": US, "eventName": "CB Consumer Confidence"}],  # still its own day...
+    "2026-10-28": [{"gmt": "10:00", "country": US, "eventName": "CB Consumer Confidence", "actual": "95"}],  # ...repeated
+    "2026-10-29": [{"gmt": "14:00", "country": US, "eventName": "Fed Interest Rate Decision", "actual": "&nbsp;"}],
+    "2026-10-31": [{"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"},
+                   {"gmt": "All Day", "country": US, "eventName": "Some Holiday"}],
+    "2026-11-03": [{"gmt": "11:00", "country": US, "eventName": "ISM Manufacturing PMI"}],
+    "2026-11-09": [{"gmt": "11:00", "country": US, "eventName": "Wholesale Inventories"}],  # Monday answering its own day
+    "2026-11-10": [{"gmt": "11:00", "country": US, "eventName": "Wholesale Inventories"}],  # and the copy
+    "2026-11-07": [{"gmt": "09:30", "country": US, "eventName": "Nonfarm Payrolls"},
+                   {"gmt": "11:00", "country": US, "eventName": "Michigan Consumer Sentiment"}],
+}
+
+
+def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
+    asked = []
+
+    class Resp:
+        def __init__(self, d):
+            self.d = d
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"rows": NASDAQ_ROWS.get(self.d, [])}}
+
+    def get(self, url, params=None, **kw):
+        asked.append(params["date"])
+        return Resp(params["date"])
+
+    p = MacroProvider(client=type("C", (), {"get": get})())
+    monkeypatch.setattr("argus.providers.macro.date", type("D", (date,), {"today": classmethod(lambda cls: date(2026, 10, 20))}))
+    ev = p.economic_events(20)
+    assert min(asked) == "2026-10-20" and max(asked) == "2026-11-11"
+    got = {(e["event"], e["date"]): e["time_et"] for e in ev}
+    assert got == {
+        ("Housing Starts", "2026-10-20"): "08:30",               # before DST ends: same clock, day before
+        ("Chicago Fed National Activity", "2026-10-26"): "08:30",
+        ("CB Consumer Confidence", "2026-10-27"): "10:00",       # once
+        ("Fed Interest Rate Decision", "2026-10-28"): "14:00",   # the FOMC end date, not Thursday
+        ("Michigan Consumer Sentiment", "2026-10-30"): "10:00",
+        ("Some Holiday", "2026-10-30"): "All Day",
+        ("ISM Manufacturing PMI", "2026-11-02"): "10:00",        # after DST ends: an hour earlier than listed
+        ("Nonfarm Payrolls", "2026-11-06"): "08:30",
+        ("Michigan Consumer Sentiment", "2026-11-06"): "10:00",
+        ("Wholesale Inventories", "2026-11-09"): "10:00",         # once, on the Monday
+    }
+    assert all(date.fromisoformat(e["date"]).weekday() < 5 for e in ev)  # releases land on weekdays
+    assert next(e for e in ev if e["event"] == "Housing Starts")["actual"] == "1.221M"
+
+
 def _row(sym, price, prev, hi, lo, a50, a200, hi52, lo52):
     return {"symbol": sym, "regularMarketPrice": price, "regularMarketPreviousClose": prev, "regularMarketDayHigh": hi,
             "regularMarketDayLow": lo, "fiftyDayAverage": a50, "twoHundredDayAverage": a200,

@@ -13,7 +13,8 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -26,6 +27,14 @@ FED_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 NASDAQ_URL = "https://api.nasdaq.com/api/calendar/economicevents"
 # By first three letters: the Fed writes "January" but also "Apr/May", "Oct/Nov" for meetings across a month end.
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+# Nasdaq's calendar is off from what it looks like. The "gmt" column is a clock time at a fixed UTC-4
+# (EDT) all year, so in winter it runs an hour ahead of New York (payrolls at "09:30"). And `?date=D`
+# usually returns the releases of the day before D, but some dates answer with D's own (cached per date,
+# it seems): a Monday query with Monday's releases, or two queries in a row with the same rows.
+# Checked against the raw feed in Oct 2026 (B-006); `_nasdaq_days` sorts out which day each answer is.
+NASDAQ_LAG = timedelta(days=1)
+NASDAQ_TZ = timezone(timedelta(hours=-4))
+NY = ZoneInfo("America/New_York")
 TENORS = ["1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
 
 
@@ -126,22 +135,59 @@ class MacroProvider:
         return self._memo("fomc", 24 * 3600, fetch)
 
     # -- US economic releases ----------------------------------------------------------------
+    @staticmethod
+    def nasdaq_slot(day: date, gmt: str | None) -> tuple[date, str | None]:
+        """(New York date, "HH:MM" Eastern) for a row of Nasdaq's calendar for `day`. Non-clock values
+        ("All Day", "Tentative") keep the day and the text as is."""
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", gmt or "")
+        if not m:
+            return day, gmt
+        t = datetime(day.year, day.month, day.day, int(m[1]), int(m[2]), tzinfo=NASDAQ_TZ).astimezone(NY)
+        return t.date(), t.strftime("%H:%M")
+
+    @staticmethod
+    def _nasdaq_days(queries: list[date], per_day: list[list[dict]]) -> list[tuple[date, list[dict]]]:
+        """(release day, rows) for the answers to consecutive daily queries.
+        A query answers with the day before (the usual case) or its own day. Its own day when: the next
+        query repeats its rows; it's a Monday with releases (the day before is Sunday); or the query
+        before answered with its own day and this one doesn't repeat it (a query never skips a day)."""
+        sig = lambda rows: [(x["gmt"], x["eventName"]) for x in rows]  # noqa: E731  actuals fill in between fetches
+        out, own_prev = [], False
+        for i, (q, rows) in enumerate(zip(queries, per_day)):
+            if i and rows and sig(rows) == sig(per_day[i - 1]):
+                own_prev = False  # the copy of the previous answer, already placed
+                continue
+            repeated = i + 1 < len(per_day) and sig(rows) == sig(per_day[i + 1])
+            own = (bool(rows) and (repeated or q.weekday() == 0)) or (own_prev and bool(per_day[i - 1]))
+            out.append((q if own else q - NASDAQ_LAG, rows))
+            own_prev = own
+        return out
+
     def economic_events(self, days: int = 21) -> list[dict]:
         """US releases from Nasdaq's economic calendar for today and the next `days` days. Times are
         Eastern; values are as published ("1,716K", "3.6%")."""
+        clean = lambda v: (html.unescape(v or "").strip() or None)  # noqa: E731
+
         def day(d: date) -> list[dict]:
             r = self._client.get(NASDAQ_URL, params={"date": d.isoformat()})
             r.raise_for_status()
             rows = ((r.json().get("data") or {}).get("rows")) or []
-            clean = lambda v: (html.unescape(v or "").strip() or None)  # noqa: E731
-            return [{"date": d.isoformat(), "time_et": clean(x.get("gmt")), "event": clean(x.get("eventName")),
-                     "actual": clean(x.get("actual")), "consensus": clean(x.get("consensus")),
-                     "previous": clean(x.get("previous"))}
+            return [{k: clean(x.get(k)) for k in ("gmt", "eventName", "actual", "consensus", "previous")}
                     for x in rows if x.get("country") == "United States" and x.get("eventName")]
 
         def fetch():
-            start = date.today()
+            today = date.today()
+            # From today's query (yesterday's or today's rows) to one past the last day, to compare with.
+            queries = [today + timedelta(days=i) for i in range(days + 3)]
             with ThreadPoolExecutor(max_workers=7) as pool:
-                per_day = list(pool.map(lambda i: day(start + timedelta(days=i)), range(days + 1)))
-            return [e for d in per_day for e in d]
+                per_day = list(pool.map(day, queries))
+            out = []
+            for d, rows in self._nasdaq_days(queries, per_day):
+                if not today <= d <= today + timedelta(days=days):
+                    continue
+                for x in rows:
+                    when, time_et = self.nasdaq_slot(d, x["gmt"])
+                    out.append({"date": when.isoformat(), "time_et": time_et, "event": x["eventName"],
+                                "actual": x["actual"], "consensus": x["consensus"], "previous": x["previous"]})
+            return out
         return self._memo(f"econ:{days}", 6 * 3600, fetch)
