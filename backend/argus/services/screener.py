@@ -59,6 +59,17 @@ def _growth(now, before):
     return (now / before - 1) * 100 if now is not None and before not in (None, 0) and before > 0 else None
 
 
+def _plausible_income(income, revenue):
+    """Net income, or None when it is under 0.1% of revenue in size. SEC frames serve each company's
+    latest-filed fact, and for NetIncomeLoss that is often the proxy statement's pay-versus-performance
+    table, tagged in the filer's presentation units (thousands or millions) as if they were dollars:
+    a figure 1000x or 1e6x too small. The frames API doesn't say which filing a fact came from, so
+    reject on scale; a genuine near-breakeven year loses its (meaningless anyway) P/E and growth."""
+    if income is not None and revenue and abs(income) < abs(revenue) / 1000:
+        return None
+    return income
+
+
 def build_rows(tickers: list[dict], annual: dict[str, dict[int, float]], prior: dict[str, dict[int, float]],
                instant: dict[str, dict[int, float]]) -> list[dict]:
     """One row per company (its first-listed ticker) with any annual figure. Prices come later."""
@@ -74,6 +85,8 @@ def build_rows(tickers: list[dict], annual: dict[str, dict[int, float]], prior: 
             continue
         p = {k: v.get(cik) for k, v in prior.items()}
         i = {k: v.get(cik) for k, v in instant.items()}
+        a["net_income"] = _plausible_income(a.get("net_income"), a.get("revenue"))
+        p["net_income"] = _plausible_income(p.get("net_income"), p.get("revenue") or a.get("revenue"))
         fcf = a["cfo"] - (a.get("capex") or 0) if a.get("cfo") is not None else None
         rev = a.get("revenue")
         # Profit more than twice revenue (mark-to-market gains, a mis-tagged revenue line): margins
