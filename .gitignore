@@ -10,5 +10,10 @@ __pycache__/
 node_modules/
 frontend/dist/
 .DS_Store
-.claude/
+# Claude Code: share the agents and project settings, keep local notes and screenshots private
+.claude/*
+!.claude/agents/
+!.claude/settings.json
 *.tsbuildinfo
+# improvement loop: scratch screenshots (reports and the model-portfolio snapshot are tracked)
+docs/loop/rounds/*/shots/
