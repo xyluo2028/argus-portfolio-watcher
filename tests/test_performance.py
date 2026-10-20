@@ -86,3 +86,23 @@ def test_summary_stats():
     assert s["excess_pct"] == pytest.approx(4.9)
     assert s["volatility_pct"] > 0 and s["cagr_pct"] is None
     assert s["gain"] == pytest.approx(8.9)
+
+
+def test_summary_on_day_one_counts_the_purchase_as_invested():
+    # Bought today at 100 + 1 fee, closed at 99: the slice starts before the buy.
+    pts = compute_series([T(1, "BUY", "X", at(D[0]), 10, 100, fee=1)], D[:1], {"X": {D[0]: 99}})
+    s = summarize(pts, inception=True)
+    assert s["start_value"] == 0 and s["end_value"] == pytest.approx(990)
+    assert s["net_invested"] == pytest.approx(1001)
+    assert s["gain"] == pytest.approx(-11)  # = unrealized P&L
+    assert s["twr_pct"] == pytest.approx((990 / 1001 - 1) * 100)
+
+
+def test_summary_of_a_later_slice_starts_at_its_first_close():
+    closes = {"X": {D[0]: 99, D[1]: 108.9}}
+    pts = compute_series([T(1, "BUY", "X", at(D[0]), 10, 100)], D[:2], closes)
+    s = summarize(pts[1:])
+    assert s["start_value"] == pytest.approx(1089) and s["net_invested"] == 0 and s["gain"] == 0
+    s = summarize(pts)
+    assert s["start_value"] == pytest.approx(990) and s["gain"] == pytest.approx(99)
+    assert s["twr_pct"] == pytest.approx(10)
