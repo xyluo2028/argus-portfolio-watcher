@@ -30,11 +30,21 @@ You run unattended: there's no one to answer questions. Work through these steps
 
 ### 0. Preflight
 
-- If `docs/loop/PAUSE` exists: write nothing, push nothing, end the session with "Paused".
-- Work on `claude-code-recursive-oncloud`: `git checkout claude-code-recursive-oncloud && git pull`.
+The session was cloned from the default branch (`main`), not the loop branch, so switch first and
+check everything after the switch.
+
+- **Switch branches first:** `git fetch origin && git checkout claude-code-recursive-oncloud && git pull`.
   Never push to `main` or any other branch, and never force-push.
-- The SessionStart hook (`scripts/cloud-session.sh`) has started Argus; confirm with
-  `curl -s http://127.0.0.1:8787/api/health`. If it isn't running, start it the way the hook does.
+- **Kill switch:** if `docs/loop/PAUSE` exists on the loop branch now checked out, write nothing,
+  push nothing, and end the session with "Paused".
+- **Restart Argus on this branch's code and portfolios.** Anything already running was started from
+  `main`: `pkill -f "argus [s]erve"; rm -rf data; bash scripts/cloud-session.sh`. The script prints
+  whether Argus is up; confirm with `curl -s http://127.0.0.1:8787/api/health`.
+- **Agents and tools:** the agent files and `.mcp.json` load when a session starts, from `main`. If
+  the `investor-*` and `developer` agent types aren't available, run general-purpose agents and tell
+  each to read its file in `.claude/agents/` first and follow it as its instructions. If the
+  `mcp__argus__*` tools aren't available, tell the investors to use the CLI (`uv run argus ... --json`)
+  and the API instead: they cover the same ground.
 - Round number `NNN`: one more than the highest folder in `docs/loop/rounds/` (first round: `001`).
   Create `docs/loop/rounds/NNN/`.
 - **Check the data sources** and record the results for the summary:
@@ -68,6 +78,10 @@ pick, write acceptance criteria into the backlog item.
 
 ### 3. Development
 
+**Kill switch, second check:** `git fetch origin` and look for `docs/loop/PAUSE` on
+`origin/claude-code-recursive-oncloud` (`git cat-file -e origin/claude-code-recursive-oncloud:docs/loop/PAUSE`).
+If it's there, stop: no development, no commit, no push.
+
 For each picked item, **one at a time** (they share the working tree), run the `developer` agent
 with the item's ID, its evidence and its acceptance criteria. After each one returns:
 
@@ -88,8 +102,10 @@ with the item's ID, its evidence and its acceptance criteria. After each one ret
      problem with this loop)
 3. Run the full checks one last time: `uv run pytest -q` and `cd frontend && npm run build`.
 4. Commit the reports, backlog, snapshot and summary: `Loop round NNN: <shipped item titles>`.
-5. `git push origin claude-code-recursive-oncloud`. If the push is rejected because the branch moved,
-   `git pull --rebase` and push again; never force.
+5. `git fetch origin`; if `docs/loop/PAUSE` now exists on `origin/claude-code-recursive-oncloud`,
+   don't push and end with "Paused before push" (the round's commits stay in this session only).
+   Otherwise `git push origin claude-code-recursive-oncloud`. If the push is rejected because the
+   branch moved, `git pull --rebase` and push again; never force.
 
 ## Hard rules
 
@@ -128,4 +144,10 @@ Paste this as the task's prompt at claude.ai/code/routines:
    connectors, a weekday schedule during market hours a few minutes past the hour (e.g. 10:37 ET),
    and the prompt above. **Run now** once and read the transcript before enabling the schedule.
 3. **Protect `main`** on GitHub (a ruleset requiring pull requests) so no run can push to it.
-4. To pause the loop: switch the task off, or commit an empty `docs/loop/PAUSE`.
+4. **Kill switches**, from gentlest to hardest:
+   - commit an empty `docs/loop/PAUSE` to `claude-code-recursive-oncloud`: the next round ends at
+     preflight, and a running round stops before development and before its push;
+   - switch the scheduled task off at claude.ai/code/routines: no new rounds start;
+   - stop or archive a running round's session at claude.ai/code: it ends now;
+   - a GitHub ruleset that blocks pushes to the loop branch, or removing the Claude GitHub App
+     from the repository: nothing more lands, whatever a session does.
