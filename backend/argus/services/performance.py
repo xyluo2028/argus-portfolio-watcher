@@ -131,15 +131,22 @@ def compute_series(txns: Iterable[TxnLike], sessions: list[date], closes: dict[s
     return points
 
 
-def summarize(points: list[DayPoint], risk_free_annual: float = 0.0) -> dict:
-    """Stats over a (possibly rebased) slice of the series."""
+def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: bool = False) -> dict:
+    """Stats over a (possibly rebased) slice of the series.
+
+    A slice normally starts at its first day's close. With `inception` (the slice begins on
+    the first flow) it starts before that day's flows instead: value 0, index 1.0, so day
+    one's purchases count as invested and its close-vs-cost move counts as gain.
+    """
     if not points:
         return {}
     start, end = points[0], points[-1]
-    # Returns within the slice exclude the first day's own return (the slice starts at its close).
-    rets = [p.ret for p in points[1:] if p.ret is not None]
-    twr = end.index / start.index - 1
-    peak, mdd = start.index, 0.0
+    within = points if inception else points[1:]
+    start_value = 0.0 if inception else start.value
+    start_index = 1.0 if inception else start.index
+    rets = [p.ret for p in within if p.ret is not None]
+    twr = end.index / start_index - 1
+    peak, mdd = start_index, 0.0
     for p in points:
         peak = max(peak, p.index)
         mdd = min(mdd, p.index / peak - 1)
@@ -166,9 +173,9 @@ def summarize(points: list[DayPoint], risk_free_annual: float = 0.0) -> dict:
         "max_drawdown_pct": mdd * 100,
         "volatility_pct": vol * 100 if vol is not None else None,
         "sharpe": sharpe,
-        "net_invested": (net := sum(p.flow_in - p.flow_out for p in points[1:])),
+        "net_invested": (net := sum(p.flow_in - p.flow_out for p in within)),
         # Dollar profit over the slice: what the positions gained beyond money added.
-        "gain": end.value - start.value - net,
-        "start_value": start.value,
+        "gain": end.value - start_value - net,
+        "start_value": start_value,
         "end_value": end.value,
     }

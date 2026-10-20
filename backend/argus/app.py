@@ -1298,18 +1298,21 @@ class Argus:
         points = performance_mod.compute_series(txns, sessions, closes, bench)
         cutoff = {"1mo": today - timedelta(days=31), "3mo": today - timedelta(days=92),
                   "ytd": date(today.year, 1, 1) - timedelta(days=1), "1y": today - timedelta(days=366)}.get(range_)
+        base = 0
         if cutoff:
             # Base the slice on the last close at or before the cutoff.
             base = max((i for i, pt in enumerate(points) if pt.d <= cutoff), default=0)
             points = points[base:]
-        base_idx = points[0].index if points else 1.0
+        # A slice from the first flow starts before that day's buys (value 0, index 1.0).
+        inception = base == 0
+        base_idx = 1.0 if inception else points[0].index if points else 1.0
         base_bench = points[0].bench_index if points else None
         return {
             "portfolio": p.name,
             "range": range_,
             "benchmark": p.benchmark,
             "provisional_today": bool(points) and points[-1].d == today and status["session"] != "closed",
-            "summary": performance_mod.summarize(points),
+            "summary": performance_mod.summarize(points, inception=inception),
             "series": [{
                 "d": pt.d.isoformat(), "value": pt.value, "flow_in": pt.flow_in, "flow_out": pt.flow_out,
                 "twr_pct": (pt.index / base_idx - 1) * 100,
