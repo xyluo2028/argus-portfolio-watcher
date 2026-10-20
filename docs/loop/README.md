@@ -50,7 +50,10 @@ check everything after the switch.
 - **Check the data sources** and record the results for the summary:
   `uv run argus quotes SPY MSFT --json` (Finnhub or Yahoo), `uv run argus history SPY --period 1mo --json`
   (Yahoo history), `curl -s http://127.0.0.1:8787/api/market-context` (look at `errors`),
-  `uv run argus financials MSFT --json` (SEC). If prices and history both fail, the round can't do
+  `uv run argus financials MSFT --json` (SEC), and the Finnhub key itself:
+  `curl -s "https://finnhub.io/api/v1/quote?symbol=AAPL" -H "X-Finnhub-Token: $FINNHUB_API_KEY"`
+  should return a quote (`{"c":...}`); a 401 means the network secret isn't reaching Finnhub, so
+  say so in the summary for a human (quotes fall back to Yahoo). If prices and history both fail, the round can't do
   useful work: write `summary.md` saying which sources failed and how, commit it, push, and stop.
 
 ### 1. Investor reviews
