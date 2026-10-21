@@ -141,6 +141,35 @@ def test_sec_prefers_restated_value():
     json.dumps(build_financials(facts))  # serializable
 
 
+def test_sec_revenue_including_assessed_tax_only_fills_gaps():
+    incl = "RevenueFromContractWithCustomerIncludingAssessedTax"
+    # Rambus and BioCryst tag revenue only this way:
+    only = {"facts": {"us-gaap": {incl: {"units": {"USD": [
+        _fact("2025-01-01", "2025-03-31", 100), _fact("2025-01-01", "2025-06-30", 210),
+        _fact("2025-01-01", "2025-12-31", 460, form="10-K"),
+    ]}}, "GrossProfit": {"units": {"USD": [_fact("2025-01-01", "2025-03-31", 60)]}}}}}
+    q = {p["period_end"]: p for p in build_financials(only)["periods"]}
+    assert (q["2025-03-31"]["revenue"], q["2025-06-30"]["revenue"]) == (100, 110)
+    assert q["2025-03-31"]["gross_margin_pct"] == 60
+    assert build_financials(only, "annual")["periods"][0]["revenue"] == 460
+    # It's gross of sales taxes, so a net figure wins wherever the company tags one:
+    both = {"facts": {"us-gaap": {
+        incl: {"units": {"USD": [_fact("2025-01-01", "2025-03-31", 101), _fact("2025-04-01", "2025-06-30", 112)]}},
+        "Revenues": {"units": {"USD": [_fact("2025-04-01", "2025-06-30", 110)]}},
+    }}}
+    q = {p["period_end"]: p["revenue"] for p in build_financials(both)["periods"]}
+    assert q == {"2025-06-30": 110, "2025-03-31": 101}
+
+
+def test_screener_revenue_covers_statement_tags():
+    from argus.providers.sec_edgar import CONCEPTS
+    from argus.services.screener import REVENUE
+
+    revenue = next(c for c in CONCEPTS if c.field == "revenue")
+    us_gaap = [t for t in (*revenue.tags, *revenue.fallback) if t != "Revenue"]  # ifrs-full has no frames
+    assert set(us_gaap) <= set(REVENUE)
+
+
 class _Fund:
     def __init__(self, name, data):
         self.name, self.data = name, data
