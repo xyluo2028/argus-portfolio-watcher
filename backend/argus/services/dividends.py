@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, timedelta
-from statistics import median
+from statistics import mean, median, pstdev
 
 FREQ_NAMES = {12: "monthly", 4: "quarterly", 2: "semiannual", 1: "annual"}
 LOOKBACK_DAYS = 400  # a payer with nothing in this window is treated as not paying
+LUMPY_CV = 0.25  # payments this dispersed (stdev / mean) over a year aren't a rate to extrapolate
 
 
 def add_months(d: date, n: int) -> date:
@@ -28,6 +29,16 @@ def frequency(ex_dates: list[date]) -> int:
     return 12 if gap <= 45 else 4 if gap <= 120 else 2 if gap <= 240 else 1
 
 
+def lumpy(amounts: list[float]) -> bool:
+    """Payments that swing up and down a lot (TIPS ETFs pay out inflation accruals), so one payment
+    times the frequency says little. A one-way move (a raise or a cut) is a new rate, not lumpiness."""
+    if len(amounts) < 4 or not (m := mean(amounts)) > 0:
+        return False
+    steps = [b - a for a, b in zip(amounts, amounts[1:])]
+    one_way = all(x >= 0 for x in steps) or all(x <= 0 for x in steps)
+    return not one_way and pstdev(amounts) / m > LUMPY_CV
+
+
 def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callable[[date], float],
                     today: date) -> dict:
     """`history`: (ex-date ISO, cash per share), any order. `qty_at(d)`: shares held going into day d."""
@@ -40,9 +51,12 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
     freq = frequency([d for d, _ in recent])
     period = timedelta(days=round(365 / freq))
     last_d, last_amt = recent[-1]
-    trailing = sum(a for d, a in recent if d > today - timedelta(days=365))
+    year = [a for d, a in recent if d > today - timedelta(days=365)]
+    trailing = sum(year)
     stale = today - last_d > period * 2 + timedelta(days=30)  # missed two payments: don't extrapolate
-    rate = trailing if stale else last_amt * freq
+    uneven = lumpy(year)
+    rate = trailing if stale or uneven else last_amt * freq
+    per_payment = trailing / freq if uneven else last_amt  # projected at the year's average if lumpy
 
     year_start, year_end = date(today.year, 1, 1), date(today.year, 12, 31)
     received = [{"ex_date": d.isoformat(), "per_share": a, "shares": q, "amount": q * a}
@@ -53,8 +67,8 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
         step, k = 12 // freq, 1
         while (nxt := add_months(last_d, step * k)) <= year_end:
             if nxt > today:
-                projected.append({"ex_date": nxt.isoformat(), "per_share": last_amt, "shares": qty,
-                                  "amount": qty * last_amt, "estimated_date": True})
+                projected.append({"ex_date": nxt.isoformat(), "per_share": per_payment, "shares": qty,
+                                  "amount": qty * per_payment, "estimated_date": True})
             k += 1
     return {"pays": True, "frequency": FREQ_NAMES[freq], "rate": rate, "trailing_12m": trailing,
             "last_ex_date": last_d.isoformat(), "last_amount": last_amt, "irregular": stale,

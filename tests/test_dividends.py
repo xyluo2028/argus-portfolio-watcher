@@ -29,6 +29,28 @@ def test_forward_rate_uses_latest_payment_so_raises_show_up():
     assert h["received"][0]["amount"] == pytest.approx(12.5)
 
 
+def test_lumpy_monthly_payer_uses_trailing_year():
+    # SCHP-style TIPS ETF: monthly payments that swing with inflation accruals
+    amounts = [0.092, 0.093, 0.177, 0.027, 0.096, 0.203, 0.221, 0.216, 0.077, 0.056]
+    dates = ["2025-11-03", "2025-12-01", "2025-12-19", "2026-04-01", "2026-05-01", "2026-06-01",
+             "2026-07-01", "2026-08-03", "2026-09-01", "2026-10-01"]
+    h = analyze_holding(list(zip(dates, amounts)), 100, lambda d: 100, date(2026, 10, 21))
+    assert h["frequency"] == "monthly" and not h["irregular"]
+    assert h["trailing_12m"] == pytest.approx(1.258) and h["rate"] == pytest.approx(1.258)
+    assert [x["per_share"] for x in h["projected"]] == pytest.approx([1.258 / 12] * 2)
+
+
+def test_steady_and_one_way_monthly_payers_keep_last_payment_rate():
+    # BND-style: small wobble around a level
+    bnd = [0.237, 0.244, 0.239, 0.247, 0.245, 0.228, 0.25, 0.242, 0.247, 0.244, 0.252, 0.253, 0.249]
+    h = analyze_holding([(f"{2025 + (m > 12)}-{(m - 1) % 12 + 1:02d}-01", a) for m, a in zip(range(10, 23), bnd)],
+                        10, lambda d: 10, TODAY)
+    assert h["rate"] == pytest.approx(0.249 * 12)
+    # a big raise is a new rate, not lumpiness
+    raised = [(f"2026-{m:02d}-01", 0.10 if m < 6 else 0.20) for m in range(1, 11)]
+    assert analyze_holding(raised, 10, lambda d: 10, TODAY)["rate"] == pytest.approx(2.4)
+
+
 def test_shares_bought_on_the_ex_date_miss_that_payment():
     hist = [(f"2026-{m:02d}-01", 0.27) for m in range(1, 11)]
     h = analyze_holding(hist, 20, lambda d: 0, TODAY)  # bought on/after Oct 1
