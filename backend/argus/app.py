@@ -53,6 +53,20 @@ log = logging.getLogger("argus.app")
 FUND_RETRY_S = 15 * 60
 
 
+def _event_happened(e: dict, now: datetime) -> bool:
+    """Whether a calendar event is behind us: a past date, reported actuals, or today's
+    before-open / after-close earnings once that time has passed (`now` in New York)."""
+    today = now.date().isoformat()
+    if e["date"] != today:
+        return e["date"] < today
+    if e["kind"] != "earnings":
+        return False
+    if e.get("epsActual") is not None or e.get("revenueActual") is not None:
+        return True
+    hm = (now.hour, now.minute)
+    return (e.get("hour") == "bmo" and hm >= (9, 30)) or (e.get("hour") == "amc" and hm >= (16, 0))
+
+
 class Argus:
     def __init__(self, settings: Settings | None = None,
                  market_factory: Callable[[Engine, Settings], MarketService] | None = None):
@@ -806,21 +820,26 @@ class Argus:
         """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
         if symbols:
             syms = [normalize_symbol(x) for x in symbols]
-        elif portfolio and str(portfolio).lower() != ALL:
+        scoped = not symbols and portfolio and str(portfolio).lower() != ALL
+        if symbols:
+            syms = [normalize_symbol(x) for x in symbols]
+        elif scoped:
             syms = sorted(s for s, p in self.portfolios.positions(portfolio).items() if p.is_open)
         else:
             syms = self.tracked_symbols()
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
-        today = datetime.now(NY).date()
-        held = set(self.held_positions())
+        now = datetime.now(NY)
+        today = now.date()
+        held = set(syms) if scoped else set(self.held_positions())  # `held` means held in that portfolio
         rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead),
                                    ["earnings", "ex_dividend", "dividend_pay"])
         for r in rows:
             r["held"] = r["symbol"] in held
+        past = [_event_happened(r, now) for r in rows]
         return {
             "as_of": today.isoformat(),
-            "upcoming": [r for r in rows if r["date"] >= today.isoformat()],
-            "recent": [r for r in rows if r["date"] < today.isoformat()],
+            "upcoming": [r for r, done in zip(rows, past) if not done],
+            "recent": [r for r, done in zip(rows, past) if done],
             "refresh_failed": refreshed["failed"],
         }
 
@@ -874,7 +893,8 @@ class Argus:
             elif price <= lo * 1.03:
                 near.append({"symbol": p["symbol"], "near": "52w_low", "gap_pct": (price / lo - 1) * 100})
 
-        events = self.upcoming_events(days_ahead=7, days_back=3)
+        events = self.upcoming_events(days_ahead=7, days_back=3, portfolio=ref)
+        mine = None if str(ref).lower() == ALL else set(self.open_symbols(ref))
         self.evaluate_alerts(live_quotes)
         last_session = date.fromisoformat(status["last_session"])
         today = datetime.now(NY).date()
@@ -892,8 +912,10 @@ class Argus:
             "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings"],
             "earnings_recent": [e for e in events["recent"] if e["kind"] == "earnings"],
             "dividends_upcoming": [e for e in events["upcoming"] if e["kind"] != "earnings"],
-            "alerts_fired": self.alerts.fired(since=min(last_session, today)),
-            "theses_due": self.notes.list(due_by=today + timedelta(days=7)),
+            "alerts_fired": [a for a in self.alerts.fired(since=min(last_session, today))
+                             if mine is None or a["symbol"] in mine],
+            "theses_due": [n for n in self.notes.list(due_by=today + timedelta(days=7))
+                           if mine is None or n["symbol"] in mine],
             "watchlist_movers": [
                 {"symbol": i["symbol"], "change_pct": i["quote"]["change_pct"], "price": i["quote"]["price"]}
                 for i in self.watchlist(live_quotes=live_quotes, with_fundamentals=False)["items"]
