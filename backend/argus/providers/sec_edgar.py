@@ -39,11 +39,16 @@ class Concept:
     field: str
     tags: tuple[str, ...]  # tried in order across us-gaap then ifrs-full
     additive: bool = True  # EPS is not: quarterly EPS can't be derived by subtraction
+    fallback: tuple[str, ...] = ()  # only fill periods the chosen tag leaves empty
 
+
+# Revenue tags, shared with the screener. Revenue including assessed tax (sales taxes, VAT) is gross of
+# tax, so it only counts when a company tags nothing else for the period, as Rambus and BioCryst do.
+REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet")
+REVENUE_FALLBACK_TAGS = ("RevenueFromContractWithCustomerIncludingAssessedTax",)
 
 CONCEPTS: tuple[Concept, ...] = (
-    Concept("revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
-                        "Revenue")),
+    Concept("revenue", (*REVENUE_TAGS, "Revenue"), fallback=REVENUE_FALLBACK_TAGS),  # "Revenue": ifrs-full
     Concept("gross_profit", ("GrossProfit",)),
     Concept("operating_income", ("OperatingIncomeLoss", "ProfitLossFromOperatingActivities")),
     Concept("net_income", ("NetIncomeLoss", "ProfitLossAttributableToOwnersOfParent", "ProfitLoss")),
@@ -243,10 +248,16 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
     units: dict[str, str] = {}
     for concept in CONCEPTS:
         rows, unit = _pick_series(facts, concept)
-        if not rows:
+        values = series_for(rows, period, concept.additive)
+        if concept.fallback:
+            spare, spare_unit = _pick_series(facts, Concept(concept.field, concept.fallback, concept.additive))
+            if unit is None or spare_unit == unit:
+                unit = unit or spare_unit
+                values = series_for(spare, period, concept.additive) | values
+        if not values:
             continue
         units[concept.field] = unit or ""
-        for end, v in series_for(rows, period, concept.additive).items():
+        for end, v in values.items():
             by_end.setdefault(end, {"period_end": end.isoformat()})[concept.field] = v
     periods = [by_end[e] for e in sorted(by_end, reverse=True)[:limit]]
     for p in periods:

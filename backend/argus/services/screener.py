@@ -16,10 +16,12 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from argus.providers.sec_edgar import REVENUE_FALLBACK_TAGS, REVENUE_TAGS
+
 log = logging.getLogger("argus.screener")
 
-REVENUE = ("Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
-           "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueNet",
+# The statements' revenue tags plus ones that may be a component; safe here since a screen takes the largest.
+REVENUE = (*REVENUE_TAGS, *REVENUE_FALLBACK_TAGS,
            "OperatingLeasesIncomeStatementLeaseRevenue", "RevenuesNetOfInterestExpense")
 # Banks rarely tag total revenue: it is net interest income plus noninterest income.
 BANK_REVENUE = ("InterestIncomeExpenseNet", "NoninterestIncome")
