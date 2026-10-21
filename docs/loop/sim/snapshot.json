@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-20T15:48:19.366805+00:00",
+ "created_at": "2026-10-21T02:37:10.560847+00:00",
  "tables": {
   "portfolio": [
    {
@@ -32,6 +32,15 @@
     "sector": "Healthcare",
     "industry": "Drug Manufacturers - General",
     "updated_at": "2026-10-20T15:23:03.256199+00:00"
+   },
+   {
+    "symbol": "BCRX",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-10-21T02:20:04.698243+00:00"
    },
    {
     "symbol": "BLLN",
@@ -97,6 +106,15 @@
     "updated_at": "2026-10-20T15:23:18.691950+00:00"
    },
    {
+    "symbol": "GRND",
+    "name": "GRINDR INC",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Technology",
+    "industry": "Software - Application",
+    "updated_at": "2026-10-21T02:18:35.967424+00:00"
+   },
+   {
     "symbol": "HD",
     "name": "HOME DEPOT INC",
     "exchange": null,
@@ -113,6 +131,15 @@
     "sector": "Healthcare",
     "industry": "Biotechnology",
     "updated_at": "2026-10-20T15:26:31.248149+00:00"
+   },
+   {
+    "symbol": "INOD",
+    "name": "INNODATA INC",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Technology",
+    "industry": "Information Technology Services",
+    "updated_at": "2026-10-21T02:18:38.512254+00:00"
    },
    {
     "symbol": "JNJ",
@@ -230,6 +257,15 @@
     "sector": "Healthcare",
     "industry": "Medical Devices",
     "updated_at": "2026-10-20T15:26:31.201755+00:00"
+   },
+   {
+    "symbol": "PTCT",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-10-21T02:20:04.703780+00:00"
    },
    {
     "symbol": "QUAL",
@@ -988,6 +1024,38 @@
     "external_id": null,
     "deleted": false,
     "created_at": "2026-10-20T15:26:31.261124+00:00"
+   },
+   {
+    "id": 37,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "GRND",
+    "qty": 487.0,
+    "price": 14.35,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-21T02:18:34.133552+00:00",
+    "note": "r002 starter; post-market quote",
+    "source": "cli",
+    "external_id": "r002-growth-grnd",
+    "deleted": false,
+    "created_at": "2026-10-21T02:18:34.608514+00:00"
+   },
+   {
+    "id": 38,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "INOD",
+    "qty": 107.0,
+    "price": 56.0,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-21T02:18:37.172609+00:00",
+    "note": "r002 starter; post-market quote",
+    "source": "cli",
+    "external_id": "r002-growth-inod",
+    "deleted": false,
+    "created_at": "2026-10-21T02:18:37.570949+00:00"
    }
   ],
   "target": [
@@ -1163,6 +1231,12 @@
   "watchlist_item": [
    {
     "watchlist_id": 1,
+    "symbol": "BCRX",
+    "note": "r002 screen C: CY2025 revenue growth 94% / 115%; check durability (one-offs?)",
+    "added_at": "2026-10-21T02:20:04.696319+00:00"
+   },
+   {
+    "watchlist_id": 1,
     "symbol": "CELH",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.416518+00:00"
@@ -1184,6 +1258,12 @@
     "symbol": "PEGA",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.419308+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "PTCT",
+    "note": "r002 screen C: CY2025 revenue growth 94% / 115%; check durability (one-offs?)",
+    "added_at": "2026-10-21T02:20:04.699118+00:00"
    },
    {
     "watchlist_id": 1,
@@ -1643,6 +1723,28 @@
     "created_by": "ui",
     "created_at": "2026-10-20T15:26:44.254141+00:00",
     "updated_at": "2026-10-20T15:26:44.254144+00:00"
+   },
+   {
+    "id": 37,
+    "symbol": "GRND",
+    "kind": "thesis",
+    "text": "[loop-growth] Starter 487 @ 14.35 (r002). Thesis: revenue +29-38% y/y for 6 straight quarters (SEC: Q2'26 $138.1M +32.5%), operating margin 23-39%, ROIC 23%. EV/EBITDA 18.1 at 8th pct and P/S 4.8 at 21st pct of own history; fwd P/E 18 on EPS est 0.60 -> 0.77. Insiders own ~83% (controlled company). Risks: near-zero book equity after debt-funded buybacks (P/B 2,900), insiders net sellers ($86M sold vs $9.3M bought). Break: growth below 20% or margin under 20% for two quarters.",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-21T02:18:50.651351+00:00",
+    "updated_at": "2026-10-21T02:18:50.651357+00:00"
+   },
+   {
+    "id": 38,
+    "symbol": "INOD",
+    "kind": "thesis",
+    "text": "[loop-growth] Starter 107 @ 56.00 (r002). Thesis: AI training-data services re-accelerating, revenue +54% and +58% y/y in Q1/Q2'26 (SEC), net margin ~16%, no debt, ROE 38%. H1'26 operating cash flow $164M (large customer prepayment in Q2). P/E 41 at its 5y median, fwd P/E 26; consensus target ~$123. Risks: customer concentration, insiders sold $175M in 12 months with no buys, short interest 14%, beta 3. Break: growth under 25% or loss of a top customer.",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-21T02:18:52.003581+00:00",
+    "updated_at": "2026-10-21T02:18:52.003589+00:00"
    }
   ],
   "peer_list": [],
@@ -3362,6 +3464,107 @@
       "USLM",
       "PEGA",
       "NUTX"
+     ]
+    }
+   },
+   {
+    "id": 83,
+    "ts": "2026-10-21T02:18:34.612325+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "37",
+    "before": null,
+    "after": {
+     "id": 37,
+     "type": "BUY",
+     "symbol": "GRND",
+     "qty": 487.0,
+     "price": 14.35,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-21T02:18:34.133552+00:00",
+     "note": "r002 starter; post-market quote",
+     "source": "cli",
+     "external_id": "r002-growth-grnd",
+     "deleted": false
+    }
+   },
+   {
+    "id": 84,
+    "ts": "2026-10-21T02:18:37.574531+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "38",
+    "before": null,
+    "after": {
+     "id": 38,
+     "type": "BUY",
+     "symbol": "INOD",
+     "qty": 107.0,
+     "price": 56.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-21T02:18:37.172609+00:00",
+     "note": "r002 starter; post-market quote",
+     "source": "cli",
+     "external_id": "r002-growth-inod",
+     "deleted": false
+    }
+   },
+   {
+    "id": 85,
+    "ts": "2026-10-21T02:18:50.652810+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "37",
+    "before": null,
+    "after": {
+     "id": 37,
+     "symbol": "GRND",
+     "kind": "thesis",
+     "text": "[loop-growth] Starter 487 @ 14.35 (r002). Thesis: revenue +29-38% y/y for 6 straight quarters (SEC: Q2'26 $138.1M +32.5%), operating margin 23-39%, ROIC 23%. EV/EBITDA 18.1 at 8th pct and P/S 4.8 at 21st pct of own history; fwd P/E 18 on EPS est 0.60 -> 0.77. Insiders own ~83% (controlled company). Risks: near-zero book equity after debt-funded buybacks (P/B 2,900), insiders net sellers ($86M sold vs $9.3M bought). Break: growth below 20% or margin under 20% for two quarters.",
+     "review_on": "2026-11-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-21T02:18:50.651351+00:00",
+     "updated_at": "2026-10-21T02:18:50.651357+00:00"
+    }
+   },
+   {
+    "id": 86,
+    "ts": "2026-10-21T02:18:52.005248+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "38",
+    "before": null,
+    "after": {
+     "id": 38,
+     "symbol": "INOD",
+     "kind": "thesis",
+     "text": "[loop-growth] Starter 107 @ 56.00 (r002). Thesis: AI training-data services re-accelerating, revenue +54% and +58% y/y in Q1/Q2'26 (SEC), net margin ~16%, no debt, ROE 38%. H1'26 operating cash flow $164M (large customer prepayment in Q2). P/E 41 at its 5y median, fwd P/E 26; consensus target ~$123. Risks: customer concentration, insiders sold $175M in 12 months with no buys, short interest 14%, beta 3. Break: growth under 25% or loss of a top customer.",
+     "review_on": "2026-11-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-21T02:18:52.003581+00:00",
+     "updated_at": "2026-10-21T02:18:52.003589+00:00"
+    }
+   },
+   {
+    "id": 87,
+    "ts": "2026-10-21T02:20:04.700906+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "BCRX",
+      "PTCT"
      ]
     }
    }
