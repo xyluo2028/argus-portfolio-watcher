@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -130,6 +131,77 @@ def test_sec_quarters_derive_q4_and_ytd_cash_flow():
     assert "eps_diluted" not in q["2025-12-31"]  # EPS isn't additive: no derived Q4
     annual = build_financials(facts, "annual")["periods"][0]
     assert (annual["revenue"], annual["eps_diluted"]) == (460, 4.2)
+
+
+def _cash_flow_facts(ocf_ytd, capex_ytd):
+    """Calendar-2025 10-Q YTD cash flow plus the 10-K year; Q4 is derived by differencing."""
+    ends = ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")
+    rows = lambda vals: [_fact("2025-01-01", e, v, form="10-K" if e.endswith("12-31") else "10-Q")  # noqa: E731
+                         for e, v in zip(ends, vals)]
+    return {"facts": {"us-gaap": {
+        "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": rows(ocf_ytd)}},
+        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": rows(capex_ytd)}},
+    }}}
+
+
+def test_sec_ttm_free_cash_flow_sums_four_quarters():
+    from argus.providers.sec_edgar import ttm_free_cash_flow
+
+    # Quarterly OCF 30/40/30/50, capex 10/10/5/15: FCF 20+30+25+35.
+    facts = _cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40))
+    assert ttm_free_cash_flow(build_financials(facts, "quarterly", 4)) == (110, "2025-12-31")
+    # Three quarters aren't a year:
+    assert ttm_free_cash_flow(build_financials(_cash_flow_facts((30, 70, 100), (10, 20, 25)))) is None
+    # A gap between quarters isn't a trailing year either:
+    gap = {"units": {"operating_cash_flow": "USD", "capex": "USD"}, "periods": [
+        {"period_end": e, "free_cash_flow": 1.0} for e in ("2025-12-31", "2025-09-30", "2025-06-30", "2024-12-31")]}
+    assert ttm_free_cash_flow(gap) is None
+    # Nor are foreign-currency filings next to US-dollar prices:
+    eur = facts | {"facts": {"us-gaap": {k: {"units": {"EUR": v["units"]["USD"]}}
+                                         for k, v in facts["facts"]["us-gaap"].items()}}}
+    assert ttm_free_cash_flow(build_financials(eur)) is None
+
+
+class _FakeSec:
+    def __init__(self, facts=None, error=None):
+        self.facts, self.error = facts, error
+
+    def get_financials(self, symbol, period="quarterly", limit=8):
+        from argus.providers.base import ProviderError
+
+        if self.error:
+            raise ProviderError(self.error)
+        return build_financials(self.facts, period, limit)
+
+
+def test_fcf_ttm_comes_from_sec_quarters_else_provider(settings):
+    from argus.db import make_engine
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    engine = make_engine(st.db_path)
+    yahoo = _Fund("yahoo", {"fcf_ttm": 16.5, "revenue_ttm": 440.0})
+    sec = _FakeSec(_cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40)))
+    m = MarketService(engine, st, [], None, [yahoo], sec=sec)
+    out = m.get_fundamentals("MSFT", ["fcf_ttm", "revenue_ttm"])
+    assert out["metrics"] == {"fcf_ttm": 110, "revenue_ttm": 440.0}
+    assert out["sources"] == {"fcf_ttm": "sec", "revenue_ttm": "yahoo"}
+
+    # An SEC hiccup keeps yesterday's SEC figure rather than switching to the provider's:
+    sec.error = "sec https://data.sec.gov/...: HTTP 503"
+    out = m.get_fundamentals("MSFT", ["fcf_ttm"], refresh=True)
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (110, "sec")
+
+    # Not in EDGAR (an ETF), or too few quarters: the provider's figure, labeled as such.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = m.get_fundamentals("SPY", ["fcf_ttm"])
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (16.5, "yahoo")
+    sec.error, sec.facts = None, _cash_flow_facts((30, 70), (10, 20))
+    out = m.get_fundamentals("NEWCO", ["fcf_ttm"])
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (16.5, "yahoo")
+    # Without SEC_USER_AGENT there's no SEC path at all:
+    plain = MarketService(engine, settings, [], None, [yahoo], sec=_FakeSec(error="must not be called"))
+    assert plain.get_fundamentals("KO", ["fcf_ttm"])["sources"]["fcf_ttm"] == "yahoo"
 
 
 def test_sec_prefers_restated_value():
