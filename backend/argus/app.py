@@ -51,6 +51,12 @@ from argus.symbols import is_plausible_symbol, normalize_symbol
 
 log = logging.getLogger("argus.app")
 FUND_RETRY_S = 15 * 60
+# Errors a retry won't fix: a provider not set up, a company SEC has no XBRL for.
+_LASTING_ERRORS = ("not configured", "SEC_USER_AGENT", "not found in EDGAR", "no XBRL")
+
+
+def _transient(err: str | None) -> bool:
+    return bool(err) and not any(t in err for t in _LASTING_ERRORS)
 
 
 def _event_happened(e: dict, now: datetime) -> bool:
@@ -1137,6 +1143,7 @@ class Argus:
         return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
 
     RESEARCH_TTL_S = 3600
+    RESEARCH_RETRY_S = 120  # a bundle missing fundamentals, ratio history or statements is rebuilt soon after
 
     def research(self, symbol: str, live_quotes: dict[str, Quote] | None = None, refresh: bool = False) -> dict:
         """Analyst consensus and targets, estimate trend and revisions, insider trades, ownership,
@@ -1144,7 +1151,7 @@ class Argus:
         Each source is optional: a missing one leaves its section empty. Cached for an hour."""
         sym = normalize_symbol(symbol)
         hit = self._research.get(sym)
-        if hit and not refresh and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+        if hit and not refresh and time.monotonic() - hit[0] < (self.RESEARCH_RETRY_S if hit[1].get("partial") else self.RESEARCH_TTL_S):
             bundle = hit[1]
         else:
             bundle = self._build_research(sym)
@@ -1159,12 +1166,24 @@ class Argus:
     def _build_research(self, sym: str) -> dict:
         yahoo, fh = self.market.profile_provider, self.market.directory
         today = datetime.now(NY).date()
+        # The bands' current values and the reported growth rates come from fundamentals: on a first
+        # open they may not be cached yet, so fetch them here rather than read an empty cache. The same
+        # Finnhub call carries the ratio history, so the series waits for it instead of asking again.
+        cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
+        cold = not cached or not cached["fresh"]
+
+        def series():
+            fetched = self.market.fetch_fundamentals(sym) if cold else None
+            try:
+                return fetched, (fh.ratio_series(sym) if fh else None), None
+            except Exception as e:  # noqa: BLE001 - the fundamentals still count
+                return fetched, None, str(e)
         jobs = {
             "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
             "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
             "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
             "insiders": (lambda: fh.insider_transactions(sym, today - timedelta(days=400))) if fh else None,
-            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "series": series,
             "news": lambda: self.events.news(sym, days=7, limit=25),
             "quarterly": lambda: self.market.get_financials(sym, "quarterly", 12)["periods"],
             "annual": lambda: self.market.get_financials(sym, "annual", 6)["periods"],
@@ -1179,11 +1198,17 @@ class Argus:
                 return name, None, str(e)
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
             got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        fetched, ratio_series, series_err = got["series"][0] or (None, None, None)
+        got["series"] = (ratio_series, got["series"][1] or series_err or (None if fh else "not configured"))
+        if fetched is not None:
+            cached = self.market.save_fundamentals(sym, fetched)  # SQLite write on this thread
+            if fetched[1] or not fetched[0]:  # a provider failed: what it supplies may be missing
+                got["fundamentals"] = (None, "; ".join(f"{k}: {v}" for k, v in fetched[1].items()) or "no data")
         errors = {k: e for k, (_, e) in got.items() if e}
         info = got["info"][0] or {}
         fund = info.get("quoteType") in ("ETF", "MUTUALFUND")
-        cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
         m = cached["metrics"] if cached else {}
+        have_fundamentals = bool(m)
         try:
             m = m | self.price_stats([sym]).get(sym, {})
         except ArgusError:
@@ -1229,6 +1254,8 @@ class Argus:
             "news": [{k: v for k, v in n.items() if k != "summary"} for n in news], "news_tone": counts,
             "growth": None if fund else research_mod.growth_profile(got["quarterly"][0] or [], got["annual"][0] or [], m, analyst),
             "errors": errors,
+            # Inputs missing for a reason that may pass (a rate limit, a provider hiccup): cached only briefly.
+            "partial": not fund and (not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
         }
 
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
