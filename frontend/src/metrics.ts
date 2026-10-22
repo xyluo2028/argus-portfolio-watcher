@@ -35,7 +35,8 @@ const DEFS: MetricDef[] = [
   { key: "pb", short: "P/B", label: "P/B", kind: "ratio1" },
   { key: "ev_ebitda", short: "EV/EBITDA", label: "EV/EBITDA", kind: "ratio1" },
   { key: "debt_to_equity", short: "Debt/Eq", label: "Debt / equity", kind: "ratio2" },
-  { key: "fcf_ttm", short: "FCF", label: "Free cash flow (TTM)", kind: "big" },
+  { key: "fcf_ttm", short: "FCF", label: "Free cash flow (TTM)", kind: "big",
+    title: "Operating cash flow − capex over the last four quarters filed with the SEC (source: sec); otherwise the data provider's figure" },
   // growth (YoY = trailing 12 months or latest quarter vs a year earlier; CAGR = compound annual rate)
   { key: "revenue_growth_yoy_pct", short: "Rev YoY", label: "Revenue growth YoY", kind: "signed", title: "Trailing 12 months vs a year earlier" },
   { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier" },

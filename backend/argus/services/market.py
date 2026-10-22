@@ -23,6 +23,7 @@ from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
+from argus.providers.sec_edgar import ttm_free_cash_flow
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -44,7 +45,7 @@ PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_fo
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
-FUNDAMENTALS_VERSION = 6  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 7  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
@@ -325,25 +326,39 @@ class MarketService:
                 failed[sym] = "; ".join(errors.values()) or "no data"
         return failed
 
+    def _sec_metrics(self, symbol: str) -> dict:
+        """Figures Argus computes from SEC filings, which beat the providers' versions: Yahoo's
+        freeCashflow is levered FCF (after interest), a fraction of MSFT's reported OCF - capex."""
+        if self.sec is None or not self.settings.sec_user_agent:
+            return {}
+        try:
+            fcf = ttm_free_cash_flow(self.sec.get_financials(symbol, "quarterly", 4))
+        except ProviderError as e:
+            if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
+                return {}  # ETFs, funds and foreign filers: the providers' figures stand
+            raise
+        return {"fcf_ttm": fcf[0]} if fcf else {}
+
     def _fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
-        """Ask every fundamentals provider at once (network only) and merge: first non-null wins,
-        except price-currency fields, where Yahoo goes first. None if nobody had anything."""
-        def ask(provider):
+        """Ask every fundamentals provider and SEC at once (network only) and merge: SEC-derived
+        figures first, then first non-null wins, except price-currency fields, where Yahoo goes
+        first. None if nobody had anything."""
+        def ask(source):
+            name, get = source
             try:
-                return provider.name, provider.get_metrics(symbol), None
+                return name, get(symbol), None
             except ProviderError as e:
-                return provider.name, None, str(e)
-        if len(self.fundamentals_providers) > 1:
-            with ThreadPoolExecutor(max_workers=len(self.fundamentals_providers)) as pool:
-                answers = list(pool.map(ask, self.fundamentals_providers))
-        else:
-            answers = [ask(p) for p in self.fundamentals_providers]
+                return name, None, str(e)
+        askers = [("sec", self._sec_metrics), *((p.name, p.get_metrics) for p in self.fundamentals_providers)]
+        with ThreadPoolExecutor(max_workers=len(askers)) as pool:
+            answers = list(pool.map(ask, askers))
         by_provider = {name: m for name, m, _ in answers if m is not None}
         errors = {name: e for name, _, e in answers if e}  # provider -> error
         names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
         metrics, sources = {}, {}
         for field in METRIC_FIELDS:
             order = sorted(names, key=lambda n: n != "yahoo") if field in PRICE_CURRENCY_FIELDS else names
+            order = ["sec", *order] if "sec" in by_provider else order
             for n in order:
                 v = by_provider[n].get(field)
                 if v is not None:
@@ -354,11 +369,12 @@ class MarketService:
     def _store_fundamentals(self, symbol: str, metrics: dict, sources: dict, errors: dict[str, str] | None = None,
                             previous: dict | None = None) -> tuple[dict, dict, datetime]:
         """Store a fresh merge. Fields from a provider that failed this time keep their last values
-        (a Finnhub rate-limit hiccup shouldn't blank growth and momentum for a day)."""
+        (a Finnhub rate-limit hiccup shouldn't blank growth and momentum for a day). SEC's figures also
+        beat the fallback a provider supplied this time."""
         if errors and previous:
             metrics, sources = dict(metrics), dict(sources)
             for field, src in previous["sources"].items():
-                if src in errors and field not in metrics and previous["metrics"].get(field) is not None:
+                if src in errors and (field not in metrics or src == "sec") and previous["metrics"].get(field) is not None:
                     metrics[field], sources[field] = previous["metrics"][field], src
         as_of = datetime.now(UTC)
         sources = sources | {"_version": FUNDAMENTALS_VERSION}

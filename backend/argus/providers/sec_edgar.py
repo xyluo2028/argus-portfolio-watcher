@@ -17,6 +17,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 
 import httpx
@@ -269,6 +270,22 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
                 if p.get(f) is not None:
                     p[out] = p[f] / p["revenue"] * 100
     return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods}
+
+
+def ttm_free_cash_flow(financials: dict) -> tuple[float, str] | None:
+    """Operating cash flow - capex over the last four reported quarters, with the latest quarter's end,
+    from build_financials' quarterly output. None unless the four newest quarters all have it, are
+    back to back and in USD (the figure sits beside prices and market cap)."""
+    units = financials.get("units", {})
+    if units.get("operating_cash_flow") != "USD" or units.get("capex") != "USD":
+        return None
+    last4 = financials.get("periods", [])[:4]
+    if len(last4) < 4 or any(p.get("free_cash_flow") is None for p in last4):
+        return None
+    ends = [date.fromisoformat(p["period_end"]) for p in last4]
+    if not all(_is_quarter((a - b).days) for a, b in pairwise(ends)):
+        return None
+    return sum(p["free_cash_flow"] for p in last4), last4[0]["period_end"]
 
 
 def _num_or_none(v: str | None) -> float | None:
