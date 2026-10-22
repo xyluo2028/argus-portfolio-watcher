@@ -105,7 +105,9 @@ export function FinancialsCard({ symbol }: { symbol: string }) {
                       <td>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
                       <td>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
                       <td className={tone(p.net_income)}>{big(p.net_income)}</td>
-                      <td>{p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}</td>
+                      <td title={p.eps_diluted_derived ? "Not filed for the quarter: derived from the full-year EPS" : undefined}>
+                        {p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}
+                      </td>
                       {show && <>
                         <td>{eps(e?.eps_estimate)}</td>
                         <td>{eps(e?.eps_actual)}{e?.eps_basis === "reported" ? "†" : ""}</td>

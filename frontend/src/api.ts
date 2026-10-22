@@ -127,6 +127,8 @@ export interface FinancialPeriod {
   net_margin_pct?: number;
   net_income?: number;
   eps_diluted?: number;
+  /** Set when fiscal-Q4 EPS isn't filed for the quarter and was worked out from the full year. */
+  eps_diluted_derived?: "net_income_per_share" | "annual_less_ytd" | "annual_less_quarters";
   free_cash_flow?: number;
 }
 
