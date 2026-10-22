@@ -326,6 +326,20 @@ class MarketService:
                 failed[sym] = "; ".join(errors.values()) or "no data"
         return failed
 
+    def fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
+        """The network half of a refresh, safe on a worker thread; hand the result to
+        save_fundamentals on the calling thread."""
+        return self._fetch_fundamentals(symbol)
+
+    def save_fundamentals(self, symbol: str, result: tuple[tuple[dict, dict] | None, dict[str, str]]) -> dict | None:
+        """Store what fetch_fundamentals got; returns the cached entry (stale if the fetch got nothing)."""
+        fetched, errors = result
+        cached = self.cached_fundamentals([symbol]).get(symbol)
+        if not fetched:
+            return cached
+        metrics, sources, as_of = self._store_fundamentals(symbol, *fetched, errors, cached)
+        return {"metrics": metrics, "sources": sources, "as_of": as_of, "fresh": True}
+
     def _sec_metrics(self, symbol: str) -> dict:
         """Figures Argus computes from SEC filings, which beat the providers' versions: Yahoo's
         freeCashflow is levered FCF (after interest), a fraction of MSFT's reported OCF - capex."""

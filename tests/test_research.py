@@ -99,3 +99,61 @@ def test_growth_profile_history_and_forward():
     fy = next(f for f in g["forward"] if f["horizon"] == "0y")
     assert (fy["revenue_growth_pct"], fy["eps_growth_pct"], fy["index_eps_growth_pct"]) == pytest.approx((40, 50, 12))
     assert [f["horizon"] for f in g["forward"]] == ["0y"]  # LTG has only the index's figure: skipped
+
+
+class _ColdFinnhub:
+    """Fundamentals provider and ratio history in one, like Finnhub's /stock/metric."""
+    name = "finnhub"
+
+    def __init__(self):
+        self.metric_calls, self.fail = 0, False
+        self.series = {k: [{"period": f"{y}-{m:02d}-28", "v": v + y - 2021 + m / 10}
+                           for y in range(2021, 2026) for m in (3, 6, 9, 12)]
+                       for k, v in (("peTTM", 20.0), ("psTTM", 2.0), ("pb", 3.0), ("evEbitdaTTM", 12.0))}
+        self._fetched = False
+
+    def get_metrics(self, symbol):
+        from argus.providers.base import ProviderError
+        self.metric_calls += 1
+        if self.fail:
+            raise ProviderError("finnhub: 429 rate limited")
+        self._fetched = True
+        return {"pe_ttm": 22.0, "ps_ttm": 2.1204, "pb": 4.0, "ev_ebitda": 14.0,
+                "revenue_growth_q_yoy_pct": 18.31, "revenue_growth_yoy_pct": 25.0}
+
+    def ratio_series(self, symbol):
+        if not self._fetched:
+            self.get_metrics(symbol)
+        return self.series
+
+    def insider_transactions(self, symbol, since):
+        return []
+
+
+def test_research_cold_fundamentals_are_fetched_and_partial_results_not_kept(make_argus):
+    fh = _ColdFinnhub()
+    a = make_argus(fundamentals=[fh])
+    a.market.directory = fh
+    assert a.market.cached_fundamentals(["BCRX"]) == {}  # cold cache
+
+    fh.fail = True  # the first build hits a rate limit: nothing to fill the bands with
+    first = a.research("BCRX")
+    assert first["partial"] and all(b["current"] is None for b in first["valuation"] or [{"current": None}])
+    assert a.research("BCRX")["as_of"] == first["as_of"]  # kept briefly, not rebuilt on every call
+    a._research["BCRX"] = (a._research["BCRX"][0] - a.RESEARCH_RETRY_S - 1, first)  # ...but not as final
+
+    fh.fail = False
+    fh.metric_calls = 0
+    out = a.research("BCRX")
+    bands = {b["key"]: b for b in out["valuation"]}
+    assert bands["psTTM"]["current"] == 2.1204 and bands["psTTM"]["percentile"] is not None
+    assert bands["peTTM"]["current"] == 22.0 and bands["evEbitdaTTM"]["current"] == 14.0
+    assert out["growth"]["reported"]["revenue_q_yoy"] == 18.31
+    assert fh.metric_calls == 1  # the ratio history came with the fundamentals call
+    assert not out["partial"] and "fundamentals" not in out["errors"]
+    assert a.market.cached_fundamentals(["BCRX"])["BCRX"]["metrics"]["ps_ttm"] == 2.1204  # stored
+
+    # A complete result is cached for the hour; a warm build doesn't refetch fundamentals.
+    assert a.research("BCRX")["as_of"] == out["as_of"]
+    a.research("BCRX", refresh=True)
+    assert fh.metric_calls == 1
