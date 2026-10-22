@@ -128,9 +128,49 @@ def test_sec_quarters_derive_q4_and_ytd_cash_flow():
     q = {p["period_end"]: p for p in build_financials(facts, "quarterly")["periods"]}
     assert [q[e]["revenue"] for e in ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")] == [100, 110, 120, 130]
     assert [q[e]["operating_cash_flow"] for e in ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")] == [30, 40, 30, 50]
-    assert "eps_diluted" not in q["2025-12-31"]  # EPS isn't additive: no derived Q4
+    assert "eps_diluted" not in q["2025-12-31"]  # Q2 and Q3 EPS missing: nothing to derive Q4 from
     annual = build_financials(facts, "annual")["periods"][0]
     assert (annual["revenue"], annual["eps_diluted"]) == (460, 4.2)
+
+
+def test_sec_derives_fiscal_q4_eps():
+    """10-Ks report EPS for the full year only; quarterly statements fill fiscal Q4 from it."""
+    ni = lambda *rows: [_fact(s, e, v, form="10-K" if e == "2025-09-30" else "10-Q") for s, e, v in rows]  # noqa: E731
+    eps = [  # fiscal year Oct-Sep, with a reported quarter outside it that must be left alone
+        _fact("2024-10-01", "2024-12-31", 1.0), _fact("2025-01-01", "2025-03-31", 1.1),
+        _fact("2025-04-01", "2025-06-30", 1.2), _fact("2024-10-01", "2025-09-30", 4.6, form="10-K"),
+        _fact("2025-10-01", "2025-12-31", 1.4),
+    ]
+    facts = {"facts": {"us-gaap": {
+        "NetIncomeLoss": {"units": {"USD": ni(("2024-10-01", "2024-12-31", 100), ("2025-01-01", "2025-03-31", 110),
+                                               ("2025-04-01", "2025-06-30", 120), ("2024-10-01", "2025-06-30", 330),
+                                               ("2024-10-01", "2025-09-30", 460),
+                                               ("2025-10-01", "2025-12-31", 140))}},
+        "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
+    }}}
+    q = {p["period_end"]: p for p in build_financials(facts, "quarterly")["periods"]}
+    assert (q["2025-09-30"]["eps_diluted"], q["2025-09-30"]["eps_diluted_derived"]) == (1.3, "annual_less_quarters")
+    assert [q[e]["eps_diluted"] for e in ("2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31")] == [1.0, 1.1, 1.2, 1.4]
+    assert not any("eps_diluted_derived" in q[e] for e in ("2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31"))
+    assert build_financials(facts, "annual")["periods"][0]["eps_diluted"] == 4.6
+
+    # The 9-month year-to-date figure shares the 10-K's basis, so it wins over the quarters (here a
+    # pre-IPO Q1 on another share basis that would wreck the subtraction):
+    eps[0] = _fact("2024-10-01", "2024-12-31", 9000.0)
+    ytd = _fact("2024-10-01", "2025-06-30", 3.25)
+    facts["facts"]["us-gaap"]["EarningsPerShareDiluted"]["units"]["USD/shares"] = [*eps, ytd]
+    p = {p["period_end"]: p for p in build_financials(facts)["periods"]}["2025-09-30"]
+    assert (p["eps_diluted"], p["eps_diluted_derived"]) == (1.35, "annual_less_ytd")
+
+    # A tagged 3-month diluted share count beats both: Q4 net income (460 - 330) / 104 shares.
+    facts["facts"]["us-gaap"]["WeightedAverageNumberOfDilutedSharesOutstanding"] = {"units": {"shares": [
+        _fact("2025-07-01", "2025-09-30", 104, form="10-K"), _fact("2024-10-01", "2025-09-30", 100, form="10-K")]}}
+    p = {p["period_end"]: p for p in build_financials(facts)["periods"]}["2025-09-30"]
+    assert (p["eps_diluted"], p["eps_diluted_derived"]) == (1.25, "net_income_per_share")
+
+    # Without Q4 net income there's no quarter row to fill, and nothing is invented:
+    del facts["facts"]["us-gaap"]["NetIncomeLoss"]
+    assert "2025-09-30" not in {p["period_end"] for p in build_financials(facts)["periods"]}
 
 
 def _cash_flow_facts(ocf_ytd, capex_ytd):

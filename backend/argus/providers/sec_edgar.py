@@ -39,7 +39,7 @@ NPORT_KEEP = 500  # holdings kept per fund (by weight); the rest only count towa
 class Concept:
     field: str
     tags: tuple[str, ...]  # tried in order across us-gaap then ifrs-full
-    additive: bool = True  # EPS is not: quarterly EPS can't be derived by subtraction
+    additive: bool = True  # EPS is not: YTD differencing doesn't apply (see _derive_q4_eps)
     fallback: tuple[str, ...] = ()  # only fill periods the chosen tag leaves empty
 
 
@@ -59,6 +59,9 @@ CONCEPTS: tuple[Concept, ...] = (
     Concept("capex", ("PaymentsToAcquirePropertyPlantAndEquipment",
                       "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")),
 )
+
+# Weighted diluted share count, for a fiscal Q4 the filer tags as a 3-month period.
+DILUTED_SHARES_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding", "AdjustedWeightedAverageShares")
 
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
 # Financial reports. The same fact also turns up in proxy statements (DEF 14A), 8-Ks and registration
@@ -260,6 +263,8 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
         units[concept.field] = unit or ""
         for end, v in values.items():
             by_end.setdefault(end, {"period_end": end.isoformat()})[concept.field] = v
+    if period == "quarterly":
+        _derive_q4_eps(facts, by_end, units)
     periods = [by_end[e] for e in sorted(by_end, reverse=True)[:limit]]
     for p in periods:
         if p.get("operating_cash_flow") is not None and p.get("capex") is not None:
@@ -270,6 +275,44 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
                 if p.get(f) is not None:
                     p[out] = p[f] / p["revenue"] * 100
     return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods}
+
+
+def _derive_q4_eps(facts: dict, by_end: dict[date, dict], units: dict[str, str]) -> None:
+    """Fill diluted EPS for fiscal-Q4 quarters the 10-K reports only as a full year. Q4 net income over
+    a tagged 3-month diluted share count is closest to what the company would report; otherwise the
+    full year less the 9-month year-to-date figure (same filing basis, so a share split or IPO earlier
+    in the year doesn't skew it), else less the three reported quarters. Either is off by a cent or so
+    when the share count moves. `eps_diluted_derived` names the method; reported values stay as filed."""
+    eps_rows, eps_unit = _pick_series(facts, next(c for c in CONCEPTS if c.field == "eps_diluted"))
+    if not eps_rows:
+        return
+    durations = _duration_rows(eps_rows)
+    quarters = sorted((s, e, v) for (s, e), (v, _) in durations.items() if _is_quarter((e - s).days))
+    share_rows, _ = _pick_series(facts, Concept("diluted_shares", DILUTED_SHARES_TAGS, additive=False))
+    q4_shares = {e: v for (s, e), (v, _) in _duration_rows(share_rows).items() if _is_quarter((e - s).days)}
+    per_share_ok = units.get("net_income") is not None and eps_unit == f"{units['net_income']}/shares"
+    for (start, end), (year_eps, form) in durations.items():
+        p = by_end.get(end)
+        if not _is_year((end - start).days) or (form and form not in ANNUAL_FORMS) or p is None \
+                or p.get("eps_diluted") is not None:
+            continue
+        if per_share_ok and p.get("net_income") is not None and q4_shares.get(end):
+            eps, method = p["net_income"] / q4_shares[end], "net_income_per_share"
+        elif ytd := next((v for (s, e), (v, _) in durations.items()
+                          if s == start and e < end and _is_quarter((end - e).days)), None):
+            eps, method = year_eps - ytd, "annual_less_ytd"
+        else:
+            # Q1-Q3 back to back from the fiscal year's start, leaving one quarter before its end.
+            chain, edge = [], start
+            for s, e, v in quarters:
+                if 0 <= (s - edge).days <= 7 and e < end and len(chain) < 3:
+                    chain.append(v)
+                    edge = e
+            if len(chain) < 3 or not _is_quarter((end - edge).days):
+                continue
+            eps, method = year_eps - sum(chain), "annual_less_quarters"
+        p["eps_diluted"], p["eps_diluted_derived"] = round(eps, 2), method
+        units.setdefault("eps_diluted", eps_unit or "")
 
 
 def ttm_free_cash_flow(financials: dict) -> tuple[float, str] | None:

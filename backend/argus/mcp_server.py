@@ -167,7 +167,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_financials(symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         """Reported financials from SEC EDGAR (revenue, gross/operating/net income and margins,
         diluted EPS, operating cash flow, capex, free cash flow). period: quarterly | annual.
-        Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals.
+        Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals;
+        such a quarter's diluted EPS carries `eps_diluted_derived` (the method used).
         ETFs have none. Quarterly results also carry `earnings`: per quarter the report date and
         timing (bmo/amc), EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted"
         from Finnhub or "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-
