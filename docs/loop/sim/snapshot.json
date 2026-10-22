@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-21T02:37:10.560847+00:00",
+ "created_at": "2026-10-22T02:39:55.521939+00:00",
  "tables": {
   "portfolio": [
    {
@@ -41,6 +41,15 @@
     "sector": null,
     "industry": null,
     "updated_at": "2026-10-21T02:20:04.698243+00:00"
+   },
+   {
+    "symbol": "BELFA",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-10-22T02:19:12.932983+00:00"
    },
    {
     "symbol": "BLLN",
@@ -1237,6 +1246,12 @@
    },
    {
     "watchlist_id": 1,
+    "symbol": "BELFA",
+    "note": "Q2 2026 rev +25% y/y, op margin 18%, Altman safe, Piotroski 8; P/E 57 TTM / 22 fwd, next FY growth est only 8.5%. Wait for a better price or Q3 confirmation.",
+    "added_at": "2026-10-22T02:19:12.930322+00:00"
+   },
+   {
+    "watchlist_id": 1,
     "symbol": "CELH",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.416518+00:00"
@@ -1324,6 +1339,16 @@
     "active": true,
     "created_by": "cli",
     "created_at": "2026-10-20T15:25:48.877161+00:00"
+   },
+   {
+    "id": 5,
+    "symbol": "PG",
+    "kind": "day_loss_pct",
+    "threshold": 4.0,
+    "note": "loop-income r003: PG reports 10-22 bmo",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-10-22T02:17:47.050347+00:00"
    }
   ],
   "alert_event": [],
@@ -1745,6 +1770,17 @@
     "created_by": "cli",
     "created_at": "2026-10-21T02:18:52.003581+00:00",
     "updated_at": "2026-10-21T02:18:52.003589+00:00"
+   },
+   {
+    "id": 39,
+    "symbol": "O",
+    "kind": "note",
+    "text": "loop-income r003: yield 5.90% vs 10Y 5.13% (spread ~0.8 pp, thin). Payout 236% of GAAP EPS is not meaningful for a REIT; need AFFO. Hold at 4% target; revisit after Q3 report 11-02.",
+    "review_on": "2026-11-03",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-22T02:17:51.021412+00:00",
+    "updated_at": "2026-10-22T02:17:51.021417+00:00"
    }
   ],
   "peer_list": [],
@@ -3565,6 +3601,54 @@
      "added": [
       "BCRX",
       "PTCT"
+     ]
+    }
+   },
+   {
+    "id": 88,
+    "ts": "2026-10-22T02:17:47.051772+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "5",
+    "before": null,
+    "after": {
+     "symbol": "PG",
+     "kind": "day_loss_pct",
+     "threshold": 4.0
+    }
+   },
+   {
+    "id": 89,
+    "ts": "2026-10-22T02:17:51.022779+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "39",
+    "before": null,
+    "after": {
+     "id": 39,
+     "symbol": "O",
+     "kind": "note",
+     "text": "loop-income r003: yield 5.90% vs 10Y 5.13% (spread ~0.8 pp, thin). Payout 236% of GAAP EPS is not meaningful for a REIT; need AFFO. Hold at 4% target; revisit after Q3 report 11-02.",
+     "review_on": "2026-11-03",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-22T02:17:51.021412+00:00",
+     "updated_at": "2026-10-22T02:17:51.021417+00:00"
+    }
+   },
+   {
+    "id": 90,
+    "ts": "2026-10-22T02:19:12.932369+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "BELFA"
      ]
     }
    }
