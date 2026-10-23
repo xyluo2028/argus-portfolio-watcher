@@ -824,8 +824,6 @@ class Argus:
     def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
                         symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
         """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
-        if symbols:
-            syms = [normalize_symbol(x) for x in symbols]
         scoped = not symbols and portfolio and str(portfolio).lower() != ALL
         if symbols:
             syms = [normalize_symbol(x) for x in symbols]
