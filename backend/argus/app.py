@@ -1216,11 +1216,10 @@ class Argus:
             pass
 
         analyst = got["analyst"][0] or {}
-        analysts = None if fund else {
-            "count": info.get("numberOfAnalystOpinions"), "rating": info.get("recommendationKey"),
-            "rating_mean": info.get("recommendationMean"), "target_mean": info.get("targetMeanPrice"),
-            "target_median": info.get("targetMedianPrice"), "target_high": info.get("targetHighPrice"),
-            "target_low": info.get("targetLowPrice"), "trend": analyst.get("recommendations") or [],
+        trend = analyst.get("recommendations") or []
+        analysts = None if fund else research_mod.analyst_consensus(info, trend) | {
+            "target_mean": info.get("targetMeanPrice"), "target_median": info.get("targetMedianPrice"),
+            "target_high": info.get("targetHighPrice"), "target_low": info.get("targetLowPrice"), "trend": trend,
         }
         estimates = None if fund else {"trend": analyst.get("eps_trend"), "revisions": analyst.get("eps_revisions")}
         short_date = info.get("dateShortInterest")

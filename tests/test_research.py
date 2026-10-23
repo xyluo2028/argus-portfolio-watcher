@@ -157,3 +157,34 @@ def test_research_cold_fundamentals_are_fetched_and_partial_results_not_kept(mak
     assert a.research("BCRX")["as_of"] == out["as_of"]
     a.research("BCRX", refresh=True)
     assert fh.metric_calls == 1
+
+
+def _month(period, sb=0, b=0, h=0, s=0, ss=0):
+    return {"period": period, "strongBuy": sb, "buy": b, "hold": h, "sell": s, "strongSell": ss}
+
+
+def test_analyst_consensus_all_buys_is_never_none():
+    # INOD: Yahoo sends recommendationKey "none" and no mean while 4 analysts rate it a buy.
+    info = {"recommendationKey": "none", "recommendationMean": None, "numberOfAnalystOpinions": 4}
+    c = r.analyst_consensus(info, [_month("0m", sb=1, b=3)])
+    assert c == {"count": 4, "rating": "buy", "rating_mean": 1.75, "rating_source": "counts", "target_count": 4}
+    assert r.analyst_consensus(info, [_month("0m", sb=3, b=1)])["rating"] == "strong_buy"
+
+
+def test_analyst_consensus_comes_from_the_counts_not_yahoo_headline():
+    # KRYS: Yahoo says "strong buy", mean 1.25, 9 analysts; the counts beside it are 1 strong buy, 10 buy, 1 hold.
+    info = {"recommendationKey": "strong_buy", "recommendationMean": 1.25, "numberOfAnalystOpinions": 9}
+    trend = [_month("-1m", sb=5, b=1), _month("0m", sb=1, b=10, h=1)]
+    c = r.analyst_consensus(info, trend)
+    assert (c["count"], c["rating"], c["rating_mean"], c["rating_source"]) == (12, "buy", 2.0, "counts")
+    assert c["target_count"] == 9  # Yahoo's count is the number of price targets
+    assert r.analyst_consensus({}, [_month("0m", h=2, s=3, ss=1)])["rating"] == "sell"
+
+
+def test_analyst_consensus_falls_back_to_yahoo_without_counts():
+    info = {"recommendationKey": "hold", "recommendationMean": 2.8, "numberOfAnalystOpinions": 5}
+    assert r.analyst_consensus(info, []) == {"count": 5, "rating": "hold", "rating_mean": 2.8,
+                                             "rating_source": "yahoo", "target_count": 5}
+    # "none" with a mean: label the mean rather than show "none"
+    assert r.analyst_consensus(info | {"recommendationKey": "none", "recommendationMean": 1.9}, [])["rating"] == "buy"
+    assert r.analyst_consensus({}, [_month("0m")])["rating"] is None  # no coverage at all
