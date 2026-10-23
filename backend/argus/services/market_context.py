@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
+from argus.market_calendar import session_date, sessions_between
 from argus.services.dividends import add_months
 
+NY, LONDON = ZoneInfo("America/New_York"), ZoneInfo("Europe/London")
 GAUGES = [
     # Index levels, not the ETFs that track them (SPY, QQQ, IWM still feed the breadth gauges)
     ("^GSPC", "S&P 500", "level"), ("^NDX", "Nasdaq 100", "level"), ("^RUT", "Russell 2000", "level"),
@@ -36,6 +39,10 @@ BREADTH_UNIVERSE = 500
 # Fields for the breadth snapshot (Yahoo's batch quote)
 BREADTH_FIELDS = ("regularMarketPrice,regularMarketPreviousClose,regularMarketDayHigh,regularMarketDayLow,"
                   "fiftyDayAverage,twoHundredDayAverage,fiftyTwoWeekHigh,fiftyTwoWeekLow,regularMarketTime")
+# The gauges' last price and previous close (Yahoo's batch quote). Daily bars alone go wrong for "1D":
+# Yahoo sometimes returns a null close for a past session, and for futures, FX and crypto the bar for
+# "today" holds the overnight price while the settle it moved from is gone.
+QUOTE_FIELDS = "regularMarketPrice,regularMarketPreviousClose,regularMarketTime,quoteType"
 FG_LABELS = [(25, "Extreme fear"), (45, "Fear"), (55, "Neutral"), (75, "Greed"), (101, "Extreme greed")]
 
 PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
@@ -47,6 +54,52 @@ MAJOR = re.compile(r"\b(CPI|PPI|Nonfarm Payrolls|Unemployment Rate|GDP|PCE|Retai
 SPEAKER = re.compile(r"\bSpeaks\b", re.I)
 NOISE = re.compile(r"\bIndex\b|n\.s\.a|Cleveland", re.I)  # raw index levels and unadjusted variants
 CURVE_TENORS = ["1 Mo", "3 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
+
+
+def _weekday(d: date, step: int) -> date:
+    while d.weekday() >= 5:
+        d += timedelta(days=step)
+    return d
+
+
+def quote_sessions(row: dict) -> tuple[date, date] | None:
+    """The session a quote's price belongs to and the one before it, whose close is the quote's
+    previous close. Stocks, ETFs and indices follow the NYSE calendar; futures trade from 6 pm New
+    York time for the next day's session; FX follows Yahoo's London day; crypto trades every day."""
+    t = row.get("regularMarketTime")
+    if not isinstance(t, (int, float)):
+        return None
+    ts = datetime.fromtimestamp(t, UTC)
+    kind = row.get("quoteType")
+    if kind == "CRYPTOCURRENCY":
+        return ts.date(), ts.date() - timedelta(days=1)
+    if kind in ("FUTURE", "CURRENCY"):
+        if kind == "FUTURE":
+            local = ts.astimezone(NY)
+            d = local.date() + timedelta(days=local.hour >= 18)
+        else:
+            d = ts.astimezone(LONDON).date()
+        d = _weekday(d, 1)
+        return d, _weekday(d - timedelta(days=1), -1)
+    d = session_date(ts)
+    before = sessions_between(d - timedelta(days=10), d - timedelta(days=1))
+    return (d, before[-1]) if before else None
+
+
+def with_quote(closes: dict[date, float], row: dict | None) -> dict[date, float]:
+    """Daily closes ending with the quote: its price on its session and its previous close on the
+    session before, replacing whatever the bars hold there (or fill in when a bar is missing)."""
+    price = _num((row or {}).get("regularMarketPrice"))
+    sessions = quote_sessions(row) if price else None
+    if not sessions or (closes and sessions[0] < max(closes) - timedelta(days=5)):  # a stale quote
+        return closes
+    d, before = sessions
+    out = {k: v for k, v in closes.items() if k <= before}
+    prev = _num(row.get("regularMarketPreviousClose"))
+    if prev:
+        out[before] = prev
+    out[d] = price
+    return out
 
 
 def _base(closes: dict[date, float], target: date) -> float | None:
@@ -211,7 +264,10 @@ def fear_greed(closes: dict[str, dict[date, float]], breadth: dict | None) -> di
 
 
 def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, float]] | None,
-          fomc: list[dict] | None, events: list[dict] | None, today: date, stocks: dict | None = None) -> dict:
+          fomc: list[dict] | None, events: list[dict] | None, today: date, stocks: dict | None = None,
+          quotes: list[dict] | None = None) -> dict:
+    rows = {r.get("symbol"): r for r in quotes or []}
+    closes = {s: with_quote(c, rows.get(s)) for s, c in closes.items()}
     gauges = []
     for sym, label, kind in GAUGES:
         c = closes.get(sym) or {}

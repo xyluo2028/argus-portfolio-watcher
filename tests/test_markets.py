@@ -172,7 +172,9 @@ def test_market_context_counts_the_largest_stocks(make_argus, monkeypatch):
     monkeypatch.setattr(a.screener, "largest", lambda n: ["AAA", "BBB"])
     seen = {}
 
-    def quote_rows(symbols, fields):
+    def quote_rows(symbols, fields, *_a):
+        if fields == mc.QUOTE_FIELDS:  # the gauges' quotes
+            return []
         seen["symbols"], seen["fields"] = symbols, fields
         return [_row("AAA", 10, 9, 10, 9, 8, 7, 10, 5), _row("BBB", 10, 11, 11, 10, 12, 13, 20, 10)]
 
@@ -204,3 +206,68 @@ def test_breadth_universe_is_the_largest_listed_companies(tmp_path):
         {"symbol": "NOCAP", "market_cap": None, "otc": False, "quote_type": "EQUITY"},
     ]}
     assert svc.largest(2) == ["BIG", "MID"]
+
+
+def _ts(iso: str) -> float:
+    from datetime import datetime
+
+    return datetime.fromisoformat(iso).timestamp()
+
+
+def test_one_day_uses_the_previous_session_close_with_ragged_bars(monkeypatch):
+    """Yahoo's bulk download (B-066): ^GSPC's 10-21 close comes back null, bitcoin has no 10-22 bar,
+    and after 6 pm the oil and FX bars for "10-22" hold the overnight price, the settle gone."""
+    import pandas as pd
+
+    days = pd.to_datetime(["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"])
+    nan = float("nan")
+    raw = {"^GSPC": [7690.73, 7712.57, nan, 7663.43, nan],
+           "XLU": [41.36, 41.88, 42.0, 42.87, nan],
+           "CL=F": [103.66, 101.79, 97.15, 100.5, nan],
+           "JPY=X": [157.81, 158.52, 158.27, 158.13, 156.84],
+           "BTC-USD": [81853.5, 82941.0, 84011.97, nan, 81358.8]}
+    df = pd.concat({s: pd.DataFrame({"Close": v}, index=days) for s, v in raw.items()}, axis=1)
+    monkeypatch.setattr("argus.providers.yahoo._yf", lambda: type("Y", (), {"download": staticmethod(lambda *a, **k: df)}))
+    closes = MacroProvider(client=object()).closes(list(raw))
+    assert date(2026, 10, 21) not in closes["^GSPC"] and date(2026, 10, 22) not in closes["BTC-USD"]
+
+    at = _ts("2026-10-23T02:20:00+00:00")  # 10:20 pm New York on 10-22
+    quotes = [
+        {"symbol": "^GSPC", "quoteType": "INDEX", "regularMarketPrice": 7663.43, "regularMarketPreviousClose": 7757.17,
+         "regularMarketTime": _ts("2026-10-22T20:31:48+00:00")},
+        {"symbol": "XLU", "quoteType": "ETF", "regularMarketPrice": 42.87, "regularMarketPreviousClose": 42.0,
+         "regularMarketTime": _ts("2026-10-22T20:00:00+00:00")},
+        {"symbol": "CL=F", "quoteType": "FUTURE", "regularMarketPrice": 100.76, "regularMarketPreviousClose": 99.47,
+         "regularMarketTime": at},
+        {"symbol": "JPY=X", "quoteType": "CURRENCY", "regularMarketPrice": 156.90, "regularMarketPreviousClose": 156.80,
+         "regularMarketTime": at},
+        {"symbol": "BTC-USD", "quoteType": "CRYPTOCURRENCY", "regularMarketPrice": 81338.7,
+         "regularMarketPreviousClose": 81316.2, "regularMarketTime": at},
+    ]
+    out = mc.build(closes, None, None, None, date(2026, 10, 22), quotes=quotes)
+    g = {x["symbol"]: x for x in out["gauges"]}
+    one_day = lambda last, prev: pytest.approx((last / prev - 1) * 100)
+    assert g["^GSPC"]["returns"]["1D"] == one_day(7663.43, 7757.17)  # not 7712.57, two sessions back
+    assert g["^GSPC"]["as_of"] == "2026-10-22" and g["^GSPC"]["change"] == pytest.approx(7663.43 - 7757.17)
+    assert g["CL=F"]["returns"]["1D"] == one_day(100.76, 99.47)  # vs the 10-22 settle, on the 10-23 session
+    assert g["CL=F"]["as_of"] == "2026-10-23" and g["CL=F"]["spark"][-3:] == [97.15, 99.47, 100.76]
+    assert g["JPY=X"]["returns"]["1D"] == one_day(156.90, 156.80)
+    assert g["BTC-USD"]["returns"]["1D"] == one_day(81338.7, 81316.2)
+    assert g["BTC-USD"]["spark"][-3:] == [84011.97, 81316.2, 81338.7]  # 10-21, 10-22 (filled), 10-23
+    assert {s["symbol"]: s["returns"]["1D"] for s in out["sectors"]}["XLU"] == one_day(42.87, 42.0)
+
+    # Without quotes (the batch failed) the bars still give a figure.
+    assert mc.build(closes, None, None, None, date(2026, 10, 22))["gauges"][0]["returns"]["1D"] is not None
+
+
+def test_quote_sessions_over_a_weekend_and_a_holiday():
+    row = lambda kind, iso: {"quoteType": kind, "regularMarketTime": _ts(iso)}
+    # Sunday 7 pm New York: futures and FX are on Monday's session, which follows Friday's
+    assert mc.quote_sessions(row("FUTURE", "2026-10-25T23:00:00+00:00")) == (date(2026, 10, 26), date(2026, 10, 23))
+    assert mc.quote_sessions(row("CURRENCY", "2026-10-25T23:30:00+00:00")) == (date(2026, 10, 26), date(2026, 10, 23))
+    # Saturday: stocks are still on Friday's close, measured from Thursday's
+    assert mc.quote_sessions(row("ETF", "2026-10-24T15:00:00+00:00")) == (date(2026, 10, 23), date(2026, 10, 22))
+    # The Friday after Thanksgiving follows Wednesday
+    assert mc.quote_sessions(row("INDEX", "2026-11-27T18:00:00+00:00")) == (date(2026, 11, 27), date(2026, 11, 25))
+    assert mc.quote_sessions(row("CRYPTOCURRENCY", "2026-10-25T01:00:00+00:00")) == (date(2026, 10, 25), date(2026, 10, 24))
+    assert mc.quote_sessions({"quoteType": "INDEX"}) is None

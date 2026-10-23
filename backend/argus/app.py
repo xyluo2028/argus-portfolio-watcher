@@ -1066,6 +1066,7 @@ class Argus:
                 raise RuntimeError("needs the screener's universe (Screener page → Build)")
             return context_mod.stock_breadth(self.macro.quote_rows(universe, context_mod.BREADTH_FIELDS))
         jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS, context_mod.HISTORY),
+                "quotes": lambda: self.macro.quote_rows(context_mod.ALL_SYMBOLS, context_mod.QUOTE_FIELDS, 60),
                 "curve": self.macro.treasury_curve, "fomc": self.macro.fomc_meetings,
                 "events": lambda: self.macro.economic_events(21), "breadth": stocks}
         def run(item):
@@ -1077,7 +1078,7 @@ class Argus:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             got = {n: (v, e) for n, v, e in pool.map(run, jobs.items())}
         out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], got["events"][0],
-                                datetime.now(NY).date(), got["breadth"][0])
+                                datetime.now(NY).date(), got["breadth"][0], got["quotes"][0])
         return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
 
     RESEARCH_TTL_S = 3600
