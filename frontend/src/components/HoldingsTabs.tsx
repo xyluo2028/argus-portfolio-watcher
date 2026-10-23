@@ -2,7 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type DividendHolding, type EarningsRow } from "../api";
 import { big, money, pct, price, ratio, tone } from "../format";
+import { COMPARE_MAX, compareUrl } from "../compareSessions";
 import { GROUPS, METRICS, formatMetric, metricTone, metricValue } from "../metrics";
+
+/** Rows picked (with checkboxes) to send to Compare. */
+export interface Selection { has: (symbol: string) => boolean; toggle: (symbol: string) => void; full: boolean }
+
+/** The checkbox cell of a pickable row (clicks don't open the row). */
+export function PickCell({ symbol, sel }: { symbol: string; sel: Selection }) {
+  const on = sel.has(symbol);
+  return (
+    <td className="pick" onClick={(e) => e.stopPropagation()}>
+      <input type="checkbox" checked={on} disabled={!on && sel.full} aria-label={`Select ${symbol} to compare`}
+             title={!on && sel.full ? `Compare takes up to ${COMPARE_MAX}` : `Select ${symbol} to compare`}
+             onChange={() => sel.toggle(symbol)} onKeyDown={(e) => e.stopPropagation()} />
+    </td>
+  );
+}
 
 // The first tab is the caller's own view ("Holdings" on a portfolio, "Overview" on the watchlist);
 // callers may add more of their own (e.g. "Heatmap") before the metric tabs.
@@ -119,10 +135,19 @@ function useFundamentals(source: TabSource, enabled: boolean) {
 export function HoldingsTabs({ source, rows: allRows, first, views = [] }: {
   source: TabSource; rows: TabRow[];
   /** The caller's own tab; `content` may take the filtered rows. */
-  first: { label: string; content: React.ReactNode | ((rows: TabRow[]) => React.ReactNode) };
+  first: { label: string; content: React.ReactNode | ((rows: TabRow[], sel: Selection) => React.ReactNode) };
   /** More caller tabs after the first, also given the filtered rows. */
   views?: { label: string; content: (rows: TabRow[]) => React.ReactNode }[];
 }) {
+  // -- picking rows for Compare (kept across tabs and filters) ------------------------------------
+  const navigateTo = useNavigate();
+  const [picked, setPicked] = useState<string[]>([]);
+  useEffect(() => { setPicked([]); }, [source.kind, source.name]);
+  const sel: Selection = {
+    has: (s) => picked.includes(s),
+    toggle: (s) => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : p.length < COMPARE_MAX ? [...p, s] : p)),
+    full: picked.length >= COMPARE_MAX,
+  };
   // -- filters (sector; all / stocks / ETFs): only when the rows carry sectors -------------------
   const filterKey = `argus.filter.${source.kind}`;
   const [filter, setFilter] = useState<Filter>(() => {
@@ -241,16 +266,25 @@ export function HoldingsTabs({ source, rows: allRows, first, views = [] }: {
           )}
         </div>
       )}
-      {tab === "First" ? (typeof first.content === "function" ? first.content(rows) : first.content)
+      {picked.length > 0 && (
+        <div className="select-bar" role="status">
+          <strong>{picked.length} selected</strong>
+          <span className="muted">{picked.join(", ")}{sel.full ? ` (the most Compare takes)` : ""}</span>
+          <span style={{ flex: 1 }} />
+          <button className="btn primary small" onClick={() => navigateTo(compareUrl(picked))}>Compare {picked.length}</button>
+          <button className="btn ghost small" onClick={() => setPicked([])}>Clear</button>
+        </div>
+      )}
+      {tab === "First" ? (typeof first.content === "function" ? first.content(rows, sel) : first.content)
         : view ? view.content(rows) : !isMetricTab(tab) ? null : (
-        <MetricTable key={tab} cols={cols} note={NOTES[tab]}
+        <MetricTable key={tab} cols={cols} note={NOTES[tab]} sel={sel}
                      rows={rows.map((p) => ({ p, m: metrics[p.symbol], div: divs?.[p.symbol], earn: earn?.[p.symbol] }))} />
       )}
     </section>
   );
 }
 
-function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: string }) {
+function MetricTable({ cols, rows, note, sel }: { cols: Col[]; rows: Row[]; note?: string; sel: Selection }) {
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const navigate = useNavigate();
   // No reset effect: the parent keys this table by tab, so a new tab starts unsorted, while live
@@ -272,7 +306,8 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
         <table className="metric-table">
           <thead>
             <tr>
-              <th className="rank" title="Rank in the current sort order">#</th><th className="left">Symbol</th><th>Price</th>
+              <th className="pick" aria-label="Select to compare" /><th className="rank" title="Rank in the current sort order">#</th>
+              <th className="left">Symbol</th><th>Price</th>
               {cols.map((c, i) => (
                 <th key={c.label} title={c.title} onClick={() => setSort((s) => (s?.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: -1 }))}
                     aria-sort={sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
@@ -285,6 +320,7 @@ function MetricTable({ cols, rows, note }: { cols: Col[]; rows: Row[]; note?: st
             {sorted.map((r, n) => (
               <tr key={r.p.symbol} tabIndex={0} onClick={() => navigate(`/t/${r.p.symbol}`)}
                   onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${r.p.symbol}`)}>
+                <PickCell symbol={r.p.symbol} sel={sel} />
                 <td className="rank">{n + 1}</td>
                 <td className="left"><span className="sym">{r.p.symbol}</span><span className="name" title={r.p.name ?? undefined}>{r.p.name ?? ""}</span></td>
                 <td>{price(r.p.price)}</td>

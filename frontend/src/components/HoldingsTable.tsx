@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Position } from "../api";
+import { PickCell, type Selection } from "./HoldingsTabs";
 import { extLabel, money, pct, price, tone } from "../format";
 
 type Key = "symbol" | "qty" | "avg_cost" | "price" | "change_pct" | "day_pnl" | "market_value" | "weight_pct" |
@@ -19,7 +20,7 @@ const COLS: { key: Key; label: string }[] = [
   { key: "unrealized_pct", label: "P&L %" },
 ];
 
-export function HoldingsTable({ positions }: { positions: Position[] }) {
+export function HoldingsTable({ positions, sel }: { positions: Position[]; sel?: Selection }) {
   const [sort, setSort] = useState<{ key: Key; dir: 1 | -1 }>({ key: "market_value", dir: -1 });
   const navigate = useNavigate();
 
@@ -48,6 +49,7 @@ export function HoldingsTable({ positions }: { positions: Position[] }) {
       <table>
         <thead>
           <tr>
+            {sel && <th className="pick" aria-label="Select to compare" />}
             <th className="rank" title="Rank in the current sort order">#</th>
             {COLS.map((c) => (
               <th key={c.key} onClick={() => onSort(c.key)} className={c.key === "symbol" ? "left" : undefined}
@@ -63,6 +65,7 @@ export function HoldingsTable({ positions }: { positions: Position[] }) {
             <tr key={`${p.symbol}-${p.price}`} className={flashes[p.symbol]} tabIndex={0}
                 onClick={() => navigate(`/t/${p.symbol}`)}
                 onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${p.symbol}`)}>
+              {sel && <PickCell symbol={p.symbol} sel={sel} />}
               <td className="rank">{i + 1}</td>
               <td className="left"><span className="sym">{p.symbol}</span><span className="name">{p.name ?? ""}</span></td>
               <td>{p.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>

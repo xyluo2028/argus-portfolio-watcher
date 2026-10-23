@@ -231,11 +231,52 @@ class Argus:
                     errors.setdefault(i["symbol"], e.message)
         return {"watchlist": name, "items": items, "errors": errors}
 
-    def compare(self, symbols: list[str], fields: list[str] | None = None) -> dict:
-        """Side-by-side quote + metrics for 2-10 symbols."""
+    COMPARE_MAX = 10
+    COMPARE_PERIODS = {"1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "3y": 3 * 366, "5y": 5 * 366}
+
+    def _compare_symbols(self, symbols: list[str]) -> list[str]:
         syms = list(dict.fromkeys(normalize_symbol(s) for s in symbols if s.strip()))
-        if not 1 <= len(syms) <= 10:
-            raise ArgusError("INVALID_ARG", "Compare 1 to 10 symbols.")
+        if not 1 <= len(syms) <= self.COMPARE_MAX:
+            raise ArgusError("INVALID_ARG", f"Compare 1 to {self.COMPARE_MAX} symbols.")
+        return syms
+
+    def _names(self, syms: list[str]) -> dict[str, dict]:
+        """Name and type per symbol: from instruments we know, else the Finnhub directory."""
+        with session_scope(self.engine) as s:
+            out = {i.symbol: {"name": i.name, "type": i.type} for i in
+                   s.scalars(select(Instrument).where(Instrument.symbol.in_(syms))) if i.name}
+        missing = [x for x in syms if x not in out]
+        if missing and self.market.directory is not None:
+            try:
+                d = self.market.directory.symbol_directory()
+                out |= {x: {"name": d[x].name, "type": d[x].type} for x in missing if x in d}
+            except ProviderError:
+                pass
+        return out
+
+    def compare(self, symbols: list[str], fields: list[str] | None = None, full: bool = False) -> dict:
+        """Side-by-side quote + metrics for 1-10 symbols. `full` returns every indicator the dashboard
+        shows (valuation, growth, profitability, momentum incl. 1M return and price CAGR, dividends,
+        fund figures) plus names; missing fundamentals are fetched first."""
+        syms = self._compare_symbols(symbols)
+        if full:
+            data = self.symbol_fundamentals(syms, wait=True)
+            quotes, errors = self.market.get_quotes(syms)
+            names = self._names(syms)
+            rows = []
+            for sym in syms:
+                q = quotes.get(sym)
+                row = {"symbol": sym, **names.get(sym, {"name": None, "type": None}),
+                       "price": q.price if q else None, "change_pct": q.change_pct if q else None,
+                       "ext_price": q.ext_price if q else None, "ext_change_pct": q.ext_change_pct if q else None,
+                       "ext_session": q.ext_session if q else None}
+                row |= data["metrics"].get(sym, {})
+                if sym not in data["metrics"]:
+                    errors.setdefault(sym, "no fundamentals")
+                rows.append(row)
+            fields_out = sorted({k for r in rows for k in r} - {"symbol", "name", "type", "price", "change_pct",
+                                                                   "ext_price", "ext_change_pct", "ext_session"})
+            return {"fields": fields_out, "rows": rows, "errors": errors, "pending": data["pending"]}
         wanted = fields or list(self.COMPARE_FIELDS)
         quotes, errors = self.market.get_quotes(syms)
         rows = []
@@ -249,6 +290,27 @@ class Argus:
                 errors.setdefault(sym, e.message)
             rows.append(row)
         return {"fields": wanted, "rows": rows, "errors": errors}
+
+    def compare_history(self, symbols: list[str], period: str = "1y") -> dict:
+        """Daily closes for 1-10 symbols over `period` (1mo 3mo 6mo ytd 1y 3y 5y), for a relative-performance
+        chart: {"period", "start", "series": {symbol: [[date, close], ...]}}. Price only, split-adjusted."""
+        syms = self._compare_symbols(symbols)
+        today = datetime.now(NY).date()
+        if period == "ytd":
+            start = date(today.year - 1, 12, 31) - timedelta(days=6)  # last year's final close is the base
+        elif period in self.COMPARE_PERIODS:
+            start = today - timedelta(days=self.COMPARE_PERIODS[period])
+        else:
+            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.",
+                             hint=f"Use one of {', '.join([*self.COMPARE_PERIODS, 'ytd'])}.")
+        closes = self.market.daily_closes_many(syms, start)
+        if period == "ytd":  # start from the last close of the previous year
+            for sym, by_day in closes.items():
+                prior = [d for d in by_day if d.year < today.year]
+                keep = max(prior) if prior else None
+                closes[sym] = {d: c for d, c in by_day.items() if d.year == today.year or d == keep}
+        return {"period": period, "start": start.isoformat(),
+                "series": {s: [[d.isoformat(), round(c, 4)] for d, c in sorted(closes[s].items())] for s in syms}}
 
     # -- tracked symbols, events, alerts, brief ----------------------------------
     # -- company profile & peers ---------------------------------------------------

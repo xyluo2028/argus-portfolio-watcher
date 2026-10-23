@@ -284,6 +284,13 @@ export interface SimResult {
 }
 
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
+export interface CompareRow {
+  symbol: string; name: string | null; type: string | null; price: number | null; change_pct: number | null;
+  ext_price: number | null; ext_change_pct: number | null; ext_session: ExtSession | null;
+  [metric: string]: number | string | null;
+}
+export interface CompareFull { fields: string[]; rows: CompareRow[]; errors: Record<string, string>; pending: string[] }
+export interface CompareHistory { period: string; start: string; series: Record<string, [string, number][]> }
 
 export interface CompanyProfile {
   symbol: string; as_of: string; name?: string; summary?: string; quote_type?: string;
@@ -463,8 +470,12 @@ export const api = {
   research: (symbol: string) => get<Research>(`/api/research/${enc(symbol)}`),
   returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  peerList: (symbol: string) => get<{ symbol: string; peers: string[]; custom: boolean }>(`/api/peers/${enc(symbol)}?metrics=false`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
+  compareFull: (symbols: string[]) => get<CompareFull>(`/api/compare?full=true&symbols=${symbols.map(enc).join(",")}`),
+  compareHistory: (symbols: string[], period: string) =>
+    get<CompareHistory>(`/api/compare/history?period=${period}&symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7, scope: { portfolio?: string; symbol?: string } = {}) => {
     const qs = new URLSearchParams({ days_ahead: String(daysAhead), days_back: String(daysBack) });

@@ -110,7 +110,7 @@ export function Dashboard({ portfolio, live }: Props) {
       </Suspense>
 
       <HoldingsTabs source={{ kind: "portfolio", name: portfolio }} rows={summary.positions}
-                    first={{ label: "Holdings", content: (rows) => <HoldingsTable positions={rows as Position[]} /> }}
+                    first={{ label: "Holdings", content: (rows, sel) => <HoldingsTable positions={rows as Position[]} sel={sel} /> }}
                     views={[{ label: "Heatmap", content: (rows) => <PortfolioHeatmap positions={rows as Position[]} /> }]} />
 
       <EventsCard portfolio={portfolio} />

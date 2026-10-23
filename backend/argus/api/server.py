@@ -204,8 +204,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.fund_holdings, symbol)
 
     @app.get("/api/peers/{symbol}")
-    async def peers(symbol: str):
-        return await run(argus.peers, symbol)
+    async def peers(symbol: str, metrics: bool = True):
+        return await run(argus.peers, symbol, metrics)
 
     @app.put("/api/peers/{symbol}")
     async def set_peers(symbol: str, body: PeersBody):
@@ -288,9 +288,13 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.watchlists.remove, [symbol], name, "ui")
 
     @app.get("/api/compare")
-    async def compare(symbols: str, fields: str | None = None):
+    async def compare(symbols: str, fields: str | None = None, full: bool = False):
         f = [x.strip() for x in fields.split(",")] if fields else None
-        return await run(argus.compare, symbols.split(","), f)
+        return await run(argus.compare, symbols.split(","), f, full)
+
+    @app.get("/api/compare/history")
+    async def compare_history(symbols: str, period: str = "1y"):
+        return await run(argus.compare_history, symbols.split(","), period)
 
     # -- routines: brief, events, alerts, notes ------------------------------------
     @app.get("/api/brief/{ref}")
