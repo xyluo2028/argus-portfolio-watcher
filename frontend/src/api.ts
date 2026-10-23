@@ -378,7 +378,8 @@ export interface GrowthProfile {
 
 export interface Research {
   symbol: string; as_of: string; fund: boolean; price: number | null; errors: Record<string, string>;
-  analysts: { count: number | null; rating: string | null; rating_mean: number | null; target_mean: number | null;
+  analysts: { count: number | null; rating: string | null; rating_mean: number | null;
+              rating_source: "counts" | "yahoo" | null; target_count: number | null; target_mean: number | null;
               target_median: number | null; target_high: number | null; target_low: number | null; upside_pct?: number;
               trend: { period: string; strongBuy: number; buy: number; hold: number; sell: number; strongSell: number }[] } | null;
   estimates: { trend: Record<string, Record<string, number | null>> | null; revisions: Record<string, Record<string, number | null>> | null } | null;

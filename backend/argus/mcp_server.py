@@ -269,8 +269,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @mcp.tool(annotations=READ)
     @_tool
     def get_research(symbol: str) -> dict:
-        """Research on one company: analyst consensus, price targets and monthly rating counts; EPS
-        estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
+        """Research on one company: analyst consensus (rating, mean and analyst count derived from the
+        current month's rating counts), price targets and monthly rating counts; EPS estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
         institutional and insider ownership, top 13F holders; short interest; 5-year valuation bands
         (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; growth (quarterly
         revenue and net income YoY from SEC filings, revenue/EPS/price CAGR 3Y and 5Y, analysts' forward

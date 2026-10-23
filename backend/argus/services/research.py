@@ -105,6 +105,43 @@ def altman_z(st: dict, market_cap: float | None, sector: str | None = None) -> d
             "caveat": "Not designed for financial companies." if sector in ("Financial Services", "Financials") else None}
 
 
+# -- analyst consensus -------------------------------------------------------------------------
+
+RATING_SCORES = {"strongBuy": 1, "buy": 2, "hold": 3, "sell": 4, "strongSell": 5}
+
+
+def rating_label(mean: float | None) -> str | None:
+    """Label for a mean rating on the 1 (strong buy) to 5 (strong sell) scale, in Yahoo's buckets."""
+    if mean is None:
+        return None
+    for cut, label in ((1.5, "strong_buy"), (2.5, "buy"), (3.5, "hold"), (4.5, "sell")):
+        if mean <= cut:
+            return label
+    return "strong_sell"
+
+
+def analyst_consensus(info: dict, trend: list[dict]) -> dict:
+    """Consensus rating, mean and analyst count. Yahoo's headline (recommendationKey/Mean) and its
+    count (numberOfAnalystOpinions, the price-target count) don't come from the monthly rating counts
+    shown beside them, and disagree with them (KRYS "strong buy" with 1 strong buy of 12; INOD "none"
+    with 4 buys). So when the current month has counts, all three are derived from them; Yahoo's
+    headline is kept only as a fallback, labelled with its source."""
+    now = next((m for m in trend if m.get("period") == "0m"), trend[0] if trend else None)
+    votes = {k: int((now or {}).get(k) or 0) for k in RATING_SCORES}
+    n = sum(votes.values())
+    if n:
+        mean = sum(RATING_SCORES[k] * v for k, v in votes.items()) / n
+        return {"count": n, "rating": rating_label(mean), "rating_mean": round(mean, 2), "rating_source": "counts",
+                "target_count": info.get("numberOfAnalystOpinions")}
+    rating = info.get("recommendationKey")
+    mean = info.get("recommendationMean")
+    if rating in (None, "none", ""):
+        rating = rating_label(mean)
+    count = info.get("numberOfAnalystOpinions")
+    return {"count": count, "rating": rating, "rating_mean": mean, "rating_source": "yahoo" if rating else None,
+            "target_count": count}
+
+
 # -- insiders ----------------------------------------------------------------------------------
 
 CODES = {"P": "Buy", "S": "Sale", "A": "Award", "M": "Option exercise", "F": "Tax withholding", "G": "Gift",
