@@ -33,6 +33,11 @@ FUND_TICKERS_URL = "https://www.sec.gov/files/company_tickers_mf.json"
 FILINGS_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
 NPORT_LATEST_MAX_AGE_S = 24 * 3600
 NPORT_KEEP = 500  # holdings kept per fund (by weight); the rest only count toward totals
+# A 10-Q is due 40-45 days after the quarter and a 10-K 60-90 days after the year, so a latest period
+# older than this means SEC's XBRL data lacks a newer report. That happens: companyfacts can lag a
+# filing by months (KO's and NEE's Q2 2026 10-Qs were filed in July and still missing in October).
+STALE_QUARTER_DAYS = 135
+STALE_YEAR_DAYS = 365 + 100
 
 
 @dataclass(frozen=True)
@@ -245,7 +250,16 @@ def series_for(rows: list[dict], period: str, additive: bool) -> dict[date, floa
     return quarters
 
 
-def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> dict:
+def freshness(latest_period: str | None, period: str = "quarterly", today: date | None = None) -> dict:
+    """How old SEC's latest period is, and `stale` once a newer report should have been filed."""
+    if latest_period is None:
+        return {"latest_period": None, "latest_period_age_days": None, "stale": False}
+    age = ((today or date.today()) - date.fromisoformat(latest_period)).days
+    limit = STALE_QUARTER_DAYS if period == "quarterly" else STALE_YEAR_DAYS
+    return {"latest_period": latest_period, "latest_period_age_days": age, "stale": age > limit}
+
+
+def build_financials(facts: dict, period: str = "quarterly", limit: int = 8, today: date | None = None) -> dict:
     if period not in ("quarterly", "annual"):
         raise ValueError("period must be 'quarterly' or 'annual'")
     by_end: dict[date, dict] = {}
@@ -274,7 +288,8 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
                            ("net_income", "net_margin_pct")):
                 if p.get(f) is not None:
                     p[out] = p[f] / p["revenue"] * 100
-    return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods}
+    return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods,
+            **freshness(periods[0]["period_end"] if periods else None, period, today)}
 
 
 def _derive_q4_eps(facts: dict, by_end: dict[date, dict], units: dict[str, str]) -> None:

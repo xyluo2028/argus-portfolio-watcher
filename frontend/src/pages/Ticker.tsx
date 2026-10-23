@@ -13,7 +13,7 @@ import {
 import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
 import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
-import { FinancialsCard } from "../components/FinancialsCard";
+import { FinancialsCard, SecStale } from "../components/FinancialsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
 import { ResearchCard } from "../components/ResearchCard";
@@ -198,9 +198,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                     {keys.map((k) => {
                       const v = metricValue(k, m, quote?.price), d = METRICS[k];
                       const src = fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
+                      const quarters = fund.sources[k] === "sec" && k === "fcf_ttm" ? fund.sec?.fcf_ttm_quarters : null;
+                      const covers = quarters?.length
+                        ? `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}` : undefined;
                       return (
-                        <div key={k} title={[d.title, src].filter(Boolean).join(" · ") || undefined}>
-                          <dt>{d.label}</dt><dd className={metricTone(k, v)}>{formatMetric(k, v)}</dd>
+                        <div key={k} title={[d.title, covers ?? src].filter(Boolean).join(" · ") || undefined}>
+                          <dt>{d.label}</dt>
+                          <dd className={metricTone(k, v)}>
+                            {formatMetric(k, v)}
+                            {quarters?.length ? <span className="ext-line">SEC, {quarters.length}Q to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span> : null}
+                          </dd>
                         </div>
                       );
                     })}
@@ -210,6 +217,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
             })}
           </div>
         ) : <p className="muted">Loading…</p>}
+        {fund?.sec?.stale && fund.sec.latest_period && Object.values(fund.sources).includes("sec") &&
+          <SecStale latest={fund.sec.latest_period} days={fund.sec.latest_period_age_days} />}
       </section>
 
       <section>

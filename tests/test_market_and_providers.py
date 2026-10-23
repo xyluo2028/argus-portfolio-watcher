@@ -202,6 +202,23 @@ def test_sec_ttm_free_cash_flow_sums_four_quarters():
     assert ttm_free_cash_flow(build_financials(eur)) is None
 
 
+def test_sec_financials_flag_a_stale_latest_quarter():
+    """SEC's companyfacts can lag a 10-Q by months (KO's Q2 2026, filed in July, was still missing in
+    October): the statements say which period they end at and flag it once a newer one is overdue."""
+    from datetime import date
+
+    facts = _cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40))
+    fin = build_financials(facts, "quarterly", today=date(2026, 5, 14))  # 134 days after 2025-12-31
+    assert (fin["latest_period"], fin["latest_period_age_days"], fin["stale"]) == ("2025-12-31", 134, False)
+    fin = build_financials(facts, "quarterly", today=date(2026, 5, 16))
+    assert (fin["latest_period"], fin["latest_period_age_days"], fin["stale"]) == ("2025-12-31", 136, True)
+    # A year is overdue later: the next 10-K comes ~60-90 days after the next year end.
+    assert build_financials(facts, "annual", today=date(2026, 5, 16))["stale"] is False
+    assert build_financials(facts, "annual", today=date(2027, 4, 15))["stale"] is True
+    assert build_financials({"facts": {}})["latest_period"] is None
+    assert build_financials({"facts": {}})["stale"] is False
+
+
 class _FakeSec:
     def __init__(self, facts=None, error=None):
         self.facts, self.error = facts, error
@@ -226,11 +243,18 @@ def test_fcf_ttm_comes_from_sec_quarters_else_provider(settings):
     out = m.get_fundamentals("MSFT", ["fcf_ttm", "revenue_ttm"])
     assert out["metrics"] == {"fcf_ttm": 110, "revenue_ttm": 440.0}
     assert out["sources"] == {"fcf_ttm": "sec", "revenue_ttm": "yahoo"}
+    # The SEC figure says which quarters it covers, and the 2025 quarters are long overdue for a newer one:
+    sec_cov = out["sec"]
+    assert sec_cov["fcf_ttm_quarters"] == ["2025-12-31", "2025-09-30", "2025-06-30", "2025-03-31"]
+    assert (sec_cov["fcf_ttm_through"], sec_cov["latest_period"]) == ("2025-12-31", "2025-12-31")
+    assert sec_cov["stale"] is True
+    assert sec_cov["latest_period_age_days"] > 135
 
     # An SEC hiccup keeps yesterday's SEC figure rather than switching to the provider's:
     sec.error = "sec https://data.sec.gov/...: HTTP 503"
     out = m.get_fundamentals("MSFT", ["fcf_ttm"], refresh=True)
     assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (110, "sec")
+    assert out["sec"]["fcf_ttm_through"] == "2025-12-31"  # with its coverage
 
     # Not in EDGAR (an ETF), or too few quarters: the provider's figure, labeled as such.
     sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
@@ -239,6 +263,7 @@ def test_fcf_ttm_comes_from_sec_quarters_else_provider(settings):
     sec.error, sec.facts = None, _cash_flow_facts((30, 70), (10, 20))
     out = m.get_fundamentals("NEWCO", ["fcf_ttm"])
     assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (16.5, "yahoo")
+    assert (out["sec"]["latest_period"], out["sec"]["fcf_ttm_quarters"]) == ("2025-06-30", None)
     # Without SEC_USER_AGENT there's no SEC path at all:
     plain = MarketService(engine, settings, [], None, [yahoo], sec=_FakeSec(error="must not be called"))
     assert plain.get_fundamentals("KO", ["fcf_ttm"])["sources"]["fcf_ttm"] == "yahoo"
