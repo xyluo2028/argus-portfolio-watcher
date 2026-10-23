@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-22T02:39:55.521939+00:00",
+ "created_at": "2026-10-23T02:40:19.460907+00:00",
  "tables": {
   "portfolio": [
    {
@@ -142,6 +142,15 @@
     "updated_at": "2026-10-20T15:26:31.248149+00:00"
    },
    {
+    "symbol": "IEF",
+    "name": "ISHARES 7-10 YEAR TREASURY B",
+    "exchange": null,
+    "type": "ETP",
+    "sector": "ETF",
+    "industry": "Long Government",
+    "updated_at": "2026-10-23T02:17:01.217424+00:00"
+   },
+   {
     "symbol": "INOD",
     "name": "INNODATA INC",
     "exchange": null,
@@ -185,6 +194,15 @@
     "sector": "Healthcare",
     "industry": "Biotechnology",
     "updated_at": "2026-10-20T15:26:31.210772+00:00"
+   },
+   {
+    "symbol": "LIF",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-10-23T02:18:42.611951+00:00"
    },
    {
     "symbol": "LOAR",
@@ -1065,6 +1083,38 @@
     "external_id": "r002-growth-inod",
     "deleted": false,
     "created_at": "2026-10-21T02:18:37.570949+00:00"
+   },
+   {
+    "id": 39,
+    "portfolio_id": 3,
+    "type": "SELL",
+    "symbol": "SGOV",
+    "qty": 50.0,
+    "price": 100.63,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-23T02:16:55.942317+00:00",
+    "note": "r004: fund IEF duration step",
+    "source": "cli",
+    "external_id": "r004-macro-sgov",
+    "deleted": false,
+    "created_at": "2026-10-23T02:16:56.656439+00:00"
+   },
+   {
+    "id": 40,
+    "portfolio_id": 3,
+    "type": "BUY",
+    "symbol": "IEF",
+    "qty": 55.0,
+    "price": 91.27,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-23T02:16:57.869405+00:00",
+    "note": "r004: 5% duration step on growth scare, 10y ~4.95%",
+    "source": "cli",
+    "external_id": "r004-macro-ief",
+    "deleted": false,
+    "created_at": "2026-10-23T02:16:58.369838+00:00"
    }
   ],
   "target": [
@@ -1185,6 +1235,12 @@
    {
     "portfolio_id": 3,
     "level": "symbol",
+    "key": "IEF",
+    "weight_pct": 5.0
+   },
+   {
+    "portfolio_id": 3,
+    "level": "symbol",
     "key": "QUAL",
     "weight_pct": 12.0
    },
@@ -1192,7 +1248,7 @@
     "portfolio_id": 3,
     "level": "symbol",
     "key": "SGOV",
-    "weight_pct": 18.0
+    "weight_pct": 13.0
    },
    {
     "portfolio_id": 3,
@@ -1261,6 +1317,12 @@
     "symbol": "DUOL",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.415347+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "LIF",
+    "note": "round 004: revenue +38% y/y two quarters running, GM ~78%, but GAAP op margin ~0 and $77M insider selling, no buys. Watch for op-margin inflection at 11-09/10 report.",
+    "added_at": "2026-10-23T02:18:42.609055+00:00"
    },
    {
     "watchlist_id": 1,
@@ -1346,9 +1408,19 @@
     "kind": "day_loss_pct",
     "threshold": 4.0,
     "note": "loop-income r003: PG reports 10-22 bmo",
-    "active": true,
+    "active": false,
     "created_by": "cli",
     "created_at": "2026-10-22T02:17:47.050347+00:00"
+   },
+   {
+    "id": 6,
+    "symbol": "KO",
+    "kind": "day_loss_pct",
+    "threshold": 4.0,
+    "note": "loop-income r004: KO reports 10-27 bmo",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-10-23T02:17:36.070674+00:00"
    }
   ],
   "alert_event": [],
@@ -1781,6 +1853,28 @@
     "created_by": "cli",
     "created_at": "2026-10-22T02:17:51.021412+00:00",
     "updated_at": "2026-10-22T02:17:51.021417+00:00"
+   },
+   {
+    "id": 40,
+    "symbol": "IEF",
+    "kind": "thesis",
+    "text": "r004 macro: 5% of book moved from SGOV to IEF (55 @ 91.27). 10y rallied 19bp to 4.95% on a tech-led risk-off day (NDX -1.8%, VIX 19) while SPY -1.2% / TLT +1.9%: bonds hedging equities again. Housing slowdown + 7.4% mortgages argue the 5%+ long-end peak is in; IEF (7-10y) adds convexity vs a growth scare. Risk: hot PCE 10-29 / hawkish FOMC 10-28 reprices the long end; stop thinking if 10y > 5.25%.",
+    "review_on": "2026-10-30",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-23T02:17:13.204406+00:00",
+    "updated_at": "2026-10-23T02:17:13.204413+00:00"
+   },
+   {
+    "id": 41,
+    "symbol": "TMDX",
+    "kind": "thesis",
+    "text": "Round 004 review: thesis on watch, not broken yet. Revenue growth slowed to +20.7% (Q2), Q2 net income 14.7M vs 34.9M a year ago, adjusted EPS missed; stock -40% YTD, below 50/200-day. Exit if Q3 (11-04/05) revenue growth < 15% or margins compress again.",
+    "review_on": "2026-11-06",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-10-23T02:18:42.626021+00:00",
+    "updated_at": "2026-10-23T02:18:42.626026+00:00"
    }
   ],
   "peer_list": [],
@@ -3650,6 +3744,155 @@
      "added": [
       "BELFA"
      ]
+    }
+   },
+   {
+    "id": 91,
+    "ts": "2026-10-23T02:16:56.659950+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "39",
+    "before": null,
+    "after": {
+     "id": 39,
+     "type": "SELL",
+     "symbol": "SGOV",
+     "qty": 50.0,
+     "price": 100.63,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-23T02:16:55.942317+00:00",
+     "note": "r004: fund IEF duration step",
+     "source": "cli",
+     "external_id": "r004-macro-sgov",
+     "deleted": false
+    }
+   },
+   {
+    "id": 92,
+    "ts": "2026-10-23T02:16:58.373806+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "40",
+    "before": null,
+    "after": {
+     "id": 40,
+     "type": "BUY",
+     "symbol": "IEF",
+     "qty": 55.0,
+     "price": 91.27,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-23T02:16:57.869405+00:00",
+     "note": "r004: 5% duration step on growth scare, 10y ~4.95%",
+     "source": "cli",
+     "external_id": "r004-macro-ief",
+     "deleted": false
+    }
+   },
+   {
+    "id": 93,
+    "ts": "2026-10-23T02:17:11.848202+00:00",
+    "actor": "ui",
+    "action": "set_targets",
+    "entity": "portfolio",
+    "entity_id": "3",
+    "before": null,
+    "after": {
+     "level": "symbol",
+     "weights": {
+      "SGOV": 13.0,
+      "IEF": 5.0,
+      "XLV": 12.0,
+      "QUAL": 12.0,
+      "XLE": 10.0,
+      "SPY": 10.0,
+      "XLP": 8.0,
+      "USMV": 8.0,
+      "VTIP": 8.0,
+      "GLD": 7.0,
+      "DBC": 6.0
+     }
+    }
+   },
+   {
+    "id": 94,
+    "ts": "2026-10-23T02:17:13.205805+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "40",
+    "before": null,
+    "after": {
+     "id": 40,
+     "symbol": "IEF",
+     "kind": "thesis",
+     "text": "r004 macro: 5% of book moved from SGOV to IEF (55 @ 91.27). 10y rallied 19bp to 4.95% on a tech-led risk-off day (NDX -1.8%, VIX 19) while SPY -1.2% / TLT +1.9%: bonds hedging equities again. Housing slowdown + 7.4% mortgages argue the 5%+ long-end peak is in; IEF (7-10y) adds convexity vs a growth scare. Risk: hot PCE 10-29 / hawkish FOMC 10-28 reprices the long end; stop thinking if 10y > 5.25%.",
+     "review_on": "2026-10-30",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-23T02:17:13.204406+00:00",
+     "updated_at": "2026-10-23T02:17:13.204413+00:00"
+    }
+   },
+   {
+    "id": 95,
+    "ts": "2026-10-23T02:17:34.407579+00:00",
+    "actor": "cli",
+    "action": "disable",
+    "entity": "alert",
+    "entity_id": "5",
+    "before": null,
+    "after": null
+   },
+   {
+    "id": 96,
+    "ts": "2026-10-23T02:17:36.072507+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "6",
+    "before": null,
+    "after": {
+     "symbol": "KO",
+     "kind": "day_loss_pct",
+     "threshold": 4.0
+    }
+   },
+   {
+    "id": 97,
+    "ts": "2026-10-23T02:18:42.611001+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "LIF"
+     ]
+    }
+   },
+   {
+    "id": 98,
+    "ts": "2026-10-23T02:18:42.628806+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "41",
+    "before": null,
+    "after": {
+     "id": 41,
+     "symbol": "TMDX",
+     "kind": "thesis",
+     "text": "Round 004 review: thesis on watch, not broken yet. Revenue growth slowed to +20.7% (Q2), Q2 net income 14.7M vs 34.9M a year ago, adjusted EPS missed; stock -40% YTD, below 50/200-day. Exit if Q3 (11-04/05) revenue growth < 15% or margins compress again.",
+     "review_on": "2026-11-06",
+     "archived": false,
+     "created_by": "ui",
+     "created_at": "2026-10-23T02:18:42.626021+00:00",
+     "updated_at": "2026-10-23T02:18:42.626026+00:00"
     }
    }
   ]
