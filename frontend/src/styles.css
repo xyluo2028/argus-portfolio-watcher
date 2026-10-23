@@ -192,7 +192,7 @@ th.sorted { color: var(--text); }
 .kv { margin: 0; }
 .kv > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
 .kv dt { color: var(--text-2); }
-.kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* research */
 svg.rev-bars { width: 100%; max-width: 720px; height: auto; display: block; margin-bottom: 8px; }

@@ -159,7 +159,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns, return_1m_pct,
         cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct. fcf_ttm is operating cash flow
         minus capex over the last four SEC quarters (source "sec"), else the provider's figure.
-        Cached 24h; `sources` says which provider supplied each value."""
+        Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
+        `latest_period` (newest quarter in SEC's XBRL data), its age, `stale` (older than ~135 days:
+        SEC's data lacks a newer 10-Q, so SEC figures lag the providers') and `fcf_ttm_quarters`."""
         return argus.fundamentals(symbol, fields)
 
     @mcp.tool(annotations=READ)
@@ -169,10 +171,12 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         diluted EPS, operating cash flow, capex, free cash flow). period: quarterly | annual.
         Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals;
         such a quarter's diluted EPS carries `eps_diluted_derived` (the method used).
-        ETFs have none. Quarterly results also carry `earnings`: per quarter the report date and
-        timing (bmo/amc), EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted"
-        from Finnhub or "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-
-        close across the report; `provisional` until that session closes); plus the next report."""
+        `latest_period` is the newest period end, `stale` true when it's older than a newer report
+        should be (~135 days for a quarter): SEC's XBRL data can lag a filing by months. ETFs have none.
+        Quarterly results also carry `earnings`: per quarter the report date and timing (bmo/amc),
+        EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted" from Finnhub or
+        "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-close across the
+        report; `provisional` until that session closes); plus the next report."""
         out = argus.market.get_financials(normalize_symbol(symbol), period, limit)
         if period == "quarterly":
             out["earnings"] = argus.earnings_history(symbol, limit)

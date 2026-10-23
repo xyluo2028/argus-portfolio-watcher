@@ -23,7 +23,7 @@ from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
-from argus.providers.sec_edgar import ttm_free_cash_flow
+from argus.providers.sec_edgar import freshness, ttm_free_cash_flow
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -45,12 +45,22 @@ PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_fo
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
-FUNDAMENTALS_VERSION = 7  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 8  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
+
+
+def sec_coverage(meta: dict | None) -> dict | None:
+    """The quarters SEC-based fundamentals cover: the latest SEC quarter with its age and `stale` flag
+    (computed now, not when cached), and the four quarter ends in the SEC FCF TTM (newest first)."""
+    if not meta:
+        return None
+    quarters = meta.get("fcf_ttm_quarters")
+    return freshness(meta.get("latest_period")) | {
+        "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None}
 
 
 def _aware(dt: datetime) -> datetime:
@@ -297,6 +307,7 @@ class MarketService:
             "as_of": as_of.isoformat(),
             "metrics": {f: metrics.get(f) for f in wanted},
             "sources": {f: sources[f] for f in wanted if f in sources},
+            "sec": sec_coverage(sources.get("_sec")),
         }
 
     def cached_fundamentals(self, symbols: list[str]) -> dict[str, dict]:
@@ -346,12 +357,16 @@ class MarketService:
         if self.sec is None or not self.settings.sec_user_agent:
             return {}
         try:
-            fcf = ttm_free_cash_flow(self.sec.get_financials(symbol, "quarterly", 4))
+            fin = self.sec.get_financials(symbol, "quarterly", 4)
         except ProviderError as e:
             if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
                 return {}  # ETFs, funds and foreign filers: the providers' figures stand
             raise
-        return {"fcf_ttm": fcf[0]} if fcf else {}
+        fcf = ttm_free_cash_flow(fin)
+        # Which quarters the SEC figures cover, kept beside the sources (see sec_coverage).
+        meta = {"latest_period": fin["periods"][0]["period_end"] if fin.get("periods") else None,
+                "fcf_ttm_quarters": [p["period_end"] for p in fin["periods"][:4]] if fcf else None}
+        return {"_sec": meta} | ({"fcf_ttm": fcf[0]} if fcf else {})
 
     def _fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
         """Ask every fundamentals provider and SEC at once (network only) and merge: SEC-derived
@@ -378,6 +393,8 @@ class MarketService:
                 if v is not None:
                     metrics[field], sources[field] = v, n
                     break
+        if metrics and by_provider.get("sec", {}).get("_sec"):
+            sources["_sec"] = by_provider["sec"]["_sec"]
         return ((metrics, sources) if metrics else None), errors
 
     def _store_fundamentals(self, symbol: str, metrics: dict, sources: dict, errors: dict[str, str] | None = None,
@@ -388,6 +405,10 @@ class MarketService:
         if errors and previous:
             metrics, sources = dict(metrics), dict(sources)
             for field, src in previous["sources"].items():
+                if field == "_sec":  # SEC's coverage goes with its kept figures
+                    if "sec" in errors:
+                        sources.setdefault(field, src)
+                    continue
                 if src in errors and (field not in metrics or src == "sec") and previous["metrics"].get(field) is not None:
                     metrics[field], sources[field] = previous["metrics"][field], src
         as_of = datetime.now(UTC)

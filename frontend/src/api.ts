@@ -117,6 +117,20 @@ export interface Fundamentals {
   as_of: string;
   metrics: Record<string, number | null>;
   sources: Record<string, string>;
+  /** Coverage of the SEC-based figures; null when SEC has nothing for the symbol. */
+  sec?: SecCoverage | null;
+}
+
+/** How current SEC's XBRL data is: `stale` once its latest period is older than a newer report should be. */
+export interface SecFreshness {
+  latest_period: string | null;
+  latest_period_age_days: number | null;
+  stale: boolean;
+}
+
+export interface SecCoverage extends SecFreshness {
+  fcf_ttm_quarters: string[] | null;  // newest first
+  fcf_ttm_through: string | null;
 }
 
 export interface FinancialPeriod {
@@ -149,7 +163,7 @@ export interface EarningsHistory {
   next: { date: string; timing: "bmo" | "amc" | "dmh" | null; eps_estimate: number | null; revenue_estimate: number | null } | null;
 }
 
-export interface Financials {
+export interface Financials extends SecFreshness {
   symbol: string;
   company: string | null;
   period: "quarterly" | "annual";
