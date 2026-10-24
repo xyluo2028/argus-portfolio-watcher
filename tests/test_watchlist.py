@@ -101,11 +101,12 @@ def test_full_compare_has_every_indicator_names_and_computed_returns(make_argus)
 
 
 def test_compare_history_gives_closes_per_symbol_and_ytd_starts_at_last_years_close(make_argus):
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta
 
+    from argus.market_calendar import NY
     from tests.test_speed import PerSymbolHistory
 
-    today = date.today()
+    today = datetime.now(NY).date()  # the app's "today" is New York's, which can lag the local date
     start = today - timedelta(days=400)
     a = make_argus(history=PerSymbolHistory({"AAA": _daily(start, [100 + i for i in range(300)])}))
     h = a.compare_history(["AAA"], "1mo")

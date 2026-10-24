@@ -191,8 +191,14 @@ class YahooProvider:
             return []
         bars = []
         for ts, row in df.iterrows():
-            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), float(row["Open"]), float(row["High"]),
-                            float(row["Low"]), float(row["Close"]), float(row.get("Volume") or 0)))
+            # Yahoo sometimes returns a session with no close (NaN), e.g. AEHR for 2026-10-23: skip it
+            # (a later fetch picks it up) and fill a missing open/high/low from the close.
+            c = _num(row.get("Close"))
+            if c is None:
+                continue
+            o, h, low = (_num(row.get(k)) for k in ("Open", "High", "Low"))
+            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), o if o is not None else c, h if h is not None else c,
+                            low if low is not None else c, c, _num(row.get("Volume")) or 0.0))
         return bars
 
     def get_dividends(self, symbol: str, years: int = 3) -> list[tuple[str, float]]:

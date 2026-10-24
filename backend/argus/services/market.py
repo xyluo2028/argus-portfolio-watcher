@@ -10,6 +10,7 @@ Freshness rules:
 from __future__ import annotations
 
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -276,9 +277,14 @@ class MarketService:
             raise ArgusError("PROVIDER_ERROR", str(e), hint="Yahoo may be rate limiting; retry shortly.") from e
 
     def _store_bars(self, symbol: str, interval: str, bars: list[Bar]) -> None:
+        # A bar without a real close can't be stored (the column is NOT NULL, and SQLite turns NaN into
+        # NULL) and would fail the whole batch, so it's dropped; the next fetch can bring it back.
+        ok = lambda v: v is not None and math.isfinite(v)  # noqa: E731
+        bars = [b for b in bars if ok(b.c)]
         if not bars:
             return
-        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v) for b in bars]
+        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o if ok(b.o) else b.c, h=b.h if ok(b.h) else b.c,
+                     l=b.l if ok(b.l) else b.c, c=b.c, v=b.v if ok(b.v) else 0.0) for b in bars]
         with session_scope(self.engine) as s:
             for i in range(0, len(rows), 500):
                 stmt = insert(PriceBar).values(rows[i:i + 500])

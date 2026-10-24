@@ -380,3 +380,43 @@ def test_sec_prefers_report_filings_over_later_proxy_copies():
     from datetime import date as D
     assert d[(D(2024, 1, 29), D(2025, 1, 26))] == (72.88, "10-K")       # the proxy copy doesn't displace it
     assert d[(D(2023, 1, 30), D(2024, 1, 28))] == (29.76, "10-K/A")     # a later report (restatement) still wins
+
+
+def test_yahoo_history_skips_a_session_without_a_close(monkeypatch):
+    # AEHR, 2026-10-23: Yahoo's bar had open/high/low but a NaN close.
+    import pandas as pd
+
+    from argus.providers.yahoo import YahooProvider
+
+    nan = float("nan")
+    df = pd.DataFrame({"Open": [65.14, nan, 55.06], "High": [65.49, 60.28, 57.83], "Low": [62.9, 54.6, 54.22],
+                       "Close": [63.88, 55.65, nan], "Volume": [1345400, nan, 1820190]},
+                      index=pd.to_datetime(["2026-10-21", "2026-10-22", "2026-10-23"]).tz_localize("America/New_York"))
+
+    class T:
+        def __init__(self, s):
+            pass
+
+        def history(self, **kw):
+            return df
+
+    monkeypatch.setattr("argus.providers.yahoo._yf", lambda: type("yf", (), {"Ticker": T}))
+    bars = YahooProvider().get_history("AEHR", datetime(2026, 10, 20, tzinfo=UTC), None, "1d")
+    assert [b.c for b in bars] == [63.88, 55.65]  # the closeless session is skipped
+    assert (bars[1].o, bars[1].v) == (55.65, 0.0)  # a missing open/volume doesn't sink the bar
+
+
+def test_a_bar_without_a_close_never_breaks_the_history_cache(make_argus):
+    # A provider handing back a NaN close used to fail the whole insert (price_bar.c is NOT NULL),
+    # so every performance request for the portfolio returned a 500.
+    from datetime import date, timedelta
+
+    from argus.providers.base import Bar
+    from tests.conftest import FakeHistory
+
+    today = date.today()
+    days = [today - timedelta(days=d) for d in (6, 5, 4)]
+    bars = [Bar(datetime(d.year, d.month, d.day, 4, tzinfo=UTC), 10, 11, 9, c, 100) for d, c in zip(days, (10.0, 10.5, float("nan")))]
+    a = make_argus(history=FakeHistory(bars))
+    closes = a.market.daily_closes("AEHR", today - timedelta(days=10))
+    assert sorted(closes.values()) == [10.0, 10.5]
