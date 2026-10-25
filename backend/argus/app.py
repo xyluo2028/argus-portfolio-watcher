@@ -190,6 +190,82 @@ class Argus:
             }
         return out
 
+    # Chart panes from Finnhub's quarterly ratio history: field -> (Finnhub key, label)
+    FUND_SERIES = {"pe_ttm": ("peTTM", "P/E"), "ps_ttm": ("psTTM", "P/S"), "pb": ("pb", "P/B"),
+                   "ev_ebitda": ("evEbitdaTTM", "EV/EBITDA")}
+    FUND_SERIES_STALE_DAYS = 200  # a quarter's figures stop carrying forward after this (missed filings)
+
+    def fundamental_series(self, symbol: str, period: str = "1y") -> dict:
+        """Daily valuation ratios and quarterly revenue for the price chart's panes.
+
+        Finnhub reports each ratio once a quarter. Its denominator (TTM EPS, sales per share, book value
+        per share, EBITDA) is recovered from the close on that quarter's end, then every daily close is
+        divided by the latest one, so a ratio moves with the price day by day and equals Finnhub's at
+        each quarter end. A quarter's figures apply from its end date (they're published a few weeks
+        later). Ratios are null where they mean nothing (a P/E on losses). `medians`: 5-year median of
+        the quarterly values. `revenue`: SEC quarterly revenue with its year-over-year change."""
+        from bisect import bisect_right
+
+        sym = normalize_symbol(symbol)
+        if period in ("1d", "5d"):
+            raise ArgusError("INVALID_ARG", "Fundamental series are daily; use a range of a month or more.")
+        bars = self.market.get_history(sym, period, "1d")
+        full = self.market.get_history(sym, "max", "1d") if bars else []
+        days = [b.ts.astimezone(NY).date() for b in full]
+        close_at = dict(zip(days, (b.c for b in full)))
+        chart_days = [b.ts.astimezone(NY).date() for b in bars]
+        out: dict = {"symbol": sym, "period": period, "ratios": {}, "medians": {}, "labels": {}, "revenue": [],
+                     "errors": {}}
+
+        def on_or_before(d: date) -> float | None:
+            i = bisect_right(days, d)
+            return close_at[days[i - 1]] if i else None
+
+        series = {}
+        if self.market.directory is not None and bars:
+            try:
+                series = self.market.directory.ratio_series(sym)
+            except ProviderError as e:
+                out["errors"]["ratios"] = str(e)
+        five_years_ago = datetime.now(NY).date() - timedelta(days=5 * 365)
+        for key, (fk, label) in self.FUND_SERIES.items():
+            out["labels"][key] = label
+            pts = sorted((date.fromisoformat(x["period"]), float(x["v"])) for x in series.get(fk) or []
+                         if isinstance(x.get("v"), (int, float)) and x.get("period"))
+            if not pts:
+                continue
+            ends = [d for d, _ in pts]
+            denoms = []
+            for d, ratio in pts:
+                c = on_or_before(d)
+                denoms.append(c / ratio if c and ratio > 0 else None)
+            values = []
+            for d, c in zip(chart_days, (b.c for b in bars)):
+                i = bisect_right(ends, d) - 1
+                ok = i >= 0 and denoms[i] and (d - ends[i]).days <= self.FUND_SERIES_STALE_DAYS
+                values.append([d.isoformat(), round(c / denoms[i], 2) if ok else None])
+            if any(v is not None for _, v in values):
+                out["ratios"][key] = values
+            recent = sorted(v for d, v in pts if d >= five_years_ago and v > 0)
+            if recent:
+                out["medians"][key] = round(recent[len(recent) // 2] if len(recent) % 2 else
+                                            (recent[len(recent) // 2 - 1] + recent[len(recent) // 2]) / 2, 2)
+        if bars:
+            limit = 60 if period == "max" else 24 if period in ("2y", "5y") else 12
+            try:
+                quarters = sorted(self.market.get_financials(sym, "quarterly", limit)["periods"],
+                                  key=lambda p: p["period_end"])
+                rev = {p["period_end"]: p.get("revenue") for p in quarters if p.get("revenue") is not None}
+                ends = sorted(rev)
+                for e in ends:
+                    prior = date.fromisoformat(e) - timedelta(days=365)
+                    year_ago = next((rev[x] for x in ends if abs((date.fromisoformat(x) - prior).days) <= 20), None)
+                    out["revenue"].append({"period_end": e, "revenue": rev[e],
+                                           "yoy_pct": (rev[e] / year_ago - 1) * 100 if year_ago and year_ago > 0 else None})
+            except ArgusError as e:
+                out["errors"]["revenue"] = e.message
+        return out
+
     RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
 
     def return_bases(self, symbol: str) -> dict:

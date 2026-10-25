@@ -195,6 +195,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
         return await run(argus.history, symbol, period, interval, specs)
 
+    @app.get("/api/fundamental-series/{symbol}")
+    async def fundamental_series(symbol: str, period: str = "1y"):
+        return await run(argus.fundamental_series, symbol, period)
+
     @app.get("/api/profile/{symbol}")
     async def company_profile(symbol: str, refresh: bool = False):
         return await run(argus.company_profile, symbol, refresh)

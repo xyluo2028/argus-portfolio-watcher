@@ -4,17 +4,34 @@ import {
   createChart,
   HistogramSeries,
   LineSeries,
+  LineStyle,
+  LineType,
   type IChartApi,
   type MouseEventParams,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
-import type { HistoryResponse, Quote } from "../api";
-import { price } from "../format";
+import type { FundamentalSeries, HistoryResponse, Quote } from "../api";
+import { big, pct, price } from "../format";
 
 export type Overlay = "sma20" | "sma50" | "sma200" | "bb20";
 export type Pane = "volume" | "rsi14" | "macd";
+/** Fundamentals, each in its own pane under the price (one y-axis per pane, never a second axis on price). */
+export type MetricPane = "pe_ttm" | "ps_ttm" | "pb" | "ev_ebitda" | "revenue";
+
+export const METRIC_PANES: { key: MetricPane; label: string; title: string }[] = [
+  { key: "pe_ttm", label: "P/E", title: "Price ÷ trailing 12-month EPS" },
+  { key: "ps_ttm", label: "P/S", title: "Price ÷ trailing 12-month sales per share" },
+  { key: "pb", label: "P/B", title: "Price ÷ book value per share" },
+  { key: "ev_ebitda", label: "EV/EBITDA", title: "Enterprise value ÷ trailing 12-month EBITDA" },
+  { key: "revenue", label: "Revenue", title: "Quarterly revenue reported to the SEC" },
+];
+// Categorical slots after the moving averages' 1-3, so a pane's color never repeats an overlay's.
+export const METRIC_COLOR: Record<MetricPane, string> = {
+  pe_ttm: "var(--series-4)", ps_ttm: "var(--series-5)", pb: "var(--series-7)", ev_ebitda: "var(--series-6)",
+  revenue: "var(--series-1)",
+};
 
 // Overlays are categorical identities: fixed slot order, never recolored by rank.
 export const OVERLAY_COLOR: Record<Overlay, string> = {
@@ -43,9 +60,18 @@ interface Props {
   overlays: Overlay[];
   panes: Pane[];
   live?: Quote | null;
+  metrics?: MetricPane[];
+  fundamentals?: FundamentalSeries | null;
 }
 
-export function CandleChart({ data, overlays, panes, live }: Props) {
+/** Latest quarter at or before each chart day (quarters ascending by period end). */
+function quarterAt(rev: FundamentalSeries["revenue"], day: string) {
+  let found: FundamentalSeries["revenue"][number] | null = null;
+  for (const q of rev) { if (q.period_end <= day) found = q; else break; }
+  return found;
+}
+
+export function CandleChart({ data, overlays, panes, live, metrics = [], fundamentals }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [legend, setLegend] = useState<string>("");
@@ -137,16 +163,58 @@ export function CandleChart({ data, overlays, panes, live }: Props) {
       line(macd.signal, "var(--series-2)", paneIndex);
       paneIndex++;
     }
+    // Fundamentals (daily charts only): a ratio line with its 5-year median, or quarterly revenue as steps.
+    const shownMetrics = !intraday && fundamentals ? metrics.filter((k) =>
+      k === "revenue" ? fundamentals.revenue.length > 0 : (fundamentals.ratios[k] ?? []).some(([, v]) => v != null)) : [];
+    const ratioAt: Record<string, Map<string, number | null>> = {};
+    for (const k of shownMetrics) {
+      const color = resolve(METRIC_COLOR[k]);
+      const label = METRIC_PANES.find((m) => m.key === k)!.label;
+      if (k === "revenue") {
+        const s = chart.addSeries(LineSeries, {
+          color, lineWidth: 2, lineType: LineType.WithSteps, priceLineVisible: false, lastValueVisible: true, title: "Revenue (qtr)",
+          crosshairMarkerVisible: false, priceFormat: { type: "custom", formatter: (v: number) => big(v), minMove: 1 },
+        }, paneIndex);
+        s.setData(times.flatMap((t) => {
+          const q = quarterAt(fundamentals!.revenue, t as string);
+          return q ? [{ time: t, value: q.revenue }] : [];
+        }));
+      } else {
+        const byDay = new Map(fundamentals!.ratios[k]);
+        ratioAt[k] = byDay;
+        const s = chart.addSeries(LineSeries, {
+          color, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: label, crosshairMarkerVisible: false,
+          priceFormat: { type: "price", precision: 1, minMove: 0.1 },
+        }, paneIndex);
+        s.setData(times.flatMap((t) => { const v = byDay.get(t as string); return v == null ? [] : [{ time: t, value: v }]; }));
+        const med = fundamentals!.medians[k];
+        if (med != null) {
+          s.createPriceLine({ price: med, color: css("--axis"), lineWidth: 1, lineStyle: LineStyle.Dashed,
+                              axisLabelVisible: true, title: "5Y median" });
+        }
+      }
+      paneIndex++;
+    }
+
     const allPanes = chart.panes();
     allPanes.forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
 
     const last = data.bars[data.bars.length - 1];
-    const describe = (b: typeof last | undefined) =>
-      b ? `O ${price(b.o)}  H ${price(b.h)}  L ${price(b.l)}  C ${price(b.c)}  Vol ${b.v.toLocaleString("en-US")}` : "";
-    setLegend(describe(last));
+    const describeMetrics = (t: Time | undefined) => shownMetrics.map((k) => {
+      if (k === "revenue") {
+        const q = t == null ? null : quarterAt(fundamentals!.revenue, t as string);
+        return q ? `Rev ${big(q.revenue)}${q.yoy_pct != null ? ` (${pct(q.yoy_pct, 0)} YoY)` : ""}` : "";
+      }
+      const v = t == null ? null : ratioAt[k]?.get(t as string);
+      return v == null ? "" : `${METRIC_PANES.find((m) => m.key === k)!.label} ${v.toFixed(1)}`;
+    }).filter(Boolean).join("  ");
+    const describe = (b: typeof last | undefined, t?: Time) =>
+      b ? `O ${price(b.o)}  H ${price(b.h)}  L ${price(b.l)}  C ${price(b.c)}  Vol ${b.v.toLocaleString("en-US")}` +
+          (shownMetrics.length ? `   ${describeMetrics(t)}` : "") : "";
+    setLegend(describe(last, times[times.length - 1]));
     const onMove = (p: MouseEventParams) => {
       const i = p.time == null ? -1 : times.indexOf(p.time);
-      setLegend(describe(i >= 0 ? data.bars[i] : last));
+      setLegend(i >= 0 ? describe(data.bars[i], times[i]) : describe(last, times[times.length - 1]));
     };
     chart.subscribeCrosshairMove(onMove);
     chart.timeScale().fitContent();
@@ -156,7 +224,7 @@ export function CandleChart({ data, overlays, panes, live }: Props) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [data, overlays, panes, themeTick]);
+  }, [data, overlays, panes, themeTick, metrics, fundamentals]);
 
   // Live price on daily charts: extend today's candle, or start it if the last bar is an earlier session.
   useEffect(() => {
@@ -175,8 +243,9 @@ export function CandleChart({ data, overlays, panes, live }: Props) {
     series.update(bar as never);
   }, [live, data]);
 
+  const extra = data.interval === "1d" && fundamentals ? metrics.length : 0;
   return (
-    <div className="chart-box">
+    <div className="chart-box" style={extra ? { height: 460 + 110 * extra } : undefined}>
       <div className="chart-legend num">{legend}</div>
       <div ref={el} style={{ position: "absolute", inset: 0 }} />
     </div>

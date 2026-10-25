@@ -112,6 +112,13 @@ export interface HistoryResponse {
   indicators?: Record<string, (number | null)[] | Record<string, (number | null)[]>>;
 }
 
+/** Daily valuation ratios (by New York date) and quarterly revenue, for the price chart's panes. */
+export interface FundamentalSeries {
+  symbol: string; period: string;
+  ratios: Record<string, [string, number | null][]>; medians: Record<string, number>; labels: Record<string, string>;
+  revenue: { period_end: string; revenue: number; yoy_pct: number | null }[]; errors: Record<string, string>;
+}
+
 export interface Fundamentals {
   symbol: string;
   as_of: string;
@@ -440,6 +447,8 @@ export interface ScreenResult { status: ScreenerStatus; matches: number; rows: S
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
+  fundamentalSeries: (symbol: string, period: string) =>
+    get<FundamentalSeries>(`/api/fundamental-series/${enc(symbol)}?period=${period}`),
   history: (symbol: string, period: string, interval: string, indicators: string[]) =>
     get<HistoryResponse>(
       `/api/history/${enc(symbol)}?period=${period}&interval=${interval}` +
