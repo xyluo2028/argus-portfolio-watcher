@@ -314,7 +314,9 @@ def portfolio_performance(ref: str, range_: Annotated[str, typer.Option("--range
                       f"{_cell(s['excess_pct'], _pct(s['excess_pct']))}")
         vol = "-" if s["volatility_pct"] is None else f"{s['volatility_pct']:.1f}%"
         sharpe = "-" if s["sharpe"] is None else f"{s['sharpe']:.2f}"
-        console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   Sharpe (rf=0) {sharpe}")
+        window = f"({s['risk_note']})" if s.get("risk_note") else f"over {s['risk_sessions']} sessions"
+        console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   "
+                      f"Sharpe (rf=0) {sharpe}  {window}")
     _run(as_json, lambda: _argus().performance(ref, range_), render)
 
 

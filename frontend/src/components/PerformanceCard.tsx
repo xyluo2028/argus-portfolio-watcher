@@ -85,7 +85,12 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
             <div className="stat"><div className="k">Excess return</div><div className={`v ${tone(s.excess_pct)}`}>{pct(s.excess_pct)}</div></div>
             <div className="stat"><div className="k">Gain</div><div className={`v ${tone(s.gain)}`}>{money(s.gain, { signed: true, whole: true })}</div></div>
             <div className="stat"><div className="k">Max drawdown</div><div className="v">{pct(s.max_drawdown_pct)}</div></div>
-            <div className="stat"><div className="k">Volatility (ann.)</div><div className="v">{s.volatility_pct == null ? "–" : `${s.volatility_pct.toFixed(1)}%`}</div></div>
+            <div className="stat" title="Annualized from this range's daily time-weighted returns; Analysis → Risk uses today's holdings over the last year">
+              <div className="k">Volatility (ann., {s.risk_sessions ?? 0} sessions)</div>
+              {s.volatility_pct == null
+                ? <div className="v muted small">{s.risk_note ?? "–"}</div>
+                : <div className="v">{s.volatility_pct.toFixed(1)}%</div>}
+            </div>
           </div>
           {/* Legend (two series), with values for the hovered or latest day. */}
           <div className="row small" style={{ gap: 16, marginBottom: 4 }} aria-live="polite">

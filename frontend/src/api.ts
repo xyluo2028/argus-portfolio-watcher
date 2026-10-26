@@ -187,6 +187,7 @@ export interface Performance {
   summary: {
     start?: string; end?: string; sessions?: number; twr_pct?: number; benchmark_pct?: number | null;
     excess_pct?: number | null; max_drawdown_pct?: number; volatility_pct?: number | null; sharpe?: number | null;
+    risk_sessions?: number; risk_note?: string | null;
     gain?: number; net_invested?: number; start_value?: number; end_value?: number;
     dividends_accrued?: number;  // estimated dividends from ex-dates held through, included in gain/TWR
   };

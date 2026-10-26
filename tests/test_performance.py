@@ -84,8 +84,27 @@ def test_summary_stats():
     assert s["max_drawdown_pct"] == pytest.approx(-10)
     assert s["benchmark_pct"] == pytest.approx(4)
     assert s["excess_pct"] == pytest.approx(4.9)
-    assert s["volatility_pct"] > 0 and s["cagr_pct"] is None
+    assert s["cagr_pct"] is None
     assert s["gain"] == pytest.approx(8.9)
+
+
+def test_volatility_and_sharpe_withheld_on_a_short_series():
+    # 4 daily returns: annualizing them gives a meaningless Sharpe, so both are null with a reason.
+    closes = {"X": {D[0]: 100, D[1]: 110, D[2]: 99, D[3]: 108.9, D[4]: 108.9}}
+    s = summarize(compute_series([T(1, "BUY", "X", at(D[0]), 1, 100)], D, closes))
+    assert s["volatility_pct"] is None and s["sharpe"] is None
+    assert s["risk_sessions"] == 4
+    assert s["risk_note"] == "needs 20 sessions, has 4"
+
+
+def test_volatility_and_sharpe_from_20_sessions():
+    days = [date.fromordinal(date(2026, 8, 3).toordinal() + i) for i in range(21)]
+    closes = {"X": {d: 100 * (1.01 if i % 2 else 1.0) * (1 + i / 1000) for i, d in enumerate(days)}}
+    s = summarize(compute_series([T(1, "BUY", "X", at(days[0]), 1, 100)], days, closes))
+    assert s["risk_sessions"] == 20 and s["risk_note"] is None
+    assert s["volatility_pct"] > 0 and s["sharpe"] is not None
+    # One session fewer and they're withheld again.
+    assert summarize(compute_series([T(1, "BUY", "X", at(days[0]), 1, 100)], days[:20], closes))["sharpe"] is None
 
 
 def test_summary_on_day_one_counts_the_purchase_as_invested():

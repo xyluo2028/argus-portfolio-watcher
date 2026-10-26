@@ -29,6 +29,9 @@ from argus.models import TxnType
 from argus.services.lots import TxnLike
 
 TRADING_DAYS = 252
+# Annualized volatility and Sharpe from fewer daily returns than this are noise (a 4-session
+# Sharpe of 3+ says nothing), so they're withheld with a reason instead.
+MIN_RISK_SESSIONS = 20
 
 
 @dataclass
@@ -152,7 +155,10 @@ def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: 
         mdd = min(mdd, p.index / peak - 1)
     vol = None
     sharpe = None
-    if len(rets) >= 2:
+    risk_note = None
+    if len(rets) < MIN_RISK_SESSIONS:
+        risk_note = f"needs {MIN_RISK_SESSIONS} sessions, has {len(rets)}"
+    else:
         mean = sum(rets) / len(rets)
         sd = math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1))
         vol = sd * math.sqrt(TRADING_DAYS)
@@ -173,6 +179,10 @@ def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: 
         "max_drawdown_pct": mdd * 100,
         "volatility_pct": vol * 100 if vol is not None else None,
         "sharpe": sharpe,
+        # What volatility and Sharpe are measured on: this slice's daily TWR returns, not the
+        # 1-year holdings history behind Analysis → Risk.
+        "risk_sessions": len(rets),
+        "risk_note": risk_note,
         "net_invested": (net := sum(p.flow_in - p.flow_out for p in within)),
         # Dollar profit over the slice: what the positions gained beyond money added.
         "gain": end.value - start_value - net,
