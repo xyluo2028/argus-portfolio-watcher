@@ -230,3 +230,46 @@ def test_earnings_overview_uses_calendar_then_eps_history(make_argus):
     assert rows["BND"]["last"] is None  # funds don't report earnings: no lookup
     a.earnings_overview("growth")
     assert FH.calls == 1  # NVDA only, then cached
+
+
+def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch):
+    """PG goes ex $1.089 on 10-23: the quote's previous close is dividend-adjusted (Day P&L leaves the
+    dividend out), the price-only close history isn't, so the dividend must count as income there."""
+    from datetime import date
+
+    import argus.app as app_mod
+    from tests.conftest import FakeQuotes
+
+    class Divs:
+        def get_dividends(self, symbol):
+            return [("2026-07-24", 1.0568), ("2026-10-23", 1.089)] if symbol == "PG" else []
+
+        def get_info(self, symbol):
+            return {"sector": "Consumer Defensive"}
+
+    a = make_argus([FakeQuotes("fake", {"PG": (161.02, 164.501), "KO": (70.0, 70.0)})])
+    a.market.profile_provider = Divs()
+    a.portfolios.create_portfolio("inc")
+    a.portfolios.add_transactions("inc", [TxnInput("BUY", "PG", at(2026, 10, 20), 31, 165.59),
+                                          TxnInput("BUY", "KO", at(2026, 10, 23), 5, 70)])  # after KO's ex: n/a
+    tot = a.portfolio("inc")["totals"]
+    assert tot["dividends_accrued"] == pytest.approx(33.759) and tot["dividends"] == pytest.approx(33.759)
+    assert tot["day_pnl"] == pytest.approx(31 * (161.02 - 164.501))
+
+    sessions = [date(2026, 10, d) for d in (20, 21, 22, 23)]
+    monkeypatch.setattr(app_mod, "market_status", lambda *a: {"last_session": "2026-10-23", "session": "closed",
+                                                             "is_trading_day": False})
+    monkeypatch.setattr(app_mod, "sessions_between", lambda s, e: list(sessions))
+    monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {
+        "PG": dict(zip(sessions, (165.59, 165.59, 165.59, 161.02))),
+        "KO": {d: 70.0 for d in sessions}, "SPY": {d: 600.0 for d in sessions}})
+    perf = a.performance("inc")
+    pg_day = perf["series"][-1]["value"] - 5 * 70 - perf["series"][-2]["value"] + perf["series"][-1]["flow_out"]
+    assert pg_day == pytest.approx(tot["day_pnl"])  # the ex-date's change equals Day P&L
+    assert perf["summary"]["dividends_accrued"] == pytest.approx(33.759)
+    assert perf["summary"]["gain"] == pytest.approx(31 * (161.02 - 165.59) + 33.759)
+
+    # Recording the payment replaces the estimate: counted once, as a DIVIDEND.
+    a.portfolios.add_transactions("inc", [TxnInput("DIVIDEND", "PG", at(2026, 10, 24), amount=33.76)])
+    tot = a.portfolio("inc")["totals"]
+    assert tot["dividends_accrued"] == 0 and tot["dividends"] == pytest.approx(33.76)

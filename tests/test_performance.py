@@ -106,3 +106,12 @@ def test_summary_of_a_later_slice_starts_at_its_first_close():
     s = summarize(pts)
     assert s["start_value"] == pytest.approx(990) and s["gain"] == pytest.approx(99)
     assert s["twr_pct"] == pytest.approx(10)
+
+
+def test_dividend_on_its_ex_date_offsets_the_price_drop():
+    # Price-only closes fall by the dividend on the ex-date; as income that day nets to zero.
+    closes = {"X": {D[0]: 100, D[1]: 99}}
+    txns = [T(1, "BUY", "X", at(D[0]), 10, 100), T(2, "DIVIDEND", "X", at(D[1], 4), amount=10)]
+    pts = compute_series(txns, D[:2], closes)
+    assert pts[1].ret == pytest.approx(0) and pts[1].flow_out == 10
+    assert summarize(pts, inception=True)["gain"] == pytest.approx(0)

@@ -90,7 +90,8 @@ export interface Summary {
     unrealized_pnl: number | null;
     unrealized_pct: number | null;
     realized_pnl: number;
-    dividends: number;
+    dividends: number;  // recorded DIVIDEND transactions + dividends_accrued
+    dividends_accrued: number;  // estimated, from ex-dates held through that no DIVIDEND records yet
     position_count: number;
     fully_priced: boolean;
     ext_pnl: number | null;
@@ -187,7 +188,9 @@ export interface Performance {
     start?: string; end?: string; sessions?: number; twr_pct?: number; benchmark_pct?: number | null;
     excess_pct?: number | null; max_drawdown_pct?: number; volatility_pct?: number | null; sharpe?: number | null;
     gain?: number; net_invested?: number; start_value?: number; end_value?: number;
+    dividends_accrued?: number;  // estimated dividends from ex-dates held through, included in gain/TWR
   };
+  dividends_accrued: { symbol: string; ex_date: string; per_share: number; shares: number; amount: number }[];
   series: { d: string; value: number; twr_pct: number; bench_pct: number | null }[];
 }
 
