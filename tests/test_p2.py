@@ -119,6 +119,18 @@ def test_daily_brief_shape(make_argus):
     assert b["theses_due"][0]["symbol"] == "AAA"
 
 
+def test_daily_brief_movers_keep_their_sign(make_argus):
+    # Mostly up on the day: losers must not be padded with gainers (nor gainers with losers).
+    a = make_argus([FakeQuotes("fake", {"AAA": (110, 100), "BBB": (101, 100), "CCC": (100, 100),
+                                        "DDD": (99, 100), "SPY": (500, 495)})])
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", s, NOW - timedelta(days=30), 10, 90)
+                                             for s in ("AAA", "BBB", "CCC", "DDD")])
+    b = a.daily_brief("growth", news=False)
+    assert [m["symbol"] for m in b["top_gainers"]] == ["AAA", "BBB"]
+    assert [m["symbol"] for m in b["top_losers"]] == ["DDD"]
+
+
 def test_daily_brief_is_scoped_to_its_portfolio(make_argus):
     from argus.db import session_scope
     from argus.market_calendar import NY
