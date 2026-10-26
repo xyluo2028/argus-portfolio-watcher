@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-23T02:40:19.460907+00:00",
+ "created_at": "2026-10-26T02:36:05.284911+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1421,6 +1421,16 @@
     "active": true,
     "created_by": "cli",
     "created_at": "2026-10-23T02:17:36.070674+00:00"
+   },
+   {
+    "id": 7,
+    "symbol": "MSFT",
+    "kind": "day_loss_pct",
+    "threshold": 6.0,
+    "note": "loop-income r005: MSFT reports 10-28 amc",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-10-26T02:18:36.945030+00:00"
    }
   ],
   "alert_event": [],
@@ -1875,6 +1885,28 @@
     "created_by": "ui",
     "created_at": "2026-10-23T02:18:42.626021+00:00",
     "updated_at": "2026-10-23T02:18:42.626026+00:00"
+   },
+   {
+    "id": 42,
+    "symbol": "GLD",
+    "kind": "note",
+    "text": "loop-macro r005 (10-25): no trade. Gold -7.3% 1M, 1.8% above 52w low; 20d corr to SPY +0.54 (1y +0.38) so it is not hedging equities while real yields sit near 5% 10Y. Decide trim vs hold at 10-29 review after FOMC (10-28) and GDP/PCE (10-29).",
+    "review_on": "2026-10-29",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-26T02:17:41.774894+00:00",
+    "updated_at": "2026-10-26T02:17:41.774901+00:00"
+   },
+   {
+    "id": 43,
+    "symbol": "RMBS",
+    "kind": "note",
+    "text": "[loop-growth] r005 pre-earnings (Q3 report 10-26 amc, est EPS 0.80 / rev 217.4M = ~+22% y/y vs 178.5M). Hold through. Exit if Q3 revenue growth < 12% y/y or product (chip) revenue falls q/q with guide below consensus. Note SEC data ends Q1'26 (stale), check the 10-Q/press release directly.",
+    "review_on": "2026-10-27",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-26T02:21:05.129839+00:00",
+    "updated_at": "2026-10-26T02:21:05.129843+00:00"
    }
   ],
   "peer_list": [],
@@ -3894,6 +3926,116 @@
      "created_at": "2026-10-23T02:18:42.626021+00:00",
      "updated_at": "2026-10-23T02:18:42.626026+00:00"
     }
+   },
+   {
+    "id": 99,
+    "ts": "2026-10-26T02:17:41.776876+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "42",
+    "before": null,
+    "after": {
+     "id": 42,
+     "symbol": "GLD",
+     "kind": "note",
+     "text": "loop-macro r005 (10-25): no trade. Gold -7.3% 1M, 1.8% above 52w low; 20d corr to SPY +0.54 (1y +0.38) so it is not hedging equities while real yields sit near 5% 10Y. Decide trim vs hold at 10-29 review after FOMC (10-28) and GDP/PCE (10-29).",
+     "review_on": "2026-10-29",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-26T02:17:41.774894+00:00",
+     "updated_at": "2026-10-26T02:17:41.774901+00:00"
+    }
+   },
+   {
+    "id": 100,
+    "ts": "2026-10-26T02:18:36.946168+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "7",
+    "before": null,
+    "after": {
+     "symbol": "MSFT",
+     "kind": "day_loss_pct",
+     "threshold": 6.0
+    }
+   },
+   {
+    "id": 101,
+    "ts": "2026-10-26T02:21:05.131007+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "43",
+    "before": null,
+    "after": {
+     "id": 43,
+     "symbol": "RMBS",
+     "kind": "note",
+     "text": "[loop-growth] r005 pre-earnings (Q3 report 10-26 amc, est EPS 0.80 / rev 217.4M = ~+22% y/y vs 178.5M). Hold through. Exit if Q3 revenue growth < 12% y/y or product (chip) revenue falls q/q with guide below consensus. Note SEC data ends Q1'26 (stale), check the 10-Q/press release directly.",
+     "review_on": "2026-10-27",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-26T02:21:05.129839+00:00",
+     "updated_at": "2026-10-26T02:21:05.129843+00:00"
+    }
+   },
+   {
+    "id": 102,
+    "ts": "2026-10-26T02:35:22.479696+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": null,
+    "after": {
+     "name": "b025-scratch",
+     "benchmark": "SPY"
+    }
+   },
+   {
+    "id": 103,
+    "ts": "2026-10-26T02:35:23.562324+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "41",
+    "before": null,
+    "after": {
+     "id": 41,
+     "type": "BUY",
+     "symbol": "XLE",
+     "qty": 10.0,
+     "price": 69.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-23T18:00:00+00:00",
+     "note": null,
+     "source": "cli",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 104,
+    "ts": "2026-10-26T02:35:34.183394+00:00",
+    "actor": "cli",
+    "action": "delete",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": {
+     "id": 4,
+     "name": "b025-scratch",
+     "benchmark": "SPY",
+     "counts": {
+      "transactions": 1,
+      "targets": 0,
+      "nav_days": 0,
+      "open_positions": 1
+     }
+    },
+    "after": null
    }
   ]
  }
