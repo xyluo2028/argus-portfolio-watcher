@@ -167,7 +167,31 @@ class Argus:
             quotes |= got
         out = self.portfolios.summary(ref, quotes if with_quotes else {}, include_lots=include_lots)
         out["quote_errors"] = errors
+        try:
+            accrued = sum(x["amount"] for x in self.accrued_dividends(ref))
+        except Exception as e:  # never block the summary on dividend history
+            log.warning("accrued dividends: %s", e)
+            accrued = 0.0
+        # `dividends` is total dividend income: recorded DIVIDEND transactions plus the estimated
+        # accruals for ex-dates held through that none records yet (`dividends_accrued`).
+        out["totals"]["dividends_accrued"] = accrued
+        out["totals"]["dividends"] += accrued
         return out
+
+    def accrued_dividends(self, ref: str, txns: list | None = None) -> list[dict]:
+        """Estimated dividends from ex-dates held through, per portfolio, that no DIVIDEND transaction
+        records (see dividends.accrue). Price-only closes drop by the dividend on its ex-date, so
+        performance and totals count these as income to reconcile with Day P&L."""
+        p = self.portfolios.view(ref)
+        if txns is None:
+            txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
+        by_pf: dict = {}
+        for t in txns:
+            by_pf.setdefault(getattr(t, "portfolio_id", None), []).append(t)
+        histories = self.dividend_histories(sorted({t.symbol for t in txns}))
+        today = datetime.now(NY).date()
+        out = [x for group in by_pf.values() for x in dividends_mod.accrue(group, histories, today)]
+        return sorted(out, key=lambda x: (x["ex_date"], x["symbol"]))
 
     def history(self, symbol: str, period: str = "1y", interval: str = "1d",
                 indicators: list[str] | None = None) -> dict:
@@ -1327,7 +1351,7 @@ class Argus:
         p = self.portfolios.view(ref)
         txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
         if not txns:
-            return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "series": []}
+            return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "dividends_accrued": [], "series": []}
         start = min(t.ts for t in txns).astimezone(NY).date()
         status = market_status()
         end = date.fromisoformat(status["last_session"])
@@ -1344,7 +1368,16 @@ class Argus:
                     closes[sym][today] = q.price
 
         bench = closes.pop(p.benchmark, {}) if p.benchmark not in {t.symbol for t in txns} else closes.get(p.benchmark, {})
-        points = performance_mod.compute_series(txns, sessions, closes, bench)
+        try:
+            accrued = self.accrued_dividends(ref, txns)
+        except Exception as e:
+            log.warning("accrued dividends: %s", e)
+            accrued = []
+        # Accrued dividends are income on their ex-date (the day the price-only close drops by them).
+        income = [TxnInput("DIVIDEND", x["symbol"], datetime.combine(date.fromisoformat(x["ex_date"]),
+                                                                    datetime.min.time(), NY), amount=x["amount"])
+                  for x in accrued]
+        points = performance_mod.compute_series([*txns, *income], sessions, closes, bench)
         cutoff = {"1mo": today - timedelta(days=31), "3mo": today - timedelta(days=92),
                   "ytd": date(today.year, 1, 1) - timedelta(days=1), "1y": today - timedelta(days=366)}.get(range_)
         base = 0
@@ -1356,12 +1389,21 @@ class Argus:
         inception = base == 0
         base_idx = 1.0 if inception else points[0].index if points else 1.0
         base_bench = points[0].bench_index if points else None
+        # Accruals inside the slice (a rebased slice counts flows after its first close).
+        first = points[0].d if points else None
+        last = points[-1].d.isoformat() if points else ""
+        in_slice = [x for x in accrued if first and x["ex_date"] <= last and (
+            x["ex_date"] >= first.isoformat() if inception else x["ex_date"] > first.isoformat())]
+        summary = performance_mod.summarize(points, inception=inception)
+        if summary:
+            summary["dividends_accrued"] = sum(x["amount"] for x in in_slice)
         return {
             "portfolio": p.name,
             "range": range_,
             "benchmark": p.benchmark,
             "provisional_today": bool(points) and points[-1].d == today and status["session"] != "closed",
-            "summary": performance_mod.summarize(points, inception=inception),
+            "summary": summary,
+            "dividends_accrued": in_slice,
             "series": [{
                 "d": pt.d.isoformat(), "value": pt.value, "flow_in": pt.flow_in, "flow_out": pt.flow_out,
                 "twr_pct": (pt.index / base_idx - 1) * 100,

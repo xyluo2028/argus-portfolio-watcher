@@ -4,13 +4,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import date, timedelta
+from collections.abc import Callable, Iterable
+from datetime import date, datetime, timedelta
 from statistics import mean, median, pstdev
+
+from argus.market_calendar import NY
+from argus.models import TxnType
 
 FREQ_NAMES = {12: "monthly", 4: "quarterly", 2: "semiannual", 1: "annual"}
 LOOKBACK_DAYS = 400  # a payer with nothing in this window is treated as not paying
 LUMPY_CV = 0.25  # payments this dispersed (stdev / mean) over a year aren't a rate to extrapolate
+MATCH_DAYS = 120  # a DIVIDEND transaction records the latest ex-date this far back (pay dates trail ex-dates)
 
 
 def add_months(d: date, n: int) -> date:
@@ -122,3 +126,53 @@ def analyze(rows: list[dict], histories: dict[str, list[tuple[str, float]]],
         "by_month": months,
         "holdings": holdings,
     }
+
+
+def accrue(txns: Iterable, histories: dict[str, list[tuple[str, float]]], today: date) -> list[dict]:
+    """Dividends earned by holding through an ex-date, from the payment history: shares held going
+    into the ex-date × cash per share. Estimates until a DIVIDEND transaction records the payment,
+    so an ex-date matched by one (the latest ex-date on or before it, within MATCH_DAYS) is skipped.
+
+    `txns` are one portfolio's (FIFO-free: only share counts matter). Histories are split-adjusted
+    per share, so shares held before a later recorded SPLIT are scaled by its ratio.
+    """
+    by_sym: dict[str, list] = {}
+    for t in txns:
+        by_sym.setdefault(t.symbol, []).append(t)
+    out = []
+    for sym, ts in by_sym.items():
+        ts.sort(key=lambda t: (t.ts, t.id or 0))
+        first = ts[0].ts.astimezone(NY).date()
+        pays = sorted((d, a) for iso, a in histories.get(sym, [])
+                      if first < (d := date.fromisoformat(iso)) <= today and a > 0)
+        if not pays:
+            continue
+        recorded = set()
+        for t in ts:
+            if TxnType(t.type) == TxnType.DIVIDEND:
+                d = t.ts.astimezone(NY).date()
+                prior = [ex for ex, _ in pays if ex <= d]
+                if prior and (d - prior[-1]).days <= MATCH_DAYS:
+                    recorded.add(prior[-1])
+        for ex, per_share in pays:
+            if ex in recorded:
+                continue
+            cutoff = datetime.combine(ex, datetime.min.time(), NY)
+            qty, later_splits = 0.0, 1.0
+            for t in ts:
+                kind = TxnType(t.type)
+                if kind == TxnType.SPLIT:
+                    if t.ts < cutoff:
+                        qty *= t.qty
+                    else:
+                        later_splits *= t.qty
+                elif t.ts < cutoff and kind in (TxnType.BUY, TxnType.OPENING):
+                    qty += t.qty
+                elif t.ts < cutoff and kind == TxnType.SELL:
+                    qty -= t.qty
+            qty *= later_splits
+            if qty > 1e-9:
+                out.append({"symbol": sym, "ex_date": ex.isoformat(), "per_share": per_share, "shares": qty,
+                            "amount": qty * per_share})
+    out.sort(key=lambda x: (x["ex_date"], x["symbol"]))
+    return out
