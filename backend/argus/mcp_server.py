@@ -192,7 +192,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @_tool
     def get_performance(portfolio: str, range: str = "all", include_series: bool = False) -> dict:  # noqa: A002
         """Time-weighted return vs the portfolio's benchmark over 1mo | 3mo | ytd | 1y | all, with
-        dollar gain, max drawdown, volatility and Sharpe (rf=0). Buys count as money in, so
+        dollar gain, max drawdown, volatility and Sharpe (rf=0). Volatility and Sharpe use this
+        range's daily returns (`risk_sessions` of them) and are null with `risk_note` under 20;
+        get_risk's 1-year holdings volatility is a different figure. Buys count as money in, so
         adding money isn't performance. include_series adds the daily points."""
         out = argus.performance(portfolio, range, quotes_now())
         if not include_series:
