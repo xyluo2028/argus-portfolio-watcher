@@ -67,6 +67,20 @@ def test_summary_day_pnl_uses_cost_for_lots_bought_in_quote_session(argus):
     assert row["unrealized_pnl"] == pytest.approx(15 * 110 - (500 + 520))
     assert row["weight_pct"] == pytest.approx(100)
     assert s["totals"]["day_pnl_pct"] == pytest.approx(130 / (1650 - 130) * 100)
+    assert row["change_pct"] == pytest.approx(130 / (10 * 100 + 5 * 104) * 100)  # Day % on Day P&L's base
+
+
+def test_day_pct_of_position_bought_today_is_measured_from_the_fill(argus):
+    # Bought well above the prior close: the quote is +1.70% on the day, the position only +0.17%.
+    session_close = at(2026, 9, 25, 20)
+    argus.portfolios.add_transactions("growth", [TxnInput("BUY", "X", session_close - timedelta(hours=2), 10, 107.82)])
+    q = {"X": Quote("X", 108.0, 106.2, None, None, None, session_close, "fake")}
+    row = argus.portfolios.summary("growth", q)["positions"][0]
+    assert row["day_pnl"] == pytest.approx(10 * (108 - 107.82))
+    assert row["change_pct"] == pytest.approx((108 / 107.82 - 1) * 100)
+    # Held from before: Day % is the quote's own change.
+    q = {"X": Quote("X", 108.0, 106.2, None, None, None, session_close + timedelta(days=3), "fake")}
+    assert argus.portfolios.summary("growth", q)["positions"][0]["change_pct"] == pytest.approx(q["X"].change_pct)
 
 
 def test_summary_without_quotes_leaves_market_fields_empty(argus):

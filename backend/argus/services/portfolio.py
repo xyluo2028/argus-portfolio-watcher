@@ -341,16 +341,20 @@ class PortfolioService:
             tot["cost_basis"] += pos.cost_basis
             if q:
                 mv = pos.qty * q.price
-                day = 0.0
+                day, day_base, bought_today = 0.0, 0.0, False
                 quote_day = session_date(q.as_of)
                 for lot in pos.lots:
                     # Shares bought in the quote's session gain from their cost, not from the prior close.
                     # OPENING lots are transfers, so their (old) cost is never a day reference.
                     bought_that_day = lot.kind == TxnType.BUY and lot.opened.astimezone(NY).date() == quote_day
+                    bought_today |= bought_that_day
                     ref = lot.cost_per_share if bought_that_day else (q.prev_close or q.price)
                     day += lot.qty * (q.price - ref)
+                    day_base += lot.qty * ref
+                # Day % on the same base as Day P&L, so a position bought today shows its move since the fill.
+                change_pct = (day / day_base * 100 if day_base > EPS else None) if bought_today else q.change_pct
                 row |= {
-                    "price": q.price, "prev_close": q.prev_close, "change_pct": q.change_pct,
+                    "price": q.price, "prev_close": q.prev_close, "change_pct": change_pct,
                     "market_value": mv, "unrealized_pnl": mv - pos.cost_basis,
                     "unrealized_pct": (mv / pos.cost_basis - 1) * 100 if pos.cost_basis > EPS else None,
                     "day_pnl": day, "quote_as_of": q.as_of.isoformat(), "quote_source": q.source,
