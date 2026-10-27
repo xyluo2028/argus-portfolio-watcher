@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Iterable
 
-from argus.market_calendar import NY
+from argus.market_calendar import NY, trade_session
 from argus.models import TxnType
 from argus.services.lots import TxnLike
 
@@ -46,8 +46,9 @@ class DayPoint:
 
 
 def txn_session(ts: datetime, sessions: list[date]) -> date | None:
-    """The trading session a transaction settles into: its NY date, or the next session."""
-    d = ts.astimezone(NY).date()
+    """The trading session a transaction settles into: its NY date, or the next session if it was made
+    after that day's close (after-hours money is invested from the next session on)."""
+    d = trade_session(ts)
     for s in sessions:
         if s >= d:
             return s

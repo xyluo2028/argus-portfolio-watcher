@@ -83,6 +83,50 @@ def test_day_pct_of_position_bought_today_is_measured_from_the_fill(argus):
     assert argus.portfolios.summary("growth", q)["positions"][0]["change_pct"] == pytest.approx(q["X"].change_pct)
 
 
+def test_buy_after_the_close_at_the_close_price_leaves_the_session_alone(argus):
+    session_close = at(2026, 9, 25, 20)  # Fri 16:00 ET
+    argus.portfolios.add_transactions("growth", [
+        TxnInput("BUY", "X", at(2026, 9, 1), 10, 50),
+        TxnInput("BUY", "X", at(2026, 9, 26, 2), 5, 110),  # Fri 22:00 ET, at the close price
+    ])
+    q = {"X": Quote("X", 110.0, 100.0, None, None, None, session_close, "fake")}
+    s = argus.portfolios.summary("growth", q)
+    row = s["positions"][0]
+    assert row["day_pnl"] == pytest.approx(100) and row["market_value"] == pytest.approx(1650)
+    assert row["change_pct"] == pytest.approx(10)  # the stock's own move, so the brief's movers show it
+    assert s["totals"]["day_pnl_pct"] == pytest.approx(10)  # base is Thursday's 1000, not 1550
+    assert s["totals"]["ext_pnl"] == pytest.approx(0)
+    q = {"X": Quote("X", 110.0, 100.0, None, None, None, session_close, "fake",
+                    ext_price=111.0, ext_as_of=at(2026, 9, 26, 1), ext_session="post")}
+    assert argus.portfolios.summary("growth", q)["totals"]["ext_pnl"] == pytest.approx(15 * 1)
+
+
+def test_buy_after_the_close_at_a_post_market_price_shows_only_after_hours(argus):
+    session_close = at(2026, 9, 25, 20)
+    argus.portfolios.add_transactions("growth", [
+        TxnInput("BUY", "HD", at(2026, 9, 1), 10, 300),
+        TxnInput("BUY", "HD", at(2026, 9, 26, 2) + timedelta(minutes=15), 1, 317),
+    ])
+    q = {"HD": Quote("HD", 319.38, 320.0, None, None, None, session_close, "fake")}
+    s = argus.portfolios.summary("growth", q)
+    row = s["positions"][0]
+    assert row["day_pnl"] == pytest.approx(10 * (319.38 - 320))
+    assert row["change_pct"] == pytest.approx(q["HD"].change_pct)
+    assert s["totals"]["day_pnl_pct"] == pytest.approx(10 * (319.38 - 320) / 3200 * 100)
+    # No after-hours trade yet: the fill-to-close gain is after-hours money.
+    assert s["totals"]["ext_pnl"] == pytest.approx(319.38 - 317) and s["totals"]["ext_session"] == "post"
+    q = {"HD": Quote("HD", 319.38, 320.0, None, None, None, session_close, "fake",
+                     ext_price=317.5, ext_as_of=at(2026, 9, 26, 1), ext_session="post")}
+    row = argus.portfolios.summary("growth", q)["positions"][0]
+    assert row["day_pnl"] == pytest.approx(10 * (319.38 - 320))
+    assert row["ext_pnl"] == pytest.approx(10 * (317.5 - 319.38) + (317.5 - 317))
+    # Next session: the lot's day runs from its fill, which is how the performance series counts the flow.
+    monday = at(2026, 9, 28, 20)
+    q = {"HD": Quote("HD", 322.0, 319.38, None, None, None, monday, "fake")}
+    assert argus.portfolios.summary("growth", q)["positions"][0]["day_pnl"] == pytest.approx(
+        10 * (322 - 319.38) + (322 - 317))
+
+
 def test_summary_without_quotes_leaves_market_fields_empty(argus):
     argus.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 2, 10)])
     s = argus.portfolios.summary("growth")

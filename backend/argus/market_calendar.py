@@ -79,6 +79,29 @@ def session_date(ts: datetime) -> date:
     return date.fromisoformat(st["last_session"])
 
 
+@lru_cache(maxsize=512)
+def _trade_cutoff(d: date) -> datetime | None:
+    """When trades stop counting toward session `d` (None if `d` isn't a session). A date entered without
+    a time lands at 16:00 (parse_ny_datetime), so that's never after the close, even on a half day."""
+    day = pd.Timestamp(d)
+    if not _cal().is_session(day):
+        return None
+    return max(_py(_cal().session_close(day)), datetime.combine(d, time(16, 0), NY).astimezone(UTC))
+
+
+def trade_session(ts: datetime) -> date:
+    """The session a trade's money belongs to: its New York date if that's a session and the trade is
+    by its close; otherwise (after the close, weekends, holidays) the next session."""
+    ts = ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+    d = ts.astimezone(NY).date()
+    if not _cal().first_session.date() <= d < _cal().last_session.date():
+        return d  # outside the calendar's span: the NY date is the best we know
+    cutoff = _trade_cutoff(d)
+    if cutoff is not None and ts <= cutoff:
+        return d
+    return _cal().date_to_session(pd.Timestamp(d) + pd.Timedelta(days=1), "next").date()
+
+
 def parse_ny_datetime(s: str | None) -> datetime:
     """Parse user input: None -> now; "YYYY-MM-DD" -> that day's 16:00 close; else ISO in New York time."""
     if not s:

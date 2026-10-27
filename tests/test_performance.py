@@ -134,3 +134,13 @@ def test_dividend_on_its_ex_date_offsets_the_price_drop():
     pts = compute_series(txns, D[:2], closes)
     assert pts[1].ret == pytest.approx(0) and pts[1].flow_out == 10
     assert summarize(pts, inception=True)["gain"] == pytest.approx(0)
+
+
+def test_after_close_buy_is_invested_from_the_next_session():
+    # 22:15 ET on D[0] is after the close: the flow belongs to D[1] and D[0]'s return ignores it.
+    closes = {"X": {D[0]: 100, D[1]: 110}}
+    txns = [T(1, "OPENING", "X", at(D[0], 15), 10, 50), T(2, "BUY", "X", datetime(2026, 9, 22, 2, 15, tzinfo=UTC), 1, 101)]
+    pts = compute_series(txns, D[:2], closes)
+    assert pts[0].flow_in == pytest.approx(1000) and pts[0].value == pytest.approx(1000)
+    assert pts[1].flow_in == pytest.approx(101)
+    assert pts[1].ret == pytest.approx(11 * 110 / (1000 + 101) - 1)
