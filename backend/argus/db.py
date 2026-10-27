@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import Engine, create_engine, event, inspect
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from argus.models import Base
@@ -83,3 +84,13 @@ def session_scope(engine: Engine) -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def upsert(session: Session, model: type[Base], **values) -> None:
+    """Insert a row, or overwrite the given columns if its primary key exists. Cache tables filled on
+    a read path use this instead of `session.merge`, whose select-then-insert lets two concurrent
+    requests for the same missing row both insert it (UNIQUE constraint failed)."""
+    keys = [c.name for c in model.__table__.primary_key]
+    stmt = insert(model).values(**values)
+    session.execute(stmt.on_conflict_do_update(index_elements=keys, set_={
+        k: stmt.excluded[k] for k in values if k not in keys}))

@@ -250,3 +250,37 @@ def test_rate_limited_ticker_lookup_leaves_the_rest_for_later(fund):
 def test_holdings_of_a_stock_are_empty(a):
     h = a.fund_holdings("COHR")
     assert (h["fund"], h["holdings"], h["source"]) == (False, [], None)
+
+
+def test_concurrent_first_requests_for_a_missing_profile_both_succeed(a):
+    """The stock page asks for /api/profile and /api/holdings at once; both build the missing profile and
+    write it. Before B-085 the second insert failed with a UNIQUE constraint (a 500 on first open)."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import func, select
+
+    from argus.db import session_scope
+    from argus.models import CompanyProfile, FundProfile
+
+    both_read = threading.Barrier(2, timeout=5)
+
+    class RacingYahoo(FakeYahoo):
+        def get_info(self, symbol):
+            both_read.wait()  # neither has written yet: both saw the row missing
+            return super().get_info(symbol)
+
+        def get_fund_profile(self, symbol):
+            both_read.wait()
+            return {"top_holdings": [], "asset_classes": {}}
+
+    a.market.profile_provider = RacingYahoo()
+    with ThreadPoolExecutor(2) as pool:
+        got = list(pool.map(lambda _: a.company_profile("COHR"), range(2)))
+    assert [p["city"] for p in got] == ["Saxonburg"] * 2
+    both_read.reset()
+    with ThreadPoolExecutor(2) as pool:
+        list(pool.map(lambda _: a.fund_profiles(["SPY"]), range(2)))
+    with session_scope(a.engine) as s:
+        assert s.scalar(select(func.count()).select_from(CompanyProfile)) == 1
+        assert s.scalar(select(func.count()).select_from(FundProfile)) == 1

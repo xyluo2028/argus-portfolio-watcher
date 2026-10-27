@@ -19,7 +19,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from argus.config import Settings
-from argus.db import session_scope
+from argus.db import session_scope, upsert
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
@@ -266,7 +266,7 @@ class MarketService:
             self._store_bars(sym, "1d", bars)
             if bars and todo[sym] == start and bars[0].ts > start + timedelta(days=5):
                 with session_scope(self.engine) as s:
-                    s.merge(RefreshLog(key=f"bars-first:{sym}", at=bars[0].ts))
+                    upsert(s, RefreshLog, key=f"bars-first:{sym}", at=bars[0].ts)
 
     def _fetch_history(self, symbol, start, end, interval) -> list[Bar]:
         if self.history_provider is None:
@@ -420,7 +420,7 @@ class MarketService:
         as_of = datetime.now(UTC)
         sources = sources | {"_version": FUNDAMENTALS_VERSION}
         with session_scope(self.engine) as s:
-            s.merge(Fundamental(symbol=symbol, as_of=as_of, metrics=metrics, sources=sources))
+            upsert(s, Fundamental, symbol=symbol, as_of=as_of, metrics=metrics, sources=sources)
         return metrics, sources, as_of
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
@@ -474,17 +474,22 @@ class MarketService:
             except ProviderError:
                 directory = {}
         with session_scope(self.engine) as s:
-            for sym in symbols:
-                inst = s.get(Instrument, sym) or Instrument(symbol=sym)
-                info = directory.get(sym)
-                if info:
-                    inst.type = inst.type or info.type
-                    inst.name = inst.name or info.name
-                if self.profile_provider is not None and not inst.sector:
-                    try:
-                        prof = self.profile_provider.get_info(sym)
-                    except ProviderError:
-                        prof = {}
-                    inst.sector = prof.get("sector") or ("ETF" if prof.get("quoteType") == "ETF" else None)
-                    inst.industry = prof.get("industry") or prof.get("category")
-                s.merge(inst)
+            known = {i.symbol: i for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(symbols)))}
+        rows = []
+        for sym in symbols:
+            inst = known.get(sym) or Instrument(symbol=sym)
+            row = dict(symbol=sym, type=inst.type, name=inst.name, sector=inst.sector, industry=inst.industry)
+            if info := directory.get(sym):
+                row["type"], row["name"] = inst.type or info.type, inst.name or info.name
+            if self.profile_provider is not None and not inst.sector:
+                try:
+                    prof = self.profile_provider.get_info(sym)
+                except ProviderError:
+                    prof = {}
+                row["sector"] = prof.get("sector") or ("ETF" if prof.get("quoteType") == "ETF" else None)
+                row["industry"] = prof.get("industry") or prof.get("category")
+            rows.append(row)
+        # Upserted in a fresh transaction (portfolio loads call this concurrently), after the fetches.
+        with session_scope(self.engine) as s:
+            for row in rows:
+                upsert(s, Instrument, **row, updated_at=datetime.now(UTC))
