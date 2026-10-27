@@ -16,7 +16,7 @@ from typing import Callable
 from sqlalchemy import Engine, select
 
 from argus.config import Settings, load_settings
-from argus.db import make_engine, session_scope
+from argus.db import make_engine, session_scope, upsert
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
@@ -345,7 +345,7 @@ class Argus:
             data["suggested_peers"] = self._similar_funds(sym, data.get("category"))
         data = {k: v for k, v in data.items() if v not in (None, "", [])} | {"suggested_peers": data.get("suggested_peers", [])}
         with session_scope(self.engine) as s:
-            s.merge(CompanyProfile(symbol=sym, as_of=now, data=data | {"v": self.PROFILE_VERSION}))
+            upsert(s, CompanyProfile, symbol=sym, as_of=now, data=data | {"v": self.PROFILE_VERSION})
         return {"symbol": sym, "as_of": now.isoformat(), **data}
 
     @staticmethod
@@ -518,8 +518,8 @@ class Argus:
                         ys = yahoo_symbol(*listing) if listing else None
                         if ys and listing[1] == "US":
                             ys = normalize_symbol(ys)
-                        s.merge(SecurityMap(id=k, ticker=listing[0] if listing else None,
-                                            exchange=listing[1] if listing else None, symbol=ys, as_of=now))
+                        upsert(s, SecurityMap, id=k, ticker=listing[0] if listing else None,
+                               exchange=listing[1] if listing else None, symbol=ys, as_of=now)
                         known[k] = (ys, listing[1] if listing else None)
         for k, (rs, _) in keyed.items():
             ys, exch = known.get(k, (None, None))
@@ -916,7 +916,7 @@ class Argus:
                 fetched = dict(zip(todo, pool.map(yahoo.get_fund_profile, todo)))
             with session_scope(self.engine) as s:
                 for sym, data in fetched.items():
-                    s.merge(FundProfile(symbol=sym, as_of=now, data=data))
+                    upsert(s, FundProfile, symbol=sym, as_of=now, data=data)
             out |= fetched
         return {k: v for k, v in out.items() if v}
 
@@ -943,7 +943,7 @@ class Argus:
             with session_scope(self.engine) as s:
                 for sym, rows in fetched.items():
                     if rows is not None:
-                        s.merge(DividendHistory(symbol=sym, as_of=now, data=[list(x) for x in rows]))
+                        upsert(s, DividendHistory, symbol=sym, as_of=now, data=[list(x) for x in rows])
                         fresh[sym] = rows
         return {sym: fresh.get(sym) or stale.get(sym, []) for sym in symbols}
 
