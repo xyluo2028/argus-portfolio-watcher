@@ -11,7 +11,7 @@ from sqlalchemy import Engine, delete, func, select
 
 from argus.db import session_scope
 from argus.errors import ArgusError
-from argus.market_calendar import NY, market_status, session_date
+from argus.market_calendar import NY, market_status, session_date, trade_session
 from argus.models import AuditLog, Instrument, NavDaily, Portfolio, Target, Transaction, TxnType
 from argus.providers.base import Quote
 from argus.services.lots import EPS, PositionState, build_positions
@@ -317,7 +317,7 @@ class PortfolioService:
 
         rows = []
         tot = {"market_value": 0.0, "cost_basis": 0.0, "day_pnl": 0.0, "realized_pnl": 0.0, "dividends": 0.0}
-        ext_pnl, ext_mv, ext_sessions = 0.0, 0.0, set()
+        ext_pnl, ext_mv, ext_sessions, after_mv = 0.0, 0.0, set(), 0.0
         priced_all = True
         for sym, pos in sorted(state.items()):
             tot["realized_pnl"] += pos.realized_pnl
@@ -341,12 +341,18 @@ class PortfolioService:
             tot["cost_basis"] += pos.cost_basis
             if q:
                 mv = pos.qty * q.price
-                day, day_base, bought_today = 0.0, 0.0, False
+                day, day_base, bought_today, after = 0.0, 0.0, False, []
                 quote_day = session_date(q.as_of)
                 for lot in pos.lots:
+                    lot_session = trade_session(lot.opened)
+                    if lot_session > quote_day:
+                        # Bought after the quote's session closed: next-session money, not part of this
+                        # session's Day P&L or its base; its move from the fill shows as after-hours P&L.
+                        after.append(lot)
+                        continue
                     # Shares bought in the quote's session gain from their cost, not from the prior close.
                     # OPENING lots are transfers, so their (old) cost is never a day reference.
-                    bought_that_day = lot.kind == TxnType.BUY and lot.opened.astimezone(NY).date() == quote_day
+                    bought_that_day = lot.kind == TxnType.BUY and lot_session == quote_day
                     bought_today |= bought_that_day
                     ref = lot.cost_per_share if bought_that_day else (q.prev_close or q.price)
                     day += lot.qty * (q.price - ref)
@@ -361,12 +367,22 @@ class PortfolioService:
                 }
                 tot["market_value"] += mv
                 tot["day_pnl"] += day
+                after_mv += sum(l.qty for l in after) * q.price
+                # After-hours P&L runs from the last close, or from the fill for shares bought since.
+                last = q.ext_price if q.ext_price is not None else q.price
+                lot_ext = sum(l.qty * (last - (l.cost_per_share if l.kind == TxnType.BUY else q.price)) for l in after)
                 if q.ext_price is not None:
                     row |= {"ext_price": q.ext_price, "ext_change_pct": q.ext_change_pct, "ext_session": q.ext_session,
-                            "ext_as_of": q.ext_as_of.isoformat(), "ext_pnl": pos.qty * q.ext_change}
+                            "ext_as_of": q.ext_as_of.isoformat(),
+                            "ext_pnl": (pos.qty - sum(l.qty for l in after)) * q.ext_change + lot_ext}
                     ext_pnl += row["ext_pnl"]
                     ext_mv += mv
                     ext_sessions.add(q.ext_session)
+                elif after:
+                    # No after-hours trade yet: the fill-to-close difference is still after-hours money.
+                    row["ext_pnl"] = lot_ext
+                    ext_pnl += lot_ext
+                    ext_sessions.add("post")
             else:
                 priced_all = False
             if include_lots:
@@ -377,7 +393,8 @@ class PortfolioService:
         mv = tot["market_value"]
         for r in rows:
             r["weight_pct"] = (r["market_value"] / mv * 100) if mv and "market_value" in r else None
-        prev_mv = mv - tot["day_pnl"]
+        # The last session's starting value, leaving out shares bought after it closed.
+        prev_mv = mv - after_mv - tot["day_pnl"]
         totals = tot | {
             "position_count": len(rows),
             "unrealized_pnl": mv - tot["cost_basis"] if priced_all else None,
