@@ -119,3 +119,12 @@ def parse_ny_datetime(s: str | None) -> datetime:
 def sessions_between(start: date, end: date) -> list[date]:
     """Trading days in [start, end], ascending."""
     return [ts.date() for ts in _cal().sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))]
+
+
+def session_on_or_after(d: date) -> date:
+    """`d` if it's a trading day, else the next one (a weekend or holiday ex-date moves forward)."""
+    if _cal().first_session.date() <= d <= _cal().last_session.date():
+        return _cal().date_to_session(pd.Timestamp(d), "next").date()
+    while d.weekday() >= 5:  # past the calendar's span: weekends are all we know
+        d += timedelta(days=1)
+    return d

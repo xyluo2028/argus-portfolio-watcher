@@ -276,6 +276,8 @@ export interface WatchItem {
 export interface CalEvent {
   symbol: string; kind: "earnings" | "ex_dividend" | "dividend_pay"; date: string; hour: string | null; held: boolean;
   epsEstimate?: number; epsActual?: number; epsSurprisePct?: number; revenueEstimate?: number; revenueActual?: number;
+  ex_date?: string;  // dividend_pay: the ex-date it belongs to; `held` means shares were held going into it
+  estimated?: boolean; per_share?: number; amount?: number;  // ex_dividend projected from the payment rhythm
 }
 
 export interface AlertRule {
