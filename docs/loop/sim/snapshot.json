@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-26T02:36:05.284911+00:00",
+ "created_at": "2026-10-27T02:39:49.125625+00:00",
  "tables": {
   "portfolio": [
    {
@@ -212,6 +212,15 @@
     "sector": "Industrials",
     "industry": "Aerospace & Defense",
     "updated_at": "2026-10-20T15:26:31.190751+00:00"
+   },
+   {
+    "symbol": "MNTN",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-10-27T02:17:34.484898+00:00"
    },
    {
     "symbol": "MSFT",
@@ -1115,6 +1124,54 @@
     "external_id": "r004-macro-ief",
     "deleted": false,
     "created_at": "2026-10-23T02:16:58.369838+00:00"
+   },
+   {
+    "id": 41,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "JPM",
+    "qty": 1.0,
+    "price": 334.4,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-27T02:15:54.115378+00:00",
+    "note": "r006 deploy idle cash to underweight JPM (post-market quote)",
+    "source": "cli",
+    "external_id": "r006-income-jpm",
+    "deleted": false,
+    "created_at": "2026-10-27T02:15:54.400563+00:00"
+   },
+   {
+    "id": 42,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "HD",
+    "qty": 1.0,
+    "price": 317.0,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-27T02:15:55.042109+00:00",
+    "note": "r006 deploy idle cash to underweight HD (post-market quote)",
+    "source": "cli",
+    "external_id": "r006-income-hd",
+    "deleted": false,
+    "created_at": "2026-10-27T02:15:55.320619+00:00"
+   },
+   {
+    "id": 43,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "RMBS",
+    "qty": 25.0,
+    "price": 90.32,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-27T02:17:16.630351+00:00",
+    "note": "r006 add after Q3 print: rev +22.3% y/y, op margin 38.3%",
+    "source": "cli",
+    "external_id": "r006-growth-rmbs-add",
+    "deleted": false,
+    "created_at": "2026-10-27T02:17:16.932153+00:00"
    }
   ],
   "target": [
@@ -1326,6 +1383,12 @@
    },
    {
     "watchlist_id": 1,
+    "symbol": "MNTN",
+    "note": null,
+    "added_at": "2026-10-27T02:17:34.482589+00:00"
+   },
+   {
+    "watchlist_id": 1,
     "symbol": "NUTX",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.419929+00:00"
@@ -1431,6 +1494,16 @@
     "active": true,
     "created_by": "cli",
     "created_at": "2026-10-26T02:18:36.945030+00:00"
+   },
+   {
+    "id": 8,
+    "symbol": "ABBV",
+    "kind": "day_loss_pct",
+    "threshold": 5.0,
+    "note": "loop-income r006: ABBV reports 10-30 bmo; payout safety check if it drops 5%+",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:19:44.775758+00:00"
    }
   ],
   "alert_event": [],
@@ -1903,10 +1976,65 @@
     "kind": "note",
     "text": "[loop-growth] r005 pre-earnings (Q3 report 10-26 amc, est EPS 0.80 / rev 217.4M = ~+22% y/y vs 178.5M). Hold through. Exit if Q3 revenue growth < 12% y/y or product (chip) revenue falls q/q with guide below consensus. Note SEC data ends Q1'26 (stale), check the 10-Q/press release directly.",
     "review_on": "2026-10-27",
-    "archived": false,
+    "archived": true,
     "created_by": "cli",
     "created_at": "2026-10-26T02:21:05.129839+00:00",
-    "updated_at": "2026-10-26T02:21:05.129843+00:00"
+    "updated_at": "2026-10-27T02:17:34.496624+00:00"
+   },
+   {
+    "id": 44,
+    "symbol": "JPM",
+    "kind": "thesis",
+    "text": "loop-income r006: added 1 sh @334.40 (post-market 10-26) to bring JPM back toward its 5% target with idle cash. Thesis unchanged: fortress balance sheet, dividend raised to 1.65/qtr in 2026, ~2% yield with high growth. Review after Q4 results / Dec ex-date; trim if CET1 falls or dividend growth stalls.",
+    "review_on": "2027-01-15",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:16:05.924167+00:00",
+    "updated_at": "2026-10-27T02:16:05.924172+00:00"
+   },
+   {
+    "id": 45,
+    "symbol": "HD",
+    "kind": "thesis",
+    "text": "loop-income r006: added 1 sh @317.00 (post-market 10-26, -0.75% AH) to bring HD toward its 5% target with idle cash. Thesis: ~2.9% yield, steady dividend raises; housing turnover is the risk. Review at Q3 earnings mid-Nov; payout ratio above ~65% or a dividend freeze is the exit signal.",
+    "review_on": "2026-11-18",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:16:06.946713+00:00",
+    "updated_at": "2026-10-27T02:16:06.946719+00:00"
+   },
+   {
+    "id": 46,
+    "symbol": "RMBS",
+    "kind": "thesis",
+    "text": "[loop-growth] r006 thesis update + add 25 sh @ 90.32 (cost now 121 sh @ 92.98, 11.25% of capital). Q3-26 (SEC): revenue 218.3M, +22.3% y/y (Q1 +8.1%, Q2 +20.4%: re-accelerating), op margin 38.3% vs 35.4% a year ago, FCF TTM 312.9M. Beat EPS 0.84 vs 0.80 adj; Q4 guide reported in-line (per headlines; Argus has no guidance). Thesis intact: memory interface chips riding DDR5/AI server, royalty base funds it. Exit if revenue growth < 12% y/y or op margin < 32% for two quarters. Max size 15% at cost; no more adds.",
+    "review_on": "2027-02-03",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:17:27.695877+00:00",
+    "updated_at": "2026-10-27T02:17:27.695883+00:00"
+   },
+   {
+    "id": 47,
+    "symbol": "MNTN",
+    "kind": "note",
+    "text": "[loop-growth] r006 watch candidate (not bought). CTV performance-ad platform, mkt cap ~703M at 9.40, P/S 2.3, GM 81%, revenue +20.6% y/y Q2-26 (Q1 +14.2%), op margin 8.6% Q2 / 13% Q1 (was negative a year ago), no debt, insiders ~19.5%. P/E 12.8 is flattered by a Q4-25 tax item (NI 34.5M vs op income 20.5M); normalized ~20x. Risks: decelerating/lumpy growth, Q2 EPS miss, -40% 1y, insider selling 10.3M, no insider buys. Reports 11-04: buy a 4-6% starter if Q3 revenue growth >= 20% and op margin >= 10%; pass if growth < 15%.",
+    "review_on": "2026-11-05",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:17:28.705917+00:00",
+    "updated_at": "2026-10-27T02:17:28.705922+00:00"
+   },
+   {
+    "id": 48,
+    "symbol": "IEF",
+    "kind": "note",
+    "text": "loop-macro r006 (10-26): no trade. Pre-staged SELL 6 GLD / BUY 24 IEF (sim net cash +20.04, realized -67.80 on GLD). Case: 20d corr to SPY IEF -0.42 vs GLD +0.51; TLT +3.9% vs SPY 0.0% 20d; HYG-LQD -2.0pp; 10Y 4.99% (-17bp 1M). Trade cuts 1y book vol ~6.1%->5.7% (own calc). Execute after FOMC 10-28 + GDP/PCE 10-29 unless PCE runs hot and 10Y breaks back above 5.15%.",
+    "review_on": "2026-10-29",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-27T02:18:34.140228+00:00",
+    "updated_at": "2026-10-27T02:18:34.140232+00:00"
    }
   ],
   "peer_list": [],
@@ -4030,6 +4158,312 @@
      "benchmark": "SPY",
      "counts": {
       "transactions": 1,
+      "targets": 0,
+      "nav_days": 0,
+      "open_positions": 1
+     }
+    },
+    "after": null
+   },
+   {
+    "id": 105,
+    "ts": "2026-10-27T02:15:54.402533+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "41",
+    "before": null,
+    "after": {
+     "id": 41,
+     "type": "BUY",
+     "symbol": "JPM",
+     "qty": 1.0,
+     "price": 334.4,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-27T02:15:54.115378+00:00",
+     "note": "r006 deploy idle cash to underweight JPM (post-market quote)",
+     "source": "cli",
+     "external_id": "r006-income-jpm",
+     "deleted": false
+    }
+   },
+   {
+    "id": 106,
+    "ts": "2026-10-27T02:15:55.322829+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "42",
+    "before": null,
+    "after": {
+     "id": 42,
+     "type": "BUY",
+     "symbol": "HD",
+     "qty": 1.0,
+     "price": 317.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-27T02:15:55.042109+00:00",
+     "note": "r006 deploy idle cash to underweight HD (post-market quote)",
+     "source": "cli",
+     "external_id": "r006-income-hd",
+     "deleted": false
+    }
+   },
+   {
+    "id": 107,
+    "ts": "2026-10-27T02:16:05.925511+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "44",
+    "before": null,
+    "after": {
+     "id": 44,
+     "symbol": "JPM",
+     "kind": "thesis",
+     "text": "loop-income r006: added 1 sh @334.40 (post-market 10-26) to bring JPM back toward its 5% target with idle cash. Thesis unchanged: fortress balance sheet, dividend raised to 1.65/qtr in 2026, ~2% yield with high growth. Review after Q4 results / Dec ex-date; trim if CET1 falls or dividend growth stalls.",
+     "review_on": "2027-01-15",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-27T02:16:05.924167+00:00",
+     "updated_at": "2026-10-27T02:16:05.924172+00:00"
+    }
+   },
+   {
+    "id": 108,
+    "ts": "2026-10-27T02:16:06.947856+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "45",
+    "before": null,
+    "after": {
+     "id": 45,
+     "symbol": "HD",
+     "kind": "thesis",
+     "text": "loop-income r006: added 1 sh @317.00 (post-market 10-26, -0.75% AH) to bring HD toward its 5% target with idle cash. Thesis: ~2.9% yield, steady dividend raises; housing turnover is the risk. Review at Q3 earnings mid-Nov; payout ratio above ~65% or a dividend freeze is the exit signal.",
+     "review_on": "2026-11-18",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-27T02:16:06.946713+00:00",
+     "updated_at": "2026-10-27T02:16:06.946719+00:00"
+    }
+   },
+   {
+    "id": 109,
+    "ts": "2026-10-27T02:17:16.934539+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "43",
+    "before": null,
+    "after": {
+     "id": 43,
+     "type": "BUY",
+     "symbol": "RMBS",
+     "qty": 25.0,
+     "price": 90.32,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-27T02:17:16.630351+00:00",
+     "note": "r006 add after Q3 print: rev +22.3% y/y, op margin 38.3%",
+     "source": "cli",
+     "external_id": "r006-growth-rmbs-add",
+     "deleted": false
+    }
+   },
+   {
+    "id": 110,
+    "ts": "2026-10-27T02:17:27.697098+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "46",
+    "before": null,
+    "after": {
+     "id": 46,
+     "symbol": "RMBS",
+     "kind": "thesis",
+     "text": "[loop-growth] r006 thesis update + add 25 sh @ 90.32 (cost now 121 sh @ 92.98, 11.25% of capital). Q3-26 (SEC): revenue 218.3M, +22.3% y/y (Q1 +8.1%, Q2 +20.4%: re-accelerating), op margin 38.3% vs 35.4% a year ago, FCF TTM 312.9M. Beat EPS 0.84 vs 0.80 adj; Q4 guide reported in-line (per headlines; Argus has no guidance). Thesis intact: memory interface chips riding DDR5/AI server, royalty base funds it. Exit if revenue growth < 12% y/y or op margin < 32% for two quarters. Max size 15% at cost; no more adds.",
+     "review_on": "2027-02-03",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-27T02:17:27.695877+00:00",
+     "updated_at": "2026-10-27T02:17:27.695883+00:00"
+    }
+   },
+   {
+    "id": 111,
+    "ts": "2026-10-27T02:17:28.706901+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "47",
+    "before": null,
+    "after": {
+     "id": 47,
+     "symbol": "MNTN",
+     "kind": "note",
+     "text": "[loop-growth] r006 watch candidate (not bought). CTV performance-ad platform, mkt cap ~703M at 9.40, P/S 2.3, GM 81%, revenue +20.6% y/y Q2-26 (Q1 +14.2%), op margin 8.6% Q2 / 13% Q1 (was negative a year ago), no debt, insiders ~19.5%. P/E 12.8 is flattered by a Q4-25 tax item (NI 34.5M vs op income 20.5M); normalized ~20x. Risks: decelerating/lumpy growth, Q2 EPS miss, -40% 1y, insider selling 10.3M, no insider buys. Reports 11-04: buy a 4-6% starter if Q3 revenue growth >= 20% and op margin >= 10%; pass if growth < 15%.",
+     "review_on": "2026-11-05",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-27T02:17:28.705917+00:00",
+     "updated_at": "2026-10-27T02:17:28.705922+00:00"
+    }
+   },
+   {
+    "id": 112,
+    "ts": "2026-10-27T02:17:34.484295+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "MNTN"
+     ]
+    }
+   },
+   {
+    "id": 113,
+    "ts": "2026-10-27T02:17:34.497501+00:00",
+    "actor": "ui",
+    "action": "update",
+    "entity": "note",
+    "entity_id": "43",
+    "before": {
+     "id": 43,
+     "symbol": "RMBS",
+     "kind": "note",
+     "text": "[loop-growth] r005 pre-earnings (Q3 report 10-26 amc, est EPS 0.80 / rev 217.4M = ~+22% y/y vs 178.5M). Hold through. Exit if Q3 revenue growth < 12% y/y or product (chip) revenue falls q/q with guide below consensus. Note SEC data ends Q1'26 (stale), check the 10-Q/press release directly.",
+     "review_on": "2026-10-27",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-26T02:21:05.129839+00:00",
+     "updated_at": "2026-10-26T02:21:05.129843+00:00"
+    },
+    "after": {
+     "id": 43,
+     "symbol": "RMBS",
+     "kind": "note",
+     "text": "[loop-growth] r005 pre-earnings (Q3 report 10-26 amc, est EPS 0.80 / rev 217.4M = ~+22% y/y vs 178.5M). Hold through. Exit if Q3 revenue growth < 12% y/y or product (chip) revenue falls q/q with guide below consensus. Note SEC data ends Q1'26 (stale), check the 10-Q/press release directly.",
+     "review_on": "2026-10-27",
+     "archived": true,
+     "created_by": "cli",
+     "created_at": "2026-10-26T02:21:05.129839+00:00",
+     "updated_at": "2026-10-27T02:17:34.496624+00:00"
+    }
+   },
+   {
+    "id": 114,
+    "ts": "2026-10-27T02:18:34.141428+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "48",
+    "before": null,
+    "after": {
+     "id": 48,
+     "symbol": "IEF",
+     "kind": "note",
+     "text": "loop-macro r006 (10-26): no trade. Pre-staged SELL 6 GLD / BUY 24 IEF (sim net cash +20.04, realized -67.80 on GLD). Case: 20d corr to SPY IEF -0.42 vs GLD +0.51; TLT +3.9% vs SPY 0.0% 20d; HYG-LQD -2.0pp; 10Y 4.99% (-17bp 1M). Trade cuts 1y book vol ~6.1%->5.7% (own calc). Execute after FOMC 10-28 + GDP/PCE 10-29 unless PCE runs hot and 10Y breaks back above 5.15%.",
+     "review_on": "2026-10-29",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-27T02:18:34.140228+00:00",
+     "updated_at": "2026-10-27T02:18:34.140232+00:00"
+    }
+   },
+   {
+    "id": 115,
+    "ts": "2026-10-27T02:19:44.777047+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "8",
+    "before": null,
+    "after": {
+     "symbol": "ABBV",
+     "kind": "day_loss_pct",
+     "threshold": 5.0
+    }
+   },
+   {
+    "id": 116,
+    "ts": "2026-10-27T02:31:21.240888+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": null,
+    "after": {
+     "name": "scratch-b046",
+     "benchmark": "SPY"
+    }
+   },
+   {
+    "id": 117,
+    "ts": "2026-10-27T02:31:21.256287+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "44",
+    "before": null,
+    "after": {
+     "id": 44,
+     "type": "BUY",
+     "symbol": "HD",
+     "qty": 10.0,
+     "price": 300.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-20T20:00:00+00:00",
+     "note": null,
+     "source": "ui",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 118,
+    "ts": "2026-10-27T02:31:21.268196+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "45",
+    "before": null,
+    "after": {
+     "id": 45,
+     "type": "BUY",
+     "symbol": "HD",
+     "qty": 1.0,
+     "price": 317.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-27T02:31:21.265679+00:00",
+     "note": null,
+     "source": "ui",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 119,
+    "ts": "2026-10-27T02:31:29.015393+00:00",
+    "actor": "ui",
+    "action": "delete",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": {
+     "id": 4,
+     "name": "scratch-b046",
+     "benchmark": "SPY",
+     "counts": {
+      "transactions": 2,
       "targets": 0,
       "nav_days": 0,
       "open_positions": 1

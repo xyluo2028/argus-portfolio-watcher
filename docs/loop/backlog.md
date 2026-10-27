@@ -25,7 +25,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-002 Check every page at phone width
 - kind: ux · severity: medium
-- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005
+- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005, income r006, macro r006
 - evidence: pages were mostly designed and checked at desktop width. r001 at 390 px: Markets is 5,418 px tall
   with one gauge per row and clips the sector and calendar tables; Analysis tables (stress, dividends) and the
   Screener results table clip after the first columns; yield-curve end labels overlap on desktop
@@ -35,6 +35,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r003: phone-width Dashboard holdings table shows only symbol and name (macro r003 #8); Screener filter rows wrap onto two lines (multibagger r003); Dividends/Analysis tables still cut off (income r003)
 - r004: Markets at 390 px shows nine full-width gauge cards before fear & greed; Markets tab off-screen in the nav (macro r004 #9)
 - r005: stock page peers table and Events row cut off at phone width (multibagger r005)
+- r006: Analysis at 390 px: stress scenarios show name and window but not the loss or $ change; factor table shows labels only; correlations clipped (income r006 #5); Markets 5,756 px tall (macro r006)
 - status: open
 
 ### B-003 Header badge says "no Finnhub key" when the stream is only switched off
@@ -54,10 +55,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-009 Stock page "Revenue growth, latest quarter" (Finnhub) contradicts the SEC table on the same page
 - kind: bug · severity: high
-- reported by: multibagger r001, still present r002, multibagger r003, multibagger r005
+- reported by: multibagger r001, still present r002, multibagger r003, multibagger r005, multibagger r006
 - evidence: /t/BLLN shows −12.8% (Finnhub `revenue_growth_q_yoy_pct`) above SEC quarters giving +64.4%
 - r003: still present (BLLN −12.8% vs SEC +64.4%; multibagger r003)
 - r005: still present (BLLN −12.8% vs SEC +64.4%; multibagger r005)
+- r006: after RMBS's Q3 print the valuation card stays a quarter behind the SEC table on the same page: TTM revenue $756M (Yahoo, through Q2) vs $796M, latest-quarter growth +20.4% (Finnhub Q2) vs +22.3% (SEC Q3), EPS TTM $2.18 vs $2.43 (multibagger r006 #1; see B-079)
 - status: open
 
 ### B-011 VICR Q3 2025 revenue $407.7M: a mis-dated 10-K fact beats the 10-Q's $110.4M
@@ -74,36 +76,24 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r004: still present (income r004)
 - status: open
 
-### B-013 Upcoming dividends disagree across Dividends, Coming up, the brief and events
-- kind: bug · severity: medium
-- reported by: income r001, income r003, macro r005, income r005
-- evidence: Dividends projects ex-dates in the next 14 days but Coming up and `/api/brief` show none; events
-  lists an ABBV pay the position isn't entitled to; estimated ex-dates on weekends; JPM/ABBV next ex-date null
-  because it falls in 2027 (rounds/001/investor-income.md #4). r002: Dividends estimates PG ex-date Sat 10-24
-  while events have the announced Fri 10-23; Coming up shows a JPM pay (Sat 10-31) for a position bought after
-  the ex-date (rounds/002/investor-income.md #4)
-- reported by (again): income r002
-- r003: KO estimated ex-date ~12-15 though the announced ex-date is 12-01 (12-15 is the pay date); PG still Sat 10-24 vs announced 10-23; Coming up still lists the unentitled JPM pay (rounds/003/investor-income.md #4). See also B-054 (VTIP December not projected)
-- r004: PG "~Oct 24" (Dividends) vs "Fri Oct 23" (Coming up) on the same page; events still lists the unentitled ABBV 11-16 pay (income r004 #8)
-- r005: SGOV/IEF estimated ex-dates Sun 11-01, NEE ~Nov 28 (Sat) vs Fri 11-27 on /t/NEE, KO ~Dec 15 vs Dec 1; Coming up and the brief still list the unentitled JPM 10-31 pay as held (macro r005 #3, income r005 #3)
-- status: open
-
 ### B-016 Market context figures frozen up to 15 min with no fetched-at time (XLI 1D 0.00%)
 - kind: bug · severity: medium
-- reported by: macro r001, macro r005
+- reported by: macro r001, macro r005, macro r006
 - evidence: XLI `1D: 0.0` while its quote is +0.05%; `as_of` is a date only (rounds/001/investor-macro.md)
 - r003: didn't reproduce (sector 1D matched quotes; macro r003)
 - r005: weekend Markets header says "as of Fri 4:00 PM ET" while oil, gold, USD/JPY and BTC show Sunday-night prices with no time tag (macro r005 #2; see B-055)
+- r006: Markets reads "as of Mon, Oct 26, 4:00 PM ET" while WTI, gold, USD/JPY and BTC are 10-27 overnight prices with no tag (macro r006)
 - status: open
 
 ### B-017 Asset-class view: bonds, TIPS, gold, commodities and cash show as "Unclassified"; no asset-class targets or duration
 - kind: feature · severity: high
-- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003
+- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003, macro r006
 - evidence: look-through "Unclassified" 39.3% (loop-macro) and 35.5% (loop-income); `funds_without_profile`
   lists BND/VCIT/VGIT/SCHP; can't check a bond floor or set drift targets by asset class; no rate-shock scenario
 - r003: still 39.3% (loop-macro) / 35.5% (loop-income) Unclassified (macro r003, income r003)
 - r004: still present (income r004)
 - r005: still open (macro r005, income r005)
+- r006: /t/IEF has the N-PORT holdings (maturities, coupons) but shows no weighted maturity or duration; Peers lists TLT, EDV, ZROZ (17–27y duration) next to IEF (~7y); 39.1% Unclassified (macro r006 #3)
 - status: open
 
 ### B-018 Notes (and cost alerts) aren't tied to a portfolio
@@ -116,11 +106,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-019 Screener has only the last calendar year: no TTM or latest-quarter growth
 - kind: feature · severity: medium
-- reported by: multibagger r001, multibagger r003, multibagger r005
+- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006
 - evidence: `fiscal_year: 2025` on 2026-10-20; LOAR +23% CY vs +36–39% latest quarters
 - r003: misled a screen — DUOL and ODD topped it on last year's growth but are now decelerating or shrinking (multibagger r003)
 - r004: XZO +62% in the screener vs +3% latest SEC quarter; COLL and HIMS likewise (multibagger r004 #4)
 - r005: ADMA FY2025 +20% vs +2.0% / −0.3% in the last two quarters; NXT, XZO (multibagger r005 #5)
+- r006: fifth round: LQDT FY growth +31.2% vs +8.1/+3.7/−0.9% latest quarters; HROW op. margin +11.2% vs −15.6%/−50.0%; HIMS +4.5% vs −12.9% (3 of 8 hits; multibagger r006 #8)
 - status: open
 
 ### B-020 Rows missing gross margin silently drop out of a gross-margin filter
@@ -131,52 +122,47 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-021 Two unlabeled betas; "SPY falls 10%" scenario understates risk next to the historical replays
 - kind: ux · severity: medium
-- reported by: income r001, income r003, macro r003
+- reported by: income r001, income r003, macro r003, macro r006
 - evidence: SCHD 0.71 (fundamentals) vs 0.22 (1y risk); scenario −1.5% vs replays −14% to −25%
 - r003: three unlabeled betas (SPY tile 0.14, factor loading 0.36, stock pages use Finnhub's: XOM −0.67 vs 0.17); "SPY falls 10%" −2.5% vs replays −5.7% to −26.5% (income r003 #9, macro r003)
+- r006: beta 0.25 (vs SPY, 1y) next to a factor "Market" loading 0.36, neither labeled (macro r006)
 - status: open
 
 ### B-022 Targets & drift card opens on "By sector" when targets are saved by position
 - kind: ux · severity: medium
-- reported by: income r001, still present r002, macro r003, income r003
+- reported by: income r001, still present r002, macro r003, income r003, macro r006
 - r003: still present (macro r003 #7, income r003)
 - r004: still present (income r004)
 - r005: still opens on "By sector"; "Targets sum to 0.0%" (income r005)
+- r006: still opens "By sector", "Targets sum to 0.0%" (macro r006)
 - status: open
 
 ### B-023 Simulate and alerts can't answer income or drift questions
 - kind: feature · severity: medium
-- reported by: income r001, income r003, macro r003, macro r005
+- reported by: income r001, income r003, macro r003, macro r005, macro r006
 - evidence: simulate has no income/drift after; no dividend or drift alert kinds
 - r003: simulate still shows no income or drift after, buys fractional shares from a dollar amount (income r003 #8); also no beta, volatility or VaR after the trade (macro r003 #6)
 - r004: macro learned only after trading that beta went 0.240 → 0.246 (macro r004 #6)
 - r005: simulate has no before/after risk; `value_after` counts net cash spent as a value gain (macro r005 #6)
+- r006: simulate SELL 6 GLD / BUY 24 IEF returns no risk before/after (computed by hand: vol 6.09→5.67, beta 0.255→0.236, VaR $575→$543); `value_after` drops by the $20.04 cash released (macro r006 #5)
 - status: open
 
 ### B-024 No cash line: targets under 100% produce phantom sells in drift
 - kind: feature · severity: medium
-- reported by: macro r001, macro r003
+- reported by: macro r001, macro r003, macro r006
 - r003: 1% held as cash shows as a "targets sum to 99%" warning (macro r003 #7)
 - r004: still present (macro r004)
 - r005: still open (macro r005, income r005)
+- r006: `/drift` warns "targets sum to 99.0%" for a 1% cash target (macro r006)
 - status: open
-
-### B-025 Day % and Day P&L use different bases for positions bought today; brief "losers" include gainers
-- kind: bug · severity: low
-- reported by: multibagger r001, income r001, macro r003, macro r005, multibagger r005
-- evidence: LOAR Day % +1.70% vs Day P&L +$18.27 (0.17% since buy); brief `top_losers` lists VGIT +0.11%
-- r003: brief top losers include VTIP 0.00% and SGOV +0.01% (macro r003 #9)
-- r004: brief losers list SGOV 0.00% (macro r004 #7)
-- r005: brief top_gainers includes IEF −0.16% (macro r005 #7); also seen by multibagger r005
-- acceptance: the brief's top_gainers contain only positions with change_pct > 0 and top_losers only < 0 (empty lists allowed); Day % and Day P&L for a position bought today use the same base (the fill price, not the prior close) so they agree in sign; tests cover both
-- status: done (r005, cb40ff3)
 
 ### B-026 Risk, events and the brief take 11–15 s on first load after a trade
 - kind: perf · severity: medium
-- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005
+- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006
 - r003: worse — cold `/risk` 33.4 s (income), 18.6 s (macro); brief 6.1 s
 - r004: cold `/risk` 24.1 s (macro), 21.5 s (income); cold portfolio fundamentals 26.8 s then all 17 "pending" (income r004 #7)
 - r005: cold `/risk` 15.5 s; portfolio fundamentals now 2.2 s (was 26.8 s) (income r005 #8)
+- r006: first `/risk` after start 8.26 s (warm 0.64 s) (macro r006)
 - status: open
 
 ### B-027 Screener universe isn't built until someone runs a screen (breadth unavailable meanwhile)
@@ -192,9 +178,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-029 Yield gauge API returns percent-of-yield changes while the page shows bp
 - kind: ux · severity: low
-- reported by: macro r001
+- reported by: macro r001, macro r006
 - r004: still present (macro r004)
 - r005: still open (macro r005)
+- r006: 10y 1D still `−0.04` (percent of yield) in the API; card shows "−0 bp" (macro r006 #8)
 - status: open
 
 ### B-030 Look-through "top stock exposure" lists a money-market fund held by DBC
@@ -220,11 +207,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-034 Economic calendar starts on the UTC date: after 8 pm ET that day's releases and actuals disappear
 - kind: bug · severity: medium
-- reported by: macro r002, macro r003
+- reported by: macro r002, macro r003, macro r006
 - evidence: at 22:15 ET 10-20, `calendar.all_events` starts 10-21 and the 10-20 housing prints are missing;
   `providers/macro.py::economic_events` uses `date.today()` on a UTC server (rounds/002/investor-macro.md #2)
 - r003: still present at 22:13 ET 10-21 (EIA crude draw, 20y auction missing; macro r003 #4)
 - r004: third round; 10-22 claims (194K vs 200K) and LEI missing at 22:12 ET; next week's claims row lost "previous" (macro r004 #2)
+- r006: at 22:14 ET 10-26 the calendar starts on 10-27 (macro r006)
 - status: open
 
 ### B-035 Calendar shows no recent actuals or surprise vs consensus; 6 h cache leaves 08:30 actuals blank
@@ -235,11 +223,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-036 Fear & greed jumps (24.6 → 38.3) when breadth loads; no component count; new-highs scored differently
 - kind: ux · severity: medium
-- reported by: macro r002, macro r003, macro r005
+- reported by: macro r002, macro r003, macro r005, macro r006
 - evidence: 22 highs vs 2 lows reads "Extreme greed" (rounds/002/investor-macro.md #4)
 - r003: 27.0 with 5 readings → 39.8 with 7 within minutes; Price strength 86.7 on 26 highs vs 4 lows (macro r003 #5)
 - r004: 9.5 → 27.8 when breadth loaded (macro r004 #3)
 - r005: fear & greed 7.9 → 25.3 when breadth loads (macro r005 #4)
+- r006: 11.7 "Extreme fear" (5 readings) → 25.4 "Fear" (7) when breadth loads (macro r006 #7)
 - status: open
 
 ### B-037 Markets has no 10y real yield, breakeven, dollar index or credit spreads
@@ -250,14 +239,16 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-038 The brief has no macro events (next FOMC, major releases this week)
 - kind: feature · severity: low
-- reported by: macro r002
+- reported by: macro r002, macro r006
+- r006: still no FOMC (10-28) or this week's releases in the brief (macro r006)
 - status: open
 
 ### B-039 VIX and yield cards color a falling VIX/yield red and a yield rise green
 - kind: ux · severity: low
-- reported by: macro r002
+- reported by: macro r002, macro r006
 - r004: still present (macro r004)
 - r005: still open (macro r005)
+- r006: 10y card shows "−0 bp" in red for a −0.2 bp move (macro r006 #8)
 - status: open
 
 ### B-041 Look-through uses Yahoo's top-10 holdings though Argus has full SEC N-PORT holdings
@@ -275,8 +266,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-043 Two dividend yields for one stock (KO 2.74% Finnhub vs 2.27% Argus)
 - kind: ux · severity: low
-- reported by: income r002, income r003
+- reported by: income r002, income r003, macro r006
 - r003: KO 2.76% vs 2.29% (income r003); see B-063 (payout column)
+- r006: IEF 4.14% (/t/IEF, Peers) vs 4.04% (Analysis → Dividends) (macro r006 #6)
 - status: open
 
 ### B-044 "Where the risk comes from" card drops holdings without saying so (15 of 17)
@@ -297,13 +289,6 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r005: next dates now agree between `/api/earnings` and `/api/events`; remaining: events and the dashboard show no report timing for HRMY, PODD, LOAR while `/api/earnings` says before the open (multibagger r005 #4)
 - status: open
 
-### B-046 After-hours P&L counts shares bought after the close as a gain
-- kind: bug · severity: medium
-- reported by: multibagger r002
-- evidence: header +$346.88 vs a real after-hours change of +$103.47
-- r004: IEF bought after the close shows day P&L −$3.85 and after-hours +$3.85; brief lists it as a top gainer; 10-22 TWR moved 0.191% → 0.184% (macro r004 #5)
-- status: open
-
 ### B-047 Screener P/E still 1000x when the company has no revenue figure (BANR 12,784)
 - kind: bug · severity: medium
 - reported by: multibagger r002 (follow-up to B-005)
@@ -313,10 +298,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-049 Evening trades are dated the next (UTC) day in positions/transactions/notes but today in performance
 - kind: bug · severity: low
-- reported by: multibagger r002, income r003
+- reported by: multibagger r002, income r003, income r006
 - evidence: `portfolio.py:338`; same UTC-vs-New-York root as B-034
 - r003: new note dated with UTC date (income r003)
 - r004: after-close transaction dated 10-23 while performance puts it on 10-22 (macro r004 #5)
+- r006: /t/JPM lists a 22:15 ET 10-26 buy as 2026-10-27 while performance puts it on 10-26 (income r006 #4)
+- r006 (developer): B-046 (0cdd051) now books after-close trades on the next New York session in Day P&L and performance; `first_opened`, lot and transaction display dates still use the UTC date
 - status: open
 
 ### B-050 Dashboard "vs IWM last session" tile disagrees with Performance's IWM 0.00%
@@ -339,27 +326,30 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-053 Excess return vs SPY starts the benchmark at the prior close, the portfolio at its fills
 - kind: bug · severity: medium
-- reported by: macro r003, macro r005
+- reported by: macro r003, macro r005, macro r006
 - evidence: loop-macro shows −0.42% excess; over the same window (from the buy fills) SPY rose +0.47%, not +0.53%, so the
   true figure is about −0.36% (rounds/003/investor-macro.md #1)
 - r004: still present (macro r004)
 - r005: still present (macro r005 #9)
+- r006: chart starts loop-macro +0.11% vs SPY 0.00% on 10-20; from the SPY fill excess would be +0.67% not +0.62% (macro r006)
 - status: open
 
 ### B-054 VTIP's December dividend isn't projected (next ex-date blank, rest of 2026 $0)
 - kind: bug · severity: medium
-- reported by: macro r003
+- reported by: macro r003, macro r006
 - evidence: VTIP paid in December 2024 and 2025; the projection steps 3 months from the last ex-date (10-01) into
   January, missing ~$96–117 from 2026 (rounds/003/investor-macro.md #2; related to B-013)
 - r004: still present (macro r004)
 - r005: still open (macro r005)
+- r006: VTIP still quarterly with no next ex-date, $0 rest of 2026 (macro r006 #6)
 - status: open
 
 ### B-055 Markets shows nothing about the overnight session after hours (futures, post-market)
 - kind: feature · severity: medium
-- reported by: macro r003, macro r005
+- reported by: macro r003, macro r005, macro r006
 - evidence: ES=F −0.46% and SPY −0.47% post-market while Markets shows only the close (rounds/003/investor-macro.md #3)
 - r005: see B-016: Sunday-night futures/FX prices shown without a time tag (macro r005 #2)
+- r006: see B-016 (macro r006)
 - status: open
 
 ### B-057 Q4 revenue isn't derived when quarters and the full year use different revenue tags (CRMD)
@@ -370,9 +360,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-059 News tone counts articles about other companies (RMBS 6 positive, none about Rambus)
 - kind: bug · severity: medium
-- reported by: multibagger r003
+- reported by: multibagger r003, multibagger r006
 - evidence: rounds/003/investor-multibagger.md #5
 - r004: still present; RMBS −7.6% day has no sector context (multibagger r004 #7)
+- r006: RMBS earnings night scored 10 positive / 0 negative; "…as Shares Slip" scored positive, "Rambus falls…" neutral; five "positive" articles about other companies (multibagger r006 #6)
 - status: open
 
 ### B-060 Screener rows have no sector or industry; no sector filter
@@ -417,18 +408,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-067 Risk only uses a 1-year window; no 20/60-day correlation or beta
 - kind: feature · severity: medium
-- reported by: macro r004, macro r005
+- reported by: macro r004, macro r005, macro r006
 - evidence: SPY/IEF correlation −0.28 over 20 days vs +0.30 over 1 year (rounds/004/investor-macro.md #4)
 - r005: 20-day SPY correlation −0.29 for IEF and +0.54 for GLD vs 1-year +0.30 / +0.36 shown (macro r005 #5)
+- r006: book beta 0.25 (1y) vs 0.06 (20d); IEF −0.42, GLD +0.51 over 20 days; window changes the trade size (macro r006 #4)
 - status: open
-
-### B-068 Sharpe ratio reported from 3 sessions (18.3, 7.13); two volatility figures for one portfolio
-- kind: bug · severity: medium
-- reported by: macro r004, income r004, income r005, macro r005
-- evidence: `/performance` Sharpe 18.3 (loop-macro) and 7.13 (loop-income) while CAGR is hidden for short histories; Dashboard volatility 17.3% vs Analysis 7.5% (rounds/004/investor-income.md #4, investor-macro.md #8)
-- r005: Dashboard volatility 16.7% / Sharpe 3.17 from 4 sessions next to Analysis 7.5%; macro Sharpe 0.38 from 4 sessions, vol 1.98% vs 6.12% (income r005 #6, macro r005 #9)
-- acceptance: volatility and Sharpe in `/performance` (and the Dashboard card) are null with a reason (e.g. "needs 20 sessions") when the series is shorter than 20 sessions; when shown, the label says what window they cover so they can't be mistaken for Analysis's 1-year risk figure; tests cover the short-series case
-- status: done (r005, 79aa805)
 
 ### B-069 PEP has no fiscal-Q4 rows (16-week quarter not derived); capex not read for HD, NEE, PEP, O
 - kind: bug · severity: medium
@@ -459,29 +443,25 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - reported by: developer r004 (follow-up to B-056)
 - evidence: KO's 10-Q for 2026-07-03 (filed 07-29, inline XBRL) isn't in companyfacts; NEE and RMBS likewise; parsing each filing's XBRL instance would fill them
 - status: open
-### B-074 Ex-dividend days don't reconcile: dividends are counted nowhere unless entered by hand
-- kind: bug · severity: high
-- reported by: income r005
-- evidence: PG ex 10-23 ($1.089 × 31 = $33.76): Day P&L −$593.74 (adjusted prev close 164.501) but the performance series fell $627.50 (unadjusted 165.59); `totals.dividends` 0, TWR, drawdown and excess vs SPY treat every ex-date as a loss; only manual `DIVIDEND` transactions count (rounds/005/investor-income.md #1)
-- acceptance: dividends a position held through its ex-date (from Argus's own payment history) are accrued automatically, unless a `DIVIDEND` transaction already records that payment (no double counting); they count as income in the performance series (so the ex-date day's change equals Day P&L), in TWR/gain and in `totals.dividends`, labeled as accrued/estimated where shown; tests cover accrual, a position bought after the ex-date (no accrual) and a manual DIVIDEND overriding the accrual
-- status: done (r005, 2ad121f)
-
 ### B-075 Bitcoin 1D covers only the hours since midnight UTC; its history skips the 10-25 bar
 - kind: bug · severity: medium
-- reported by: macro r005 (follow-up to B-066)
+- reported by: macro r005 (follow-up to B-066), macro r006
 - evidence: BTC quote `prev_close` is the 00:00 UTC open, so 1D at 22:15 ET Sunday covers ~2 h (rounds/005/investor-macro.md #1)
+- r006: wrong sign: card −0.09% / −0.14% vs about +0.6% over a real 24 h; daily history now skips the 10-26 bar; quote `session_date` 10-26 for a 10-27 02:15 price (macro r006 #1)
 - status: open
 
 ### B-076 Brief "near_52w_extremes" lists every holding
 - kind: ux · severity: low
-- reported by: macro r005
+- reported by: macro r005, macro r006, income r006
 - evidence: 11 rows for 11 positions (SGOV 0.07% from its high, SPY 2.8% from its high) (rounds/005/investor-macro.md #8)
+- r006: loop-macro still lists all 11 holdings; loop-income lists 9 of 17, the two checked are right (macro r006, income r006)
 - status: open
 
 ### B-077 Asking for BTC-USD returns symbol "BTC.USD"
 - kind: bug · severity: low
-- reported by: macro r005
+- reported by: macro r005, macro r006
 - evidence: rounds/005/investor-macro.md #10
+- r006: still `BTC.USD` (macro r006)
 - status: open
 
 ### B-078 Alerts can't watch an index or yield (^TNX rejected as "not a US ticker")
@@ -492,8 +472,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-079 FCF margin divides SEC FCF by Yahoo revenue from a later window
 - kind: bug · severity: low
-- reported by: income r005 (related to B-056)
+- reported by: income r005 (related to B-056), multibagger r006
 - evidence: KO 25.06% vs 25.49% over the same SEC quarters (rounds/005/investor-income.md #4)
+- r006: RMBS FCF margin 41.4% = SEC FCF through Q3 ÷ Yahoo revenue through Q2; 39.3% on one window (multibagger r006 #1)
 - status: open
 
 ### B-080 Stale-SEC banner says a 10-Q "is due" when it was filed months ago; NEE's fundamentals card has no banner
@@ -504,8 +485,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-081 Stock page says "Not held in <portfolio>" when another portfolio holds it
 - kind: ux · severity: low
-- reported by: income r005
+- reported by: income r005, multibagger r006
 - evidence: /t/KO defaulted to loop-growth, "Not held in loop-growth", while showing the loop-income alert and thesis (rounds/005/investor-income.md #7)
+- r006: also shows "Not held in loop-growth" while the position loads, above that position's own buys (multibagger r006 #9)
 - status: open
 
 ### B-082 Statements lose gross profit / operating income on some quarters (INOD Q1–Q2 2026; KRYS, GRND, TGTX gross profit; ESE op. income; BELFA EPS)
@@ -514,10 +496,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: rounds/005/investor-multibagger.md #2
 - status: open
 
-### B-083 Momentum "1 week" (Finnhub, 4 sessions) contradicts the chart's 5D on the same page
+### B-083 Momentum periods (Finnhub) contradict the chart's returns on the same page
 - kind: bug · severity: low
-- reported by: multibagger r005
+- reported by: multibagger r005, income r006, multibagger r006
 - evidence: RMBS −7.6% vs −1.8% (rounds/005/investor-multibagger.md #3)
+- r006: every Finnhub momentum period disagrees with the chart: JPM 6M +5.9% vs +8.4%, 1Y +12.6% vs +11.2%; RMBS 6M −34.3% vs −43.0%, YTD at the 10-23 close (a session stale); only Argus's own 1 month agrees (income r006 #6, multibagger r006 #7)
 - status: open
 
 ### B-084 ESE and GRND classed as Technology; no warning that healthcare is 47% of the book
@@ -526,8 +509,115 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: rounds/005/investor-multibagger.md #6
 - status: open
 
+### B-086 Banks: revenue growth +109% and gross margin 0.0% (Finnhub/Yahoo); SEC statements have no bank revenue
+- kind: bug · severity: medium
+- reported by: income r006
+- evidence: /t/JPM revenue growth YoY +109.0%, latest quarter +74.0%, gross margin 0.0%; BAC, C, USB, WFC, PNC similar; JPM tags `RevenuesNetOfInterestExpense`, so statements show "–" for Revenue (rounds/006/investor-income.md #2; related to B-047)
+- status: open
+
+### B-087 Accrued dividend labeled "received"; no dividend figure on the Dashboard tiles
+- kind: ux · severity: low
+- reported by: income r006 (follow-up to B-074)
+- evidence: `/dividends` `totals.received 33.759` for PG's unpaid dividend; Analysis legend "Received (est.)"; Dashboard tiles show Realized P&L $0 and no dividends (rounds/006/investor-income.md #7)
+- status: open
+
+### B-088 A past earnings report vanishes after an events refresh (MNTN Q2 2026)
+- kind: bug · severity: medium
+- reported by: multibagger r006
+- evidence: `/api/earnings/MNTN` returned the 2026-06-30 report (EPS 0.10 vs 0.1931) and minutes later didn't; `EventsService.refresh` deletes the ±100-day window before re-inserting (rounds/006/investor-multibagger.md #2)
+- status: open
+
+### B-089 Valuation bands include pre-listing or garbage points (MNTN P/S 0.019, P/B 0.020)
+- kind: bug · severity: medium
+- reported by: multibagger r006
+- evidence: MNTN listed 2025-05-22; `psTTM` band has 0.019, 0.032; `pb` has 19 points back to 2021; P/S percentile 80 vs ~67 without them (rounds/006/investor-multibagger.md #4)
+- status: open
+
+### B-090 No revenue guidance or segment revenue
+- kind: feature · severity: medium
+- reported by: multibagger r006
+- evidence: RMBS exit rule needs product revenue and guide vs consensus; Argus has total revenue only (rounds/006/investor-multibagger.md #5)
+- status: open
+
+### B-091 Economic calendar figures have no unit or period (PCE QoQ annualized read as monthly)
+- kind: ux · severity: medium
+- reported by: macro r006
+- evidence: "Core PCE Prices · Previous 3.30%" on GDP day is QoQ SAAR; same-named Core CPI and Core PPI pairs; footnote says MoM/YoY (rounds/006/investor-macro.md #2; related to the B-002 r002 note)
+- status: open
+
+### B-092 ETF pages request SEC financials (502) and show an empty ownership card
+- kind: removal · severity: low
+- reported by: macro r006
+- evidence: /t/IEF: `GET /api/financials/IEF` 502, "Reported financials" card says ETFs have none; Ownership & short all dashes (rounds/006/investor-macro.md #9)
+- status: open
+
+### B-093 Dividends page ignores announced ex-dates; projections stop at Dec 31
+- kind: bug · severity: medium
+- reported by: developer r006 (follow-up to B-013), income r005, income r006
+- evidence: Dividends still shows its own estimate when an ex-date is announced: KO ~12-15 vs announced 12-01, NEE ~11-30 vs announced Fri 11-27; projections stop at year end so a window crossing Dec 31 gets no January estimates (JPM/ABBV next ex-date null in 2027); on a stock page "not owed" and the estimate amount are across all portfolios
+- status: open
 
 ## Done
+
+### B-013 Upcoming dividends disagree across Dividends, Coming up, the brief and events
+- kind: bug · severity: medium
+- reported by: income r001, income r003, macro r005, income r005, macro r006, income r006
+- evidence: Dividends projects ex-dates in the next 14 days but Coming up and `/api/brief` show none; events
+  lists an ABBV pay the position isn't entitled to; estimated ex-dates on weekends; JPM/ABBV next ex-date null
+  because it falls in 2027 (rounds/001/investor-income.md #4). r002: Dividends estimates PG ex-date Sat 10-24
+  while events have the announced Fri 10-23; Coming up shows a JPM pay (Sat 10-31) for a position bought after
+  the ex-date (rounds/002/investor-income.md #4)
+- reported by (again): income r002
+- r003: KO estimated ex-date ~12-15 though the announced ex-date is 12-01 (12-15 is the pay date); PG still Sat 10-24 vs announced 10-23; Coming up still lists the unentitled JPM pay (rounds/003/investor-income.md #4). See also B-054 (VTIP December not projected)
+- r004: PG "~Oct 24" (Dividends) vs "Fri Oct 23" (Coming up) on the same page; events still lists the unentitled ABBV 11-16 pay (income r004 #8)
+- r005: SGOV/IEF estimated ex-dates Sun 11-01, NEE ~Nov 28 (Sat) vs Fri 11-27 on /t/NEE, KO ~Dec 15 vs Dec 1; Coming up and the brief still list the unentitled JPM 10-31 pay as held (macro r005 #3, income r005 #3)
+- r006: sixth sighting. Coming up, `/api/brief` and now /t/JPM list the JPM 10-31 pay as held though every share was bought after the 10-06 ex-date; Coming up and the brief omit the Dividends page's estimated 11-01 ex-dates for BND, VCIT, VGIT, SCHP (loop-income, $131.93) and SGOV, IEF (loop-macro); 11-01 is a Sunday; NEE ~11-28 (Sat) (income r006 #3, macro r006 #6)
+- acceptance: this round's slice: (1) a dividend pay event counts as held for a portfolio (Coming up, the brief's `dividends_upcoming`, the stock page's Events card) only if the portfolio held shares on that dividend's ex-date; (2) Coming up and the brief include the estimated ex-dates the Dividends projection puts inside their window, marked as estimates, from the same projection code; (3) an estimated ex-date that falls on a weekend or US market holiday moves to the next business day, the same on Dividends, Coming up and the brief; tests cover each. KO's ex-vs-pay estimate and VTIP (B-054) stay open if not fixed by this
+- status: done (r006, f76fbf4); remaining facets moved to B-093
+
+### B-046 After-hours P&L counts shares bought after the close as a gain
+- kind: bug · severity: high
+- reported by: multibagger r002, income r006, multibagger r006
+- evidence: header +$346.88 vs a real after-hours change of +$103.47
+- r004: IEF bought after the close shows day P&L −$3.85 and after-hours +$3.85; brief lists it as a top gainer; 10-22 TWR moved 0.191% → 0.184% (macro r004 #5)
+- r006: post-close buys at 22:15 ET: HD bought at 317.00 and marked at the 319.38 close adds +$2.38 to "last session" Day P&L and moves gain/TWR (income r006 #4); 25 RMBS bought at the close price changed the header Day % +0.92% → +0.90%, TWR −1.358% → −1.379%, and the brief's RMBS move +5.45% → +4.28% (multibagger r006 #3)
+- acceptance: a transaction timestamped after the regular-session close of its New York trading day is next-session money: it doesn't change that session's Day P&L or Day % (header, dashboard, holdings, brief), nor that session's performance-series return or TWR (the flow counts at the start of the next session); its change from fill price to the last price shows only in after-hours P&L; the brief's movers report the stock's own session change for a position not bought during that session; tests cover an after-close buy at the close price and at a different post-market price
+- status: done (r006, 0cdd051)
+
+### B-085 Stock page returns 500s on first open: /api/profile and /api/holdings race to insert the same company_profile row
+- kind: bug · severity: medium
+- reported by: income r006
+- evidence: /t/JPM first load: `GET /api/profile/JPM 500` and `GET /api/holdings/JPM 500` with `sqlite3.IntegrityError: UNIQUE constraint failed: company_profile.symbol`; both call `company_profile()` concurrently; works on reload (rounds/006/investor-income.md #1)
+- acceptance: opening a stock page whose company profile is missing or stale never returns a 500: concurrent first requests to `/api/profile/<sym>` and `/api/holdings/<sym>` both succeed and leave one `company_profile` row (write it as an upsert or serialize the fetch per symbol); other cache tables written on a read path the same way get the same treatment; a test reproduces the race (two writers for a missing row) and passes
+- status: done (r006, 7a9d693)
+
+### B-074 Ex-dividend days don't reconcile: dividends are counted nowhere unless entered by hand
+- kind: bug · severity: high
+- reported by: income r005
+- evidence: PG ex 10-23 ($1.089 × 31 = $33.76): Day P&L −$593.74 (adjusted prev close 164.501) but the performance series fell $627.50 (unadjusted 165.59); `totals.dividends` 0, TWR, drawdown and excess vs SPY treat every ex-date as a loss; only manual `DIVIDEND` transactions count (rounds/005/investor-income.md #1)
+- acceptance: dividends a position held through its ex-date (from Argus's own payment history) are accrued automatically, unless a `DIVIDEND` transaction already records that payment (no double counting); they count as income in the performance series (so the ex-date day's change equals Day P&L), in TWR/gain and in `totals.dividends`, labeled as accrued/estimated where shown; tests cover accrual, a position bought after the ex-date (no accrual) and a manual DIVIDEND overriding the accrual
+- r006: confirmed: loop-income's 10-26 value change equals Day P&L (income r006)
+- status: done (r005, 2ad121f)
+
+### B-068 Sharpe ratio reported from 3 sessions (18.3, 7.13); two volatility figures for one portfolio
+- kind: bug · severity: medium
+- reported by: macro r004, income r004, income r005, macro r005
+- evidence: `/performance` Sharpe 18.3 (loop-macro) and 7.13 (loop-income) while CAGR is hidden for short histories; Dashboard volatility 17.3% vs Analysis 7.5% (rounds/004/investor-income.md #4, investor-macro.md #8)
+- r005: Dashboard volatility 16.7% / Sharpe 3.17 from 4 sessions next to Analysis 7.5%; macro Sharpe 0.38 from 4 sessions, vol 1.98% vs 6.12% (income r005 #6, macro r005 #9)
+- acceptance: volatility and Sharpe in `/performance` (and the Dashboard card) are null with a reason (e.g. "needs 20 sessions") when the series is shorter than 20 sessions; when shown, the label says what window they cover so they can't be mistaken for Analysis's 1-year risk figure; tests cover the short-series case
+- r006: confirmed working (macro, income, multibagger r006)
+- status: done (r005, 79aa805)
+
+### B-025 Day % and Day P&L use different bases for positions bought today; brief "losers" include gainers
+- kind: bug · severity: low
+- reported by: multibagger r001, income r001, macro r003, macro r005, multibagger r005
+- evidence: LOAR Day % +1.70% vs Day P&L +$18.27 (0.17% since buy); brief `top_losers` lists VGIT +0.11%
+- r003: brief top losers include VTIP 0.00% and SGOV +0.01% (macro r003 #9)
+- r004: brief losers list SGOV 0.00% (macro r004 #7)
+- r005: brief top_gainers includes IEF −0.16% (macro r005 #7); also seen by multibagger r005
+- acceptance: the brief's top_gainers contain only positions with change_pct > 0 and top_losers only < 0 (empty lists allowed); Day % and Day P&L for a position bought today use the same base (the fill price, not the prior close) so they agree in sign; tests cover both
+- r006: mover lists confirmed (macro, income, multibagger r006); same-session Day % not checkable with the market closed
+- status: done (r005, cb40ff3)
 
 ### B-066 Markets "1D" for indexes, futures, FX and crypto uses the wrong prior close
 - kind: bug · severity: high
