@@ -345,7 +345,8 @@ def events(days: int = 14, as_json: JsonOpt = False):
     def render(d):
         t = Table("Date", "Symbol", "Event", "When", "EPS est.", "Held")
         for e in d["upcoming"]:
-            t.add_row(e["date"], e["symbol"], e["kind"].replace("_", " "), e.get("hour") or "",
+            kind = e["kind"].replace("_", " ") + (" (est.)" if e.get("estimated") else "")
+            t.add_row(e["date"], e["symbol"], kind, e.get("hour") or "",
                       "-" if e.get("epsEstimate") is None else f"{e['epsEstimate']:.2f}", "yes" if e["held"] else "")
         console.print(t)
     _run(as_json, lambda: _argus().upcoming_events(days_ahead=days), render)

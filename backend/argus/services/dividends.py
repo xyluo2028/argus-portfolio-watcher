@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from statistics import mean, median, pstdev
 
-from argus.market_calendar import NY
+from argus.market_calendar import NY, session_on_or_after
 from argus.models import TxnType
 
 FREQ_NAMES = {12: "monthly", 4: "quarterly", 2: "semiannual", 1: "annual"}
@@ -67,10 +67,12 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
                 for d, a in pays if year_start <= d <= today and (q := qty_at(d)) > 0]
     projected = []
     if not stale:  # with no shares (a watchlist) this still gives the expected dates, at $0
-        # Same day of the month as the last ex-date, every 12/freq months (payers keep their rhythm).
+        # Same day of the month as the last ex-date, every 12/freq months (payers keep their rhythm),
+        # moved to the next trading day when that's a weekend or holiday (funds go ex on business days).
         step, k = 12 // freq, 1
-        while (nxt := add_months(last_d, step * k)) <= year_end:
-            if nxt > today:
+        while add_months(last_d, step * k) <= year_end:
+            nxt = session_on_or_after(add_months(last_d, step * k))
+            if today < nxt <= year_end:
                 projected.append({"ex_date": nxt.isoformat(), "per_share": per_payment, "shares": qty,
                                   "amount": qty * per_payment, "estimated_date": True})
             k += 1

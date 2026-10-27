@@ -59,6 +59,9 @@ def _transient(err: str | None) -> bool:
     return bool(err) and not any(t in err for t in _LASTING_ERRORS)
 
 
+ESTIMATE_MATCH_DAYS = 10  # an announced ex-date this close to a projected one replaces it
+
+
 def _event_happened(e: dict, now: datetime) -> bool:
     """Whether a calendar event is behind us: a past date, reported actuals, or today's
     before-open / after-close earnings once that time has passed (`now` in New York)."""
@@ -798,11 +801,54 @@ class Argus:
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
         now = datetime.now(NY)
         today = now.date()
+        start, end = today - timedelta(days=days_back), today + timedelta(days=days_ahead)
         held = set(syms) if scoped else set(self.held_positions())  # `held` means held in that portfolio
-        rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead),
-                                   ["earnings", "ex_dividend", "dividend_pay"])
+        rows = self.events.between(syms, start, end, ["earnings", "ex_dividend", "dividend_pay"])
+        announced_ex = self.events.between(syms, start - timedelta(days=dividends_mod.MATCH_DAYS),
+                                           end + timedelta(days=ESTIMATE_MATCH_DAYS), ["ex_dividend"])
+        histories = self.dividend_histories(syms)
+        by_pf: dict = {}
+        for t in self.portfolios.active_transactions(portfolio if scoped else ALL):
+            by_pf.setdefault(t.portfolio_id, []).append(t)
+
+        def shares_at(sym: str, d: date) -> float:
+            """Shares held going into day `d` (in this portfolio, else across all), as Dividends counts them."""
+            cutoff = datetime.combine(d, datetime.min.time(), NY)
+            return sum(pos.qty for txns in by_pf.values()
+                       if (pos := build_positions([t for t in txns if t.symbol == sym and t.ts < cutoff]).get(sym)))
+
+        ex_dates = {s: {date.fromisoformat(d) for d, _ in histories.get(s, [])} for s in syms}
+        for e in announced_ex:
+            ex_dates[e["symbol"]].add(date.fromisoformat(e["date"]))
         for r in rows:
-            r["held"] = r["symbol"] in held
+            if r["kind"] == "earnings":
+                r["held"] = r["symbol"] in held
+                continue
+            # A dividend belongs to whoever held shares going into its ex-date (for a payment, the
+            # latest ex-date before it), not to shares bought since.
+            ex = date.fromisoformat(r["date"])
+            if r["kind"] == "dividend_pay":
+                prior = [d for d in ex_dates[r["symbol"]] if ex - timedelta(days=dividends_mod.MATCH_DAYS) <= d <= ex]
+                if not prior:  # ex-date unknown: all we can say is whether it's held now
+                    r["held"] = r["symbol"] in held
+                    continue
+                ex = max(prior)
+                r["ex_date"] = ex.isoformat()
+            r["held"] = shares_at(r["symbol"], ex) > 0
+        if scoped:  # a portfolio's calendar lists only the payments it's owed
+            rows = [r for r in rows if r["kind"] != "dividend_pay" or r["held"]]
+        # Ex-dates the Dividends page projects into the window, unless one is announced near it.
+        for sym in syms:
+            qty = shares_at(sym, today + timedelta(days=1))
+            proj = dividends_mod.analyze_holding(histories.get(sym, []), qty, lambda d: 0.0, today)["projected"]
+            for x in proj:
+                d = date.fromisoformat(x["ex_date"])
+                if d > end or any(abs((d - a).days) <= ESTIMATE_MATCH_DAYS for a in ex_dates[sym]):
+                    continue
+                rows.append({"symbol": sym, "kind": "ex_dividend", "date": x["ex_date"], "hour": None,
+                             "estimated": True, "per_share": x["per_share"], "amount": x["amount"],
+                             "source": "estimate", "held": qty > 0})
+        rows.sort(key=lambda r: (r["date"], r["symbol"]))
         past = [_event_happened(r, now) for r in rows]
         return {
             "as_of": today.isoformat(),

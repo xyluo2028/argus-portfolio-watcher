@@ -55,7 +55,16 @@ def test_steady_and_one_way_monthly_payers_keep_last_payment_rate():
 def test_shares_bought_on_the_ex_date_miss_that_payment():
     hist = [(f"2026-{m:02d}-01", 0.27) for m in range(1, 11)]
     h = analyze_holding(hist, 20, lambda d: 0, TODAY)  # bought on/after Oct 1
-    assert h["received"] == [] and [x["ex_date"] for x in h["projected"]] == ["2026-11-01", "2026-12-01"]
+    # Sun Nov 1 moves to Mon Nov 2
+    assert h["received"] == [] and [x["ex_date"] for x in h["projected"]] == ["2026-11-02", "2026-12-01"]
+
+
+def test_estimated_ex_dates_move_off_weekends_and_holidays():
+    # quarterly on the 28th: Aug 28 -> Sat Nov 28 -> Mon Nov 30; monthly on the 26th: Thanksgiving -> Fri Nov 27
+    h = analyze_holding([("2026-05-28", 0.5), ("2026-08-28", 0.5)], 1, lambda d: 1, TODAY)
+    assert [x["ex_date"] for x in h["projected"]] == ["2026-11-30"]
+    m = analyze_holding([(f"2026-{k:02d}-26", 0.1) for k in range(4, 10)], 1, lambda d: 1, TODAY)
+    assert [x["ex_date"] for x in m["projected"]] == ["2026-10-26", "2026-11-27", "2026-12-28"]
 
 
 def test_stale_payer_is_not_extrapolated_and_non_payers_are_zero():

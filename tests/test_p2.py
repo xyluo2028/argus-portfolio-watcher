@@ -187,3 +187,50 @@ def test_todays_earnings_count_as_happened_once_reported_or_past_their_time(hour
     assert _event_happened(e, now) is happened
     assert _event_happened(e | {"date": "2026-10-19"}, now) is True
     assert _event_happened({**e, "date": "2026-10-21", "epsActual": None}, now) is False
+
+
+def test_dividend_events_follow_ex_date_ownership_and_projection(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY, session_on_or_after
+    from argus.models import DividendHistory, Event
+    from argus.services.dividends import add_months
+
+    today = datetime.now(NY).date()
+    if (today + timedelta(days=10)).year != today.year:
+        pytest.skip("projections stop at the year end")
+    a = make_argus([FakeQuotes("fake", {s: (100, 100) for s in ("JJJ", "MMM", "AAA", "SPY")})])
+    ex, pay = today - timedelta(days=20), today + timedelta(days=3)
+    a.portfolios.create_portfolio("late")
+    a.portfolios.create_portfolio("early")
+    a.portfolios.add_transactions("late", [TxnInput("BUY", "JJJ", datetime.now(UTC) - timedelta(days=10), 10, 90),
+                                           TxnInput("BUY", "MMM", datetime.now(UTC) - timedelta(days=200), 10, 90),
+                                           TxnInput("BUY", "AAA", datetime.now(UTC) - timedelta(days=200), 10, 90)])
+    a.portfolios.add_transactions("early", [TxnInput("BUY", "JJJ", datetime.now(UTC) - timedelta(days=30), 5, 90)])
+    target = today + timedelta(days=3)  # MMM and AAA pay monthly; their next ex-date lands about here
+    monthly = [[add_months(target, -k).isoformat(), 0.25] for k in range(6, 0, -1)]
+    a.events.refresh(["JJJ", "MMM", "AAA"])  # mark fresh so the rows below stay
+    with session_scope(a.engine) as s:
+        for sym, data in (("JJJ", [[add_months(ex, -3).isoformat(), 1.0], [ex.isoformat(), 1.0]]),
+                          ("MMM", monthly), ("AAA", monthly)):
+            s.add(DividendHistory(symbol=sym, as_of=datetime.now(UTC), data=data))
+        s.add(Event(symbol="JJJ", kind="dividend_pay", d=pay, data={}, source="t"))
+        s.add(Event(symbol="AAA", kind="ex_dividend", d=target - timedelta(days=1), data={}, source="t"))
+
+    # (1) "late" bought JJJ after its ex-date: not owed the payment; "early" is
+    b = a.daily_brief("late", news=False)
+    assert [e["symbol"] for e in b["dividends_upcoming"] if e["kind"] == "dividend_pay"] == []
+    early = a.upcoming_events(refresh=False, portfolio="early")["upcoming"]
+    assert [(e["symbol"], e["held"], e["ex_date"]) for e in early] == [("JJJ", True, ex.isoformat())]
+    jjj = a.upcoming_events(refresh=False, symbols=["JJJ"])["upcoming"]  # stock page: any portfolio
+    assert [(e["kind"], e["held"]) for e in jjj] == [("dividend_pay", True)]
+
+    # (2) + (3) MMM's projected ex-date (moved to a trading day) shows as an estimate, the same date as
+    # the Dividends page; AAA's announced ex-date replaces its estimate
+    est = session_on_or_after(add_months(target, 0)).isoformat()
+    div = {h["symbol"]: h for h in a.dividends("late")["holdings"]}
+    assert div["MMM"]["next_ex_date_est"] == est
+    rows = [(e["symbol"], e["date"], e.get("estimated", False), e["held"]) for e in b["dividends_upcoming"]]
+    assert rows == sorted([("MMM", est, True, True), ("AAA", (target - timedelta(days=1)).isoformat(), False, True)],
+                          key=lambda r: (r[1], r[0]))
+    mmm = next(e for e in b["dividends_upcoming"] if e["symbol"] == "MMM")
+    assert mmm["amount"] == pytest.approx(2.5)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type CalEvent } from "../api";
-import { big, pct } from "../format";
+import { big, money, pct } from "../format";
 
 const KIND = { earnings: "Earnings", ex_dividend: "Ex-dividend", dividend_pay: "Dividend paid" } as const;
 const HOUR: Record<string, string> = { bmo: "before open", amc: "after close", dmh: "during hours" };
@@ -42,8 +42,15 @@ export function EventsCard({ symbol, portfolio }: { symbol?: string; portfolio?:
                 <tr key={`${e.symbol}-${e.kind}-${e.date}`} style={{ cursor: "default" }}>
                   <td className="text-2">{day(e.date)}</td>
                   <td style={{ textAlign: "left" }}>{symbol ? "" : <Link to={`/t/${e.symbol}`} className="sym">{e.symbol}</Link>}</td>
-                  <td style={{ textAlign: "left" }}>{KIND[e.kind]}{e.hour && HOUR[e.hour] ? <span className="muted"> · {HOUR[e.hour]}</span> : null}</td>
+                  <td style={{ textAlign: "left" }}>
+                    {KIND[e.kind]}{e.hour && HOUR[e.hour] ? <span className="muted"> · {HOUR[e.hour]}</span> : null}
+                    {e.estimated ? <span className="muted" title="Estimated from the payment rhythm"> · est.</span> : null}
+                    {e.kind === "dividend_pay" && !e.held && e.ex_date ? (
+                      <span className="muted" title={`No shares held going into the ${day(e.ex_date)} ex-date`}> · not owed</span>
+                    ) : null}
+                  </td>
                   <td className="small text-2">
+                    {e.estimated && e.amount ? `≈ ${money(e.amount)}` : ""}
                     {e.kind === "earnings" && e.epsEstimate != null ? `EPS est. ${e.epsEstimate.toFixed(2)}` : ""}
                     {e.kind === "earnings" && e.revenueEstimate ? ` · rev est. ${big(e.revenueEstimate)}` : ""}
                   </td>
