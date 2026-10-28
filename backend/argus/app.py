@@ -51,6 +51,41 @@ from argus.symbols import is_plausible_symbol, normalize_symbol
 
 log = logging.getLogger("argus.app")
 FUND_RETRY_S = 15 * 60
+
+RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
+# Momentum metric -> the chart range it is measured over, so the stock page's card and chart agree.
+MOMENTUM_RANGES = {"return_1w_pct": "5D", "return_1m_pct": "1M", "return_3m_pct": "3M", "return_6m_pct": "6M",
+                   "return_ytd_price_pct": "YTD", "return_1y_pct": "1Y"}
+
+
+def _return_anchor(status: dict) -> date:
+    """"Now" for a return: today during the regular session (the live price), else the last completed session."""
+    return datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+
+
+def range_bases(closes: list[tuple[date, float]], anchor: date, months: dict[str, int] = RETURN_MONTHS) -> dict:
+    """Base close per range for returns ending at `anchor` (closes sorted by date): 1D the previous
+    close, 5D five sessions back, month ranges the close on or before that calendar date, YTD last
+    year's final close, Max the first close. A range reaching back before the history is None."""
+    from argus.services.dividends import add_months
+
+    before = [c for c in closes if c[0] < anchor]
+
+    def on_or_before(d: date) -> dict | None:
+        if not before or d < before[0][0]:
+            return None
+        day, close = next(c for c in reversed(before) if c[0] <= d)
+        return {"date": day.isoformat(), "close": close}
+
+    bases: dict[str, dict | None] = {
+        "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
+        "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
+    }
+    for label, n in months.items():
+        bases[label] = on_or_before(add_months(anchor, -n))
+    bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
+    bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
+    return bases
 # Errors a retry won't fix: a provider not set up, a company SEC has no XBRL for.
 _LASTING_ERRORS = ("not configured", "SEC_USER_AGENT", "not found in EDGAR", "no XBRL")
 
@@ -217,39 +252,19 @@ class Argus:
             }
         return out
 
-    RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
-
     def return_bases(self, symbol: str) -> dict:
         """The price each chart range is measured from, so a client can show live returns:
         1D the previous close, 5D the close five sessions back, 1M-5Y the close on or before that
         calendar date, YTD last year's final close, Max the first close. Split-adjusted closes,
         dividends not included (price return). A range longer than the history is null."""
-        from argus.services.dividends import add_months
-
         sym = normalize_symbol(symbol)
         bars = self.market.get_history(sym, "max", "1d")
         status = market_status()
-        # "Now" is today's live price during the session; otherwise the last completed close.
-        anchor = datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+        anchor = _return_anchor(status)
         closes = [(b.ts.astimezone(NY).date(), b.c) for b in bars]
-        before = [c for c in closes if c[0] < anchor]
-
-        def on_or_before(d: date) -> dict | None:
-            if not before or d < before[0][0]:
-                return None  # the range reaches back before the first bar
-            day, close = next(c for c in reversed(before) if c[0] <= d)
-            return {"date": day.isoformat(), "close": close}
-
-        bases: dict[str, dict | None] = {
-            "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
-            "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
-        }
-        for label, months in self.RETURN_MONTHS.items():
-            bases[label] = on_or_before(add_months(anchor, -months))
-        bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
-        bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
         last = closes[-1] if closes else None
-        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"], "bases": bases,
+        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"],
+                "bases": range_bases(closes, anchor),
                 "last_close": {"date": last[0].isoformat(), "close": last[1]} if last else None}
 
     COMPARE_FIELDS = ("pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "market_cap",
@@ -686,29 +701,26 @@ class Argus:
         return {"watchlist": name, **self.symbol_fundamentals([i["symbol"] for i in self.watchlists.items(name)])}
 
     def price_stats(self, symbols: list[str]) -> dict[str, dict[str, float | None]]:
-        """From cached daily closes, to the latest close: the 1-month return and the 3- and 5-year
-        compound annual growth rate of the price (price only; null when the history is shorter)."""
-        from argus.services.dividends import add_months
-
+        """From cached daily closes, to the latest close: the momentum returns (1W, 1M, 3M, 6M, YTD,
+        1Y) measured from the same bases as the stock chart's ranges (return_bases), and the 3- and
+        5-year compound annual growth rate of the price (price only; null when the history is shorter).
+        Computed here rather than taken from Finnhub, whose figures lag a session and use other bases."""
         closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=5 * 366 + 10))
+        anchor = _return_anchor(market_status())
         out: dict[str, dict[str, float | None]] = {}
         for sym, by_day in closes.items():
-            days = sorted(by_day)
-            stats: dict[str, float | None] = {"return_1m_pct": None, "cagr_3y_pct": None, "cagr_5y_pct": None}
-            if days:
-                last_d, last = days[-1], by_day[days[-1]]
+            series = sorted(by_day.items())
+            bases = range_bases(series, anchor, {**RETURN_MONTHS, "3Y": 36})
+            last = series[-1][1] if series else None
 
-                def base(months: int) -> float | None:
-                    target = add_months(last_d, -months)
-                    if target < days[0]:
-                        return None  # history doesn't reach back that far
-                    return next((by_day[d] for d in reversed(days) if d <= target), None)
+            def ret(label: str) -> float | None:
+                b = bases.get(label)
+                return (last / b["close"] - 1) * 100 if last is not None and b and b["close"] else None
 
-                b1 = base(1)
-                stats["return_1m_pct"] = (last / b1 - 1) * 100 if b1 else None
-                for years in (3, 5):
-                    b = base(12 * years)
-                    stats[f"cagr_{years}y_pct"] = ((last / b) ** (1 / years) - 1) * 100 if b else None
+            stats: dict[str, float | None] = {key: ret(label) for key, label in MOMENTUM_RANGES.items()}
+            for years in (3, 5):
+                r = ret(f"{years}Y")
+                stats[f"cagr_{years}y_pct"] = ((1 + r / 100) ** (1 / years) - 1) * 100 if r is not None else None
             out[sym] = stats
         return out
 
@@ -719,10 +731,10 @@ class Argus:
         return {"fcf_margin_pct": fcf / rev * 100 if fcf is not None and rev else None}
 
     def fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
-        """One symbol's fundamentals with the same computed figures the portfolio views add (1M return,
-        3Y/5Y price CAGR, FCF margin)."""
+        """One symbol's fundamentals with the same computed figures the portfolio views add (momentum
+        returns, 3Y/5Y price CAGR, FCF margin)."""
         sym = normalize_symbol(symbol)
-        computed = {"return_1m_pct", "cagr_3y_pct", "cagr_5y_pct", "fcf_margin_pct"}
+        computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct", "fcf_margin_pct"}
         stored = [f for f in fields if f not in computed] if fields else None
         out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
         if fields and not stored:
@@ -736,7 +748,8 @@ class Argus:
         extra = stats | self._derived(full)
         if fields:
             extra = {k: v for k, v in extra.items() if k in fields}
-        return out | {"metrics": out["metrics"] | extra}
+        sources = out.get("sources", {}) | {k: "argus" for k in extra if k in MOMENTUM_RANGES}
+        return out | {"metrics": out["metrics"] | extra, "sources": sources}
 
     def symbol_fundamentals(self, syms: list[str], wait: bool = False) -> dict:
         """Cached fundamentals for many symbols in one call, plus price stats and derived figures. Missing or stale

@@ -197,6 +197,61 @@ def test_return_bases(make_argus, monkeypatch):
     assert b["Max"]["date"] == "2025-12-29"
 
 
+def test_momentum_returns_match_the_chart_ranges(make_argus, monkeypatch):
+    """B-083: the stock page's momentum figures come from Argus's own closes, measured from the same
+    base closes as the chart's range returns, through the latest session (Finnhub's lagged a day)."""
+    from datetime import date
+
+    import argus.app as app_mod
+
+    days = [date(2025, 3, 3) + timedelta(days=i) for i in range(420)]
+    days = [d for d in days if d.weekday() < 5 and d not in (date(2025, 12, 31), date(2026, 4, 3))]
+    days = [d for d in days if d <= date(2026, 4, 17)]
+    closes = {d: 100 + i * 0.5 for i, d in enumerate(days)}
+    closes[date(2026, 4, 17)] = 50.0  # a crash on the latest session must show up
+    bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, c, 1) for d, c in closes.items()]
+    a = make_argus(history=PerSymbolHistory({"X": bars}),
+                   fundamentals=[SlowFund("finnhub", {"return_1w_pct": 8.8, "return_ytd_price_pct": 17.6}, delay=0)])
+    monkeypatch.setattr(app_mod, "market_status", lambda: {"session": "closed", "last_session": "2026-04-17"})
+
+    b = a.return_bases("X")["bases"]
+    assert b["5D"]["date"] == "2026-04-10"   # five sessions before the 04-17 close
+    assert b["YTD"]["date"] == "2025-12-30"  # last year's final close (12-31 had no session here)
+    assert b["1M"]["date"] == "2026-03-17"
+    assert b["6M"]["date"] == "2025-10-17"
+    assert b["1Y"]["date"] == "2025-04-17"
+    assert b["3M"]["date"] == "2026-01-16"   # 01-17 is a Saturday: the close on or before
+
+    f = a.fundamentals("X")
+    m = f["metrics"]
+    for key, label in app_mod.MOMENTUM_RANGES.items():
+        assert m[key] == pytest.approx((50.0 / b[label]["close"] - 1) * 100), key
+        assert f["sources"][key] == "argus"
+    assert m["return_1w_pct"] < 0 and m["return_ytd_price_pct"] < 0  # not Finnhub's stale +8.8 / +17.6
+    assert a.symbol_fundamentals(["X"])["metrics"]["X"]["return_6m_pct"] == pytest.approx(m["return_6m_pct"])
+
+    # During the session "now" is today: the last close's day is a base, not the endpoint.
+    monkeypatch.setattr(app_mod, "datetime", type("D", (datetime,), {"now": staticmethod(
+        lambda tz=None: datetime(2026, 4, 20, 11, tzinfo=tz))}))
+    monkeypatch.setattr(app_mod, "market_status", lambda: {"session": "regular", "last_session": "2026-04-17"})
+    assert a.return_bases("X")["bases"]["1D"]["date"] == "2026-04-17"
+
+
+def test_momentum_returns_null_beyond_the_history(make_argus, monkeypatch):
+    from datetime import date
+
+    import argus.app as app_mod
+
+    days = [d for d in (date(2026, 1, 5) + timedelta(days=i) for i in range(60)) if d.weekday() < 5]
+    bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, 100 + i, 1) for i, d in enumerate(days)]
+    a = make_argus(history=PerSymbolHistory({"X": bars}))
+    monkeypatch.setattr(app_mod, "market_status", lambda: {"session": "closed", "last_session": days[-1].isoformat()})
+    m = a.price_stats(["X"])["X"]
+    assert m["return_ytd_price_pct"] is None  # listed this year: no prior year-end close
+    assert m["return_6m_pct"] is None and m["return_1y_pct"] is None and m["cagr_3y_pct"] is None
+    assert m["return_1w_pct"] == pytest.approx(((100 + len(days) - 1) / (100 + len(days) - 6) - 1) * 100)
+
+
 def test_single_symbol_fundamentals_add_price_cagr_and_fcf_margin(make_argus):
     from datetime import date
 
