@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-27T02:39:49.125625+00:00",
+ "created_at": "2026-10-28T02:46:45.556690+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1172,6 +1172,22 @@
     "external_id": "r006-growth-rmbs-add",
     "deleted": false,
     "created_at": "2026-10-27T02:17:16.932153+00:00"
+   },
+   {
+    "id": 44,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "KO",
+    "qty": 1.0,
+    "price": 91.23,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-28T02:20:09.907626+00:00",
+    "note": "r007: post-market buy after Q3 beat, toward 4% target",
+    "source": "cli",
+    "external_id": "loop-income-r007-ko",
+    "deleted": false,
+    "created_at": "2026-10-28T02:20:10.328231+00:00"
    }
   ],
   "target": [
@@ -2035,6 +2051,28 @@
     "created_by": "cli",
     "created_at": "2026-10-27T02:18:34.140228+00:00",
     "updated_at": "2026-10-27T02:18:34.140232+00:00"
+   },
+   {
+    "id": 49,
+    "symbol": "INOD",
+    "kind": "note",
+    "text": "[loop-growth] r007 (10-27 close 44.74, -25.3% on the day, -20.1% on cost): reports of ~550 abrupt layoffs in India plus the Philippines, notices cite a 'ramp-down of the business assignment' (Research > News, brief headlines). Reads like a large customer program shrinking, which is the thesis-break risk (top-customer concentration), but nothing confirmed by the company. Decision: hold, no add, until the 11-05 Q3 report. Exit the whole position on 11-05 if the company confirms a top-customer ramp-down, if Q3 revenue growth < 25% y/y, or if the Q4 outlook implies < 25%. Analyst targets (mean 122.75) predate the news; ignore them.",
+    "review_on": "2026-11-05",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-28T02:18:32.199274+00:00",
+    "updated_at": "2026-10-28T02:18:32.199280+00:00"
+   },
+   {
+    "id": 50,
+    "symbol": "KO",
+    "kind": "thesis",
+    "text": "loop-income r007: added 1 sh @91.23 (post-market 10-27) after Q3: EPS 0.91 vs 0.907 est, revenue 13.35B vs 13.31B (Argus brief). Stock -1.6% on the day, so yield 2.33% on Argus rate 2.12. Payout ~64% of EPS (rate / eps_ttm 3.33). Brings KO 3.84% -> 3.93% of a 4% target. Review after Q4 report / Feb raise.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-28T02:20:21.021812+00:00",
+    "updated_at": "2026-10-28T02:20:21.021820+00:00"
    }
   ],
   "peer_list": [],
@@ -4470,6 +4508,69 @@
      }
     },
     "after": null
+   },
+   {
+    "id": 120,
+    "ts": "2026-10-28T02:18:32.201120+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "49",
+    "before": null,
+    "after": {
+     "id": 49,
+     "symbol": "INOD",
+     "kind": "note",
+     "text": "[loop-growth] r007 (10-27 close 44.74, -25.3% on the day, -20.1% on cost): reports of ~550 abrupt layoffs in India plus the Philippines, notices cite a 'ramp-down of the business assignment' (Research > News, brief headlines). Reads like a large customer program shrinking, which is the thesis-break risk (top-customer concentration), but nothing confirmed by the company. Decision: hold, no add, until the 11-05 Q3 report. Exit the whole position on 11-05 if the company confirms a top-customer ramp-down, if Q3 revenue growth < 25% y/y, or if the Q4 outlook implies < 25%. Analyst targets (mean 122.75) predate the news; ignore them.",
+     "review_on": "2026-11-05",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-28T02:18:32.199274+00:00",
+     "updated_at": "2026-10-28T02:18:32.199280+00:00"
+    }
+   },
+   {
+    "id": 121,
+    "ts": "2026-10-28T02:20:10.331052+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "44",
+    "before": null,
+    "after": {
+     "id": 44,
+     "type": "BUY",
+     "symbol": "KO",
+     "qty": 1.0,
+     "price": 91.23,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-28T02:20:09.907626+00:00",
+     "note": "r007: post-market buy after Q3 beat, toward 4% target",
+     "source": "cli",
+     "external_id": "loop-income-r007-ko",
+     "deleted": false
+    }
+   },
+   {
+    "id": 122,
+    "ts": "2026-10-28T02:20:21.023930+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "50",
+    "before": null,
+    "after": {
+     "id": 50,
+     "symbol": "KO",
+     "kind": "thesis",
+     "text": "loop-income r007: added 1 sh @91.23 (post-market 10-27) after Q3: EPS 0.91 vs 0.907 est, revenue 13.35B vs 13.31B (Argus brief). Stock -1.6% on the day, so yield 2.33% on Argus rate 2.12. Payout ~64% of EPS (rate / eps_ttm 3.33). Brings KO 3.84% -> 3.93% of a 4% target. Review after Q4 report / Feb raise.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-28T02:20:21.021812+00:00",
+     "updated_at": "2026-10-28T02:20:21.021820+00:00"
+    }
    }
   ]
  }
