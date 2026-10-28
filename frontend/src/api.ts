@@ -139,6 +139,8 @@ export interface SecFreshness {
 export interface SecCoverage extends SecFreshness {
   fcf_ttm_quarters: string[] | null;  // newest first
   fcf_ttm_through: string | null;
+  /** Quarters behind SEC's revenue_ttm, eps_ttm and revenue_growth_q_yoy_pct (newest first); null when the providers' were newer. */
+  ttm_quarters?: string[] | null;
 }
 
 export interface FinancialPeriod {

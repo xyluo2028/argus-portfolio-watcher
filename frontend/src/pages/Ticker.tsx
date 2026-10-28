@@ -9,6 +9,7 @@ import {
   type Position,
   type Quote,
   type ReturnBases,
+  type SecCoverage,
   type StreamUpdate,
 } from "../api";
 import { CandleChart, METRIC_COLOR, METRIC_PANES, OVERLAY_COLOR, type MetricPane, type Overlay, type Pane } from "../components/CandleChart";
@@ -49,6 +50,14 @@ const SECTIONS: { group: GroupName; title: string }[] = [
   { group: "Profitability", title: "Profitability" }, { group: "Momentum", title: "Momentum" },
   { group: "Dividends & risk", title: "Dividends & risk" }, { group: "Fund", title: "Fund" },
 ];
+
+/** The SEC quarters (newest first) behind a figure sourced from SEC, so the card says which window it covers. */
+function secQuarters(key: string, sec: SecCoverage | null | undefined): string[] | null {
+  if (!sec) return null;
+  if (key === "fcf_ttm" || key === "fcf_margin_pct") return sec.fcf_ttm_quarters;
+  if (key === "revenue_ttm" || key === "eps_ttm" || key === "revenue_growth_q_yoy_pct") return sec.ttm_quarters ?? null;
+  return null;
+}
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
   const symbol = (useParams().symbol ?? "").toUpperCase();
@@ -247,15 +256,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                       const since = d.range && bases?.bases[d.range];
                       const src = since ? `since the ${since.date} close, as the chart's ${d.range}`
                         : fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
-                      const quarters = fund.sources[k] === "sec" && k === "fcf_ttm" ? fund.sec?.fcf_ttm_quarters : null;
-                      const covers = quarters?.length
-                        ? `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}` : undefined;
+                      const quarters = fund.sources[k] === "sec" ? secQuarters(k, fund.sec) : null;
+                      const covers = !quarters?.length ? undefined : k === "revenue_growth_q_yoy_pct"
+                        ? `SEC, quarter to ${quarters[0]} vs a year earlier`
+                        : `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}`;
                       return (
                         <div key={k} title={[d.title, covers ?? src].filter(Boolean).join(" · ") || undefined}>
                           <dt>{d.label}</dt>
                           <dd className={metricTone(k, v)}>
                             {formatMetric(k, v)}
-                            {quarters?.length ? <span className="ext-line">SEC, {quarters.length}Q to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span> : null}
+                            {quarters?.length ? <span className="ext-line">SEC, {k === "revenue_growth_q_yoy_pct" ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span> : null}
                           </dd>
                         </div>
                       );

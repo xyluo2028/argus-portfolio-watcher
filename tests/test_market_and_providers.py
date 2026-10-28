@@ -269,6 +269,99 @@ def test_fcf_ttm_comes_from_sec_quarters_else_provider(settings):
     assert plain.get_fundamentals("KO", ["fcf_ttm"])["sources"]["fcf_ttm"] == "yahoo"
 
 
+def _quarterly_facts():
+    """Five back-to-back quarters (Rambus-like, in $M), each tagged as its own 3-month period."""
+    q = [("2025-07-01", "2025-09-30", 178.513, 0.44, 82.483), ("2025-10-01", "2025-12-31", 190.244, 0.58, 93.3),
+         ("2026-01-01", "2026-03-31", 180.189, 0.55, 71.574), ("2026-04-01", "2026-06-30", 207.385, 0.61, 52.178),
+         ("2026-07-01", "2026-09-30", 218.289, 0.69, 95.879)]
+    col = lambda i: [_fact(x[0], x[1], x[2 + i]) for x in q]  # noqa: E731
+    return {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": col(0)}},
+        "EarningsPerShareDiluted": {"units": {"USD/shares": col(1)}},
+        "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": [
+            _fact(a, b, fcf + 10) for a, b, _, _, fcf in q]}},
+        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": [_fact(a, b, 10) for a, b, *_ in q]}},
+    }}}
+
+
+def test_sec_ttm_figures_share_one_window():
+    from argus.providers.sec_edgar import ttm_figures
+
+    fin = build_financials(_quarterly_facts(), "quarterly", 8)
+    t = ttm_figures(fin)
+    rev = 218.289 + 207.385 + 180.189 + 190.244
+    assert t["revenue_ttm"] == pytest.approx(rev)
+    assert t["eps_ttm"] == pytest.approx(2.43)
+    assert t["revenue_growth_q_yoy_pct"] == pytest.approx((218.289 / 178.513 - 1) * 100)  # +22.3%
+    assert t["fcf_margin_pct"] == pytest.approx(312.931 / rev * 100)  # 39.3%: same quarters on both sides
+    # Four quarters but no year-ago one: TTM figures, no quarterly growth.
+    assert "revenue_growth_q_yoy_pct" not in ttm_figures(build_financials(_quarterly_facts(), "quarterly", 4))
+    # Foreign-currency revenue doesn't sit beside dollar prices:
+    eur = {"units": {**fin["units"], "revenue": "EUR"}, "periods": fin["periods"]}
+    assert set(ttm_figures(eur)) == {"eps_ttm"}
+
+
+def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
+    """After a 10-Q, Yahoo's revenue and Finnhub's quarterly growth can run a quarter behind SEC's
+    statements on the same page (RMBS: $756M and +20.4% through Q2 vs $796M and +22.3% through Q3).
+    SEC's quarters then supply revenue, EPS, growth and FCF margin from one window."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    yahoo = _Fund("yahoo", {"revenue_ttm": 756.331, "eps_ttm": 2.42, "fcf_ttm": 202.3, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"revenue_growth_q_yoy_pct": 20.43, "pe_ttm": 39.6})
+    sec = _FakeSec(_quarterly_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [], None, [finnhub, yahoo], sec=sec))
+    fields = ["revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "fcf_ttm", "fcf_margin_pct", "pe_ttm"]
+    out = a.fundamentals("RMBS", fields)
+    m, src = out["metrics"], out["sources"]
+    assert m["revenue_ttm"] == pytest.approx(796.107)
+    assert m["eps_ttm"] == pytest.approx(2.43)
+    assert m["revenue_growth_q_yoy_pct"] == pytest.approx(22.28, abs=0.01)
+    assert m["fcf_margin_pct"] == pytest.approx(39.31, abs=0.01)
+    assert {k: src[k] for k in fields} == {"revenue_ttm": "sec", "eps_ttm": "sec", "revenue_growth_q_yoy_pct": "sec",
+                                           "fcf_ttm": "sec", "fcf_margin_pct": "sec", "pe_ttm": "finnhub"}
+    assert out["sec"]["ttm_quarters"] == ["2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"]
+    # The portfolio views show the same figure:
+    assert a.symbol_fundamentals(["RMBS"])["metrics"]["RMBS"]["fcf_margin_pct"] == pytest.approx(m["fcf_margin_pct"])
+
+    # Same quarter on both sides (BLLN: Finnhub's -12.8% vs SEC's +64.4%): SEC's still wins.
+    yahoo.data = yahoo.data | {"_period_end": "2026-09-30"}
+    out = a.fundamentals("RMBS", fields, refresh=True)
+    assert out["sources"]["revenue_growth_q_yoy_pct"] == "sec"
+
+    # A provider a quarter ahead (earnings out, SEC's XBRL not caught up, as KO's): the providers' figures,
+    # while FCF margin stays SEC's FCF over SEC's revenue for the same quarters.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("RMBS", fields, refresh=True)
+    assert {k: out["sources"][k] for k in ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct")} == {
+        "revenue_ttm": "yahoo", "eps_ttm": "yahoo", "revenue_growth_q_yoy_pct": "finnhub"}
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(39.31, abs=0.01)
+    assert out["sec"]["ttm_quarters"] is None
+
+    # Not in EDGAR (an ETF, a foreign filer): the providers' figures, FCF margin from them.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = a.fundamentals("SPY", fields)
+    assert out["sources"]["revenue_ttm"] == "yahoo" and out["metrics"]["eps_ttm"] == 2.42
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(202.3 / 756.331 * 100)
+
+
+def test_provider_ahead_of_sec():
+    from datetime import date
+
+    from argus.services.market import provider_ahead_of_sec
+
+    assert provider_ahead_of_sec("2026-09-30", ["2026-06-30"]) is False
+    assert provider_ahead_of_sec("2026-04-03", ["2026-04-03"]) is False
+    assert provider_ahead_of_sec("2026-04-03", ["2026-07-03"]) is True
+    assert provider_ahead_of_sec("2025-12-27", ["2026-01-02"]) is False  # 52/53-week calendars
+    assert provider_ahead_of_sec(None, []) is True
+    # No provider period: SEC counts as behind once a newer report is overdue.
+    assert provider_ahead_of_sec(date.today().isoformat(), []) is False
+    assert provider_ahead_of_sec("2020-03-31", []) is True
+
+
 def test_sec_prefers_restated_value():
     facts = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [
         _fact("2025-01-01", "2025-03-31", 100, filed="2025-05-01"),

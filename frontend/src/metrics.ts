@@ -25,8 +25,10 @@ const rel = (a: number | null | undefined, b: number | null | undefined) => (a !
 const DEFS: MetricDef[] = [
   // valuation & size
   { key: "market_cap", short: "Mkt cap", label: "Market cap", kind: "big" },
-  { key: "revenue_ttm", short: "Revenue", label: "Revenue (TTM)", kind: "big" },
-  { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money" },
+  { key: "revenue_ttm", short: "Revenue", label: "Revenue (TTM)", kind: "big",
+    title: "Last four quarters filed with the SEC (source: sec) when they're as recent as the data provider's; otherwise the provider's figure" },
+  { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money",
+    title: "Diluted EPS summed over the same SEC quarters as revenue (source: sec); otherwise the data provider's figure" },
   { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", title: "Price ÷ trailing 12-month earnings" },
   { key: "pe_forward", short: "Fwd P/E", label: "P/E (forward)", kind: "ratio1", title: "Price ÷ next 12 months' estimated earnings" },
   { key: "peg", short: "PEG", label: "PEG (expected)", kind: "ratio2",
@@ -41,7 +43,7 @@ const DEFS: MetricDef[] = [
     title: "Operating cash flow − capex over the last four quarters filed with the SEC (source: sec); otherwise the data provider's figure" },
   // growth (YoY = trailing 12 months or latest quarter vs a year earlier; CAGR = compound annual rate)
   { key: "revenue_growth_yoy_pct", short: "Rev YoY", label: "Revenue growth YoY", kind: "signed", title: "Trailing 12 months vs a year earlier" },
-  { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier" },
+  { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier (from SEC filings when they're as recent as the data provider's)" },
   { key: "revenue_growth_3y_pct", short: "Rev CAGR 3Y", label: "Revenue CAGR 3Y", kind: "signed", title: "Compound annual growth over 3 years" },
   { key: "revenue_growth_5y_pct", short: "Rev CAGR 5Y", label: "Revenue CAGR 5Y", kind: "signed", title: "Compound annual growth over 5 years" },
   { key: "eps_growth_yoy_pct", short: "EPS YoY", label: "EPS growth YoY", kind: "signed" },
@@ -52,7 +54,7 @@ const DEFS: MetricDef[] = [
   { key: "gross_margin_pct", short: "Gross", label: "Gross margin", kind: "pct" },
   { key: "operating_margin_pct", short: "Operating", label: "Operating margin", kind: "pct" },
   { key: "net_margin_pct", short: "Net", label: "Net margin", kind: "pct" },
-  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue (TTM)" },
+  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue over the same four quarters (SEC when it has both)" },
   { key: "roe_pct", short: "ROE", label: "Return on equity", kind: "pct" },
   { key: "roa_pct", short: "ROA", label: "Return on assets", kind: "pct" },
   { key: "roic_pct", short: "ROIC", label: "Return on invested capital", kind: "pct", title: "Operating profit after tax ÷ debt + equity (TTM)" },
