@@ -67,6 +67,37 @@ def test_estimated_ex_dates_move_off_weekends_and_holidays():
     assert [x["ex_date"] for x in m["projected"]] == ["2026-10-26", "2026-11-27", "2026-12-28"]
 
 
+KO_HIST = [("2025-12-01", 0.51), ("2026-03-13", 0.53), ("2026-06-15", 0.53), ("2026-09-15", 0.53)]
+
+
+def test_announced_ex_date_replaces_the_estimate_for_its_payment():
+    # KO-style: the rhythm guesses Dec 15, the company declares Dec 1 (14 days off): one December payment
+    h = analyze_holding(KO_HIST, 43, lambda d: 43, TODAY, announced=[date(2026, 12, 1)])
+    assert [(x["ex_date"], x["estimated_date"]) for x in h["projected"]] == [("2026-12-01", False)]
+    assert h["projected"][0]["amount"] == pytest.approx(43 * 0.53)
+    # one the history already has changes nothing; one that passed before the history shows it is received
+    assert analyze_holding(KO_HIST, 43, lambda d: 43, TODAY, announced=[date(2026, 9, 15)])["projected"][0][
+        "ex_date"] == "2026-12-15"
+    late = analyze_holding(KO_HIST, 43, lambda d: 43, date(2026, 12, 3), announced=[date(2026, 12, 1)])
+    assert late["projected"] == [] and late["received"][-1]["ex_date"] == "2026-12-01"
+
+
+def test_projection_crosses_the_year_end_when_asked_and_totals_stay_in_the_year():
+    hist = [("2026-01-06", 1.5), ("2026-04-06", 1.5), ("2026-07-06", 1.5), ("2026-10-06", 1.5)]  # JPM-style
+    today = date(2026, 10, 28)
+    assert analyze_holding(hist, 15, lambda d: 15, today)["projected"] == []
+    h = analyze_holding(hist, 15, lambda d: 15, today, until=date(2027, 1, 31))
+    assert [x["ex_date"] for x in h["projected"]] == ["2027-01-06"]
+    out = analyze([{"symbol": "JPM", "qty": 15}, {"symbol": "KO", "qty": 43}], {"JPM": hist, "KO": KO_HIST},
+                  lambda s, d: 15 if s == "JPM" else 43, today, {"KO": [date(2026, 12, 1)]})
+    by = {x["symbol"]: x for x in out["holdings"]}
+    assert (by["JPM"]["next_ex_date_est"], by["JPM"]["projected_rest_of_year"]) == ("2027-01-06", 0)
+    assert (by["KO"]["next_ex_date_est"], by["KO"]["next_ex_date_announced"]) == ("2026-12-01", True)
+    assert out["totals"]["projected"] == pytest.approx(43 * 0.53)  # not doubled, and no 2027 money
+    assert out["by_month"][11]["projected"] == pytest.approx(43 * 0.53)
+    assert [e["ex_date"] for e in by["KO"]["events"] if e["ex_date"] > "2026-10"] == ["2026-12-01"]
+
+
 def test_stale_payer_is_not_extrapolated_and_non_payers_are_zero():
     stale = analyze_holding([("2025-11-01", 1.0), ("2026-02-01", 1.0)], 10, lambda d: 10, TODAY)
     assert stale["irregular"] and stale["projected"] == [] and stale["rate"] == pytest.approx(2.0)

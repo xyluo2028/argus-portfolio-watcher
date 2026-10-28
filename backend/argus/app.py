@@ -94,7 +94,7 @@ def _transient(err: str | None) -> bool:
     return bool(err) and not any(t in err for t in _LASTING_ERRORS)
 
 
-ESTIMATE_MATCH_DAYS = 10  # an announced ex-date this close to a projected one replaces it
+ANNOUNCED_REACH_DAYS = 183  # a declared ex-date this far past a window can still replace an estimate in it
 
 
 def _event_happened(e: dict, now: datetime) -> bool:
@@ -957,7 +957,7 @@ class Argus:
         held = set(syms) if scoped else set(self.held_positions())  # `held` means held in that portfolio
         rows = self.events.between(syms, start, end, ["earnings", "ex_dividend", "dividend_pay"])
         announced_ex = self.events.between(syms, start - timedelta(days=dividends_mod.MATCH_DAYS),
-                                           end + timedelta(days=ESTIMATE_MATCH_DAYS), ["ex_dividend"])
+                                           end + timedelta(days=ANNOUNCED_REACH_DAYS), ["ex_dividend"])
         histories = self.dividend_histories(syms)
         by_pf: dict = {}
         for t in self.portfolios.active_transactions(portfolio if scoped else ALL):
@@ -969,9 +969,22 @@ class Argus:
             return sum(pos.qty for txns in by_pf.values()
                        if (pos := build_positions([t for t in txns if t.symbol == sym and t.ts < cutoff]).get(sym)))
 
-        ex_dates = {s: {date.fromisoformat(d) for d, _ in histories.get(s, [])} for s in syms}
+        announced = {s: set() for s in syms}
         for e in announced_ex:
-            ex_dates[e["symbol"]].add(date.fromisoformat(e["date"]))
+            announced[e["symbol"]].add(date.fromisoformat(e["date"]))
+        paid = {s: {date.fromisoformat(d): a for d, a in histories.get(s, [])} for s in syms}
+        ex_dates = {s: set(paid[s]) | announced[s] for s in syms}
+        # The Dividends projection, with declared ex-dates in place of its estimates, through the window.
+        proj = {s: dividends_mod.analyze_holding(histories.get(s, []), shares_at(s, today + timedelta(days=1)),
+                                                 lambda d, s=s: shares_at(s, d), today, announced[s], end)
+                for s in syms}
+
+        def expected(r: dict, sym: str, ex: date) -> None:
+            """Cash per share (paid, else projected) and the amount for shares held into ex-date `ex`."""
+            per_share = paid[sym].get(ex, proj[sym].get("per_payment"))
+            if per_share is not None:
+                r["per_share"], r["amount"] = per_share, per_share * shares_at(sym, ex)
+
         for r in rows:
             if r["kind"] == "earnings":
                 r["held"] = r["symbol"] in held
@@ -987,19 +1000,16 @@ class Argus:
                 ex = max(prior)
                 r["ex_date"] = ex.isoformat()
             r["held"] = shares_at(r["symbol"], ex) > 0
+            expected(r, r["symbol"], ex)
         if scoped:  # a portfolio's calendar lists only the payments it's owed
             rows = [r for r in rows if r["kind"] != "dividend_pay" or r["held"]]
-        # Ex-dates the Dividends page projects into the window, unless one is announced near it.
+        # Ex-dates the Dividends page estimates in the window (declared ones are already rows).
         for sym in syms:
-            qty = shares_at(sym, today + timedelta(days=1))
-            proj = dividends_mod.analyze_holding(histories.get(sym, []), qty, lambda d: 0.0, today)["projected"]
-            for x in proj:
-                d = date.fromisoformat(x["ex_date"])
-                if d > end or any(abs((d - a).days) <= ESTIMATE_MATCH_DAYS for a in ex_dates[sym]):
-                    continue
-                rows.append({"symbol": sym, "kind": "ex_dividend", "date": x["ex_date"], "hour": None,
-                             "estimated": True, "per_share": x["per_share"], "amount": x["amount"],
-                             "source": "estimate", "held": qty > 0})
+            for x in proj[sym]["projected"]:
+                if x["estimated_date"] and x["ex_date"] <= end.isoformat():
+                    rows.append({"symbol": sym, "kind": "ex_dividend", "date": x["ex_date"], "hour": None,
+                                 "estimated": True, "per_share": x["per_share"], "amount": x["amount"],
+                                 "source": "estimate", "held": x["shares"] > 0})
         rows.sort(key=lambda r: (r["date"], r["symbol"]))
         past = [_event_happened(r, now) for r in rows]
         return {
@@ -1160,9 +1170,20 @@ class Argus:
             pos = build_positions([t for t in by_sym.get(sym, []) if t.ts < cutoff]).get(sym)
             return pos.qty if pos else 0.0
 
-        histories = self.dividend_histories([r["symbol"] for r in rows])
+        syms = [r["symbol"] for r in rows]
+        histories = self.dividend_histories(syms)
+        today = datetime.now(NY).date()
         return {"portfolio": summ["portfolio"]["name"],
-                **dividends_mod.analyze(rows, histories, qty_at, datetime.now(NY).date())}
+                **dividends_mod.analyze(rows, histories, qty_at, today, self.announced_ex_dates(syms, today))}
+
+    def announced_ex_dates(self, symbols: list[str], today: date) -> dict[str, list[date]]:
+        """Declared ex-dates per symbol from the events calendar (refreshed daily), recent and upcoming."""
+        self.events.refresh(symbols)
+        out: dict[str, list[date]] = {}
+        for e in self.events.between(symbols, today - timedelta(days=dividends_mod.MATCH_DAYS),
+                                     today + timedelta(days=366), ["ex_dividend"]):
+            out.setdefault(e["symbol"], []).append(date.fromisoformat(e["date"]))
+        return out
 
     def watchlist_dividends(self, name: str = DEFAULT_WATCHLIST, live_quotes: dict[str, Quote] | None = None) -> dict:
         """Yield, rate, frequency and next ex-date for watched symbols (no shares, so no income)."""
@@ -1173,7 +1194,9 @@ class Argus:
         rows = [{"symbol": s, "name": None, "qty": 0.0, "avg_cost": None, "cost_basis": 0.0,
                  "price": quotes[s].price if s in quotes else None, "market_value": 0.0} for s in syms]
         histories = self.dividend_histories(syms)
-        return {"watchlist": name, **dividends_mod.analyze(rows, histories, lambda s, d: 0.0, datetime.now(NY).date())}
+        today = datetime.now(NY).date()
+        return {"watchlist": name, **dividends_mod.analyze(rows, histories, lambda s, d: 0.0, today,
+                                                           self.announced_ex_dates(syms, today))}
 
     def watchlist_earnings(self, name: str = DEFAULT_WATCHLIST) -> dict:
         return {"watchlist": name, **self.earnings_for([i["symbol"] for i in self.watchlists.items(name)])}

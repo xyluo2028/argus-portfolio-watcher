@@ -279,7 +279,8 @@ export interface CalEvent {
   symbol: string; kind: "earnings" | "ex_dividend" | "dividend_pay"; date: string; hour: string | null; held: boolean;
   epsEstimate?: number; epsActual?: number; epsSurprisePct?: number; revenueEstimate?: number; revenueActual?: number;
   ex_date?: string;  // dividend_pay: the ex-date it belongs to; `held` means shares were held going into it
-  estimated?: boolean; per_share?: number; amount?: number;  // ex_dividend projected from the payment rhythm
+  estimated?: boolean;  // ex_dividend projected from the payment rhythm
+  per_share?: number; amount?: number;  // dividends: expected cash per share, and for the shares held into the ex-date
 }
 
 export interface AlertRule {
@@ -348,7 +349,7 @@ export interface FundHoldings {
 export interface DividendHolding {
   symbol: string; name: string | null; qty: number; pays: boolean; frequency: string | null; rate: number;
   trailing_12m: number; last_ex_date: string | null; last_amount: number | null; irregular: boolean;
-  next_ex_date_est: string | null; annual_income: number; yield_pct: number | null; yield_on_cost_pct: number | null;
+  next_ex_date_est: string | null; next_ex_date_announced: boolean; annual_income: number; yield_pct: number | null; yield_on_cost_pct: number | null;
   received_ytd: number; projected_rest_of_year: number;
 }
 export interface Dividends {

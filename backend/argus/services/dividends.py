@@ -44,8 +44,10 @@ def lumpy(amounts: list[float]) -> bool:
 
 
 def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callable[[date], float],
-                    today: date) -> dict:
-    """`history`: (ex-date ISO, cash per share), any order. `qty_at(d)`: shares held going into day d."""
+                    today: date, announced: Iterable[date] = (), until: date | None = None) -> dict:
+    """`history`: (ex-date ISO, cash per share), any order. `qty_at(d)`: shares held going into day d.
+    `announced`: ex-dates the company has declared (calendar), which replace the estimated ones.
+    Projects to Dec 31, or to `until` when that's later (a window that crosses the year end)."""
     pays = sorted((date.fromisoformat(d), a) for d, a in history)
     recent = [(d, a) for d, a in pays if d > today - timedelta(days=LOOKBACK_DAYS)]
     if not recent:
@@ -63,6 +65,7 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
     per_payment = trailing / freq if uneven else last_amt  # projected at the year's average if lumpy
 
     year_start, year_end = date(today.year, 1, 1), date(today.year, 12, 31)
+    horizon = max(until or year_end, year_end)
     received = [{"ex_date": d.isoformat(), "per_share": a, "shares": q, "amount": q * a}
                 for d, a in pays if year_start <= d <= today and (q := qty_at(d)) > 0]
     projected = []
@@ -70,47 +73,70 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
         # Same day of the month as the last ex-date, every 12/freq months (payers keep their rhythm),
         # moved to the next trading day when that's a weekend or holiday (funds go ex on business days).
         step, k = 12 // freq, 1
-        while add_months(last_d, step * k) <= year_end:
+        while add_months(last_d, step * k) <= horizon:
             nxt = session_on_or_after(add_months(last_d, step * k))
-            if today < nxt <= year_end:
+            if today < nxt <= horizon:
                 projected.append({"ex_date": nxt.isoformat(), "per_share": per_payment, "shares": qty,
                                   "amount": qty * per_payment, "estimated_date": True})
             k += 1
+    # A declared ex-date is the payment the estimate guessed at: it replaces any estimate within half
+    # a period of it (KO's 12-01 replaces a 12-15 guess), at the projected amount per share. One the
+    # history already has is skipped; one that's passed before the history shows it counts as received.
+    half = period / 2
+    for a in sorted(set(announced)):
+        if a < last_d + half or a > horizon:
+            continue
+        projected = [x for x in projected if abs(date.fromisoformat(x["ex_date"]) - a) >= half]
+        q = qty_at(a) if a <= today else qty
+        x = {"ex_date": a.isoformat(), "per_share": per_payment, "shares": q, "amount": q * per_payment}
+        if a > today:
+            projected.append(x | {"estimated_date": False})
+        elif a >= year_start and q > 0:
+            received.append(x)
+    projected.sort(key=lambda x: x["ex_date"])
     return {"pays": True, "frequency": FREQ_NAMES[freq], "rate": rate, "trailing_12m": trailing,
             "last_ex_date": last_d.isoformat(), "last_amount": last_amt, "irregular": stale,
-            "received": received, "projected": projected}
+            "per_payment": per_payment, "received": received, "projected": projected}
 
 
 def analyze(rows: list[dict], histories: dict[str, list[tuple[str, float]]],
-            qty_at: Callable[[str, date], float], today: date) -> dict:
-    """`rows`: portfolio summary positions (symbol, name, qty, avg_cost, cost_basis, price, market_value)."""
+            qty_at: Callable[[str, date], float], today: date,
+            announced: dict[str, Iterable[date]] | None = None) -> dict:
+    """`rows`: portfolio summary positions (symbol, name, qty, avg_cost, cost_basis, price, market_value).
+    `announced`: declared ex-dates per symbol (see analyze_holding)."""
     holdings = []
     months = [{"month": m, "received": 0.0, "projected": 0.0} for m in range(1, 13)]
     tot = {"annual_income": 0.0, "received": 0.0, "projected": 0.0}
+    year_end = date(today.year, 12, 31).isoformat()
     for r in rows:
         sym = r["symbol"]
-        h = analyze_holding(histories.get(sym, []), r["qty"], lambda d, s=sym: qty_at(s, d), today)
+        # Projected a year ahead so the next ex-date is known in December too; totals stay this year's.
+        h = analyze_holding(histories.get(sym, []), r["qty"], lambda d, s=sym: qty_at(s, d), today,
+                            (announced or {}).get(sym, ()), add_months(today, 12))
+        this_year = [x for x in h["projected"] if x["ex_date"] <= year_end]
         price, avg_cost = r.get("price"), r.get("avg_cost")
         income = h["rate"] * r["qty"]
         received = sum(x["amount"] for x in h["received"])
-        projected = sum(x["amount"] for x in h["projected"])
+        projected = sum(x["amount"] for x in this_year)
         for x in h["received"]:
             months[int(x["ex_date"][5:7]) - 1]["received"] += x["amount"]
-        for x in h["projected"]:
+        for x in this_year:
             months[int(x["ex_date"][5:7]) - 1]["projected"] += x["amount"]
         tot["annual_income"] += income
         tot["received"] += received
         tot["projected"] += projected
-        next_ex = h["projected"][0]["ex_date"] if h["projected"] else None
+        nxt = h["projected"][0] if h["projected"] else None
+        next_ex = nxt["ex_date"] if nxt else None
         holdings.append({
             "symbol": sym, "name": r.get("name"), "qty": r["qty"], "pays": h["pays"], "frequency": h["frequency"],
             "rate": h["rate"], "trailing_12m": h["trailing_12m"], "last_ex_date": h["last_ex_date"],
             "last_amount": h.get("last_amount"), "irregular": h.get("irregular", False),
-            "next_ex_date_est": next_ex, "annual_income": income,
+            "next_ex_date_est": next_ex, "next_ex_date_announced": bool(nxt) and not nxt["estimated_date"],
+            "annual_income": income,
             "yield_pct": h["rate"] / price * 100 if price else None,
             "yield_on_cost_pct": h["rate"] / avg_cost * 100 if avg_cost else None,
             "received_ytd": received, "projected_rest_of_year": projected,
-            "events": h["received"] + h["projected"],
+            "events": sorted(h["received"], key=lambda x: x["ex_date"]) + this_year,
         })
 
     mv = sum(r.get("market_value") or 0 for r in rows)

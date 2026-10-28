@@ -50,7 +50,7 @@ export function EventsCard({ symbol, portfolio }: { symbol?: string; portfolio?:
                     ) : null}
                   </td>
                   <td className="small text-2">
-                    {e.estimated && e.amount ? `≈ ${money(e.amount)}` : ""}
+                    {e.kind !== "earnings" && e.amount ? `≈ ${money(e.amount)}` : ""}
                     {e.kind === "earnings" && e.epsEstimate != null ? `EPS est. ${e.epsEstimate.toFixed(2)}` : ""}
                     {e.kind === "earnings" && e.revenueEstimate ? ` · rev est. ${big(e.revenueEstimate)}` : ""}
                   </td>
