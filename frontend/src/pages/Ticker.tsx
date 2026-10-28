@@ -21,7 +21,7 @@ import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { SymbolNotes } from "../components/SymbolNotes";
 import { extLabel, nyTime, pct, price, quoteTime, tone } from "../format";
-import { GROUPS, METRICS, formatMetric, metricTone, metricValue, type GroupName } from "../metrics";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue, type GroupName, type Metrics } from "../metrics";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -130,7 +130,12 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   };
 
   const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
-  const m = fund?.metrics ?? {};
+  // Momentum returns use the chart's bases and live price, so the card and the range buttons agree.
+  const m: Metrics = { ...(fund?.metrics ?? {}) };
+  for (const d of Object.values(METRICS)) {
+    const r = d.range ? rangeReturn(d.range) : null;
+    if (r != null) m[d.key] = r;
+  }
   const high52 = m.high_52w, low52 = m.low_52w;
 
   return (
@@ -239,7 +244,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                   <dl className="kv">
                     {keys.map((k) => {
                       const v = metricValue(k, m, quote?.price), d = METRICS[k];
-                      const src = fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
+                      const since = d.range && bases?.bases[d.range];
+                      const src = since ? `since the ${since.date} close, as the chart's ${d.range}`
+                        : fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
                       const quarters = fund.sources[k] === "sec" && k === "fcf_ttm" ? fund.sec?.fcf_ttm_quarters : null;
                       const covers = quarters?.length
                         ? `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}` : undefined;

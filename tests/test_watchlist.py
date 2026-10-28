@@ -45,13 +45,16 @@ def test_compare_combines_quotes_and_metrics(make_argus):
     assert out["rows"][1]["price"] is None and "BBB" in out["errors"]
 
 
-def test_watchlist_views_share_the_portfolio_machinery(make_argus):
+def test_watchlist_views_share_the_portfolio_machinery(make_argus, monkeypatch):
     from datetime import UTC, date, datetime, timedelta
+
+    import argus.app as app_mod
 
     from argus.providers.base import Bar
     from tests.test_speed import PerSymbolHistory
 
     today = date.today()
+    monkeypatch.setattr(app_mod, "market_status", lambda: {"session": "closed", "last_session": today.isoformat()})
     days = [today - timedelta(days=60 - i) for i in range(61)]
     bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, 100 + i, 1) for i, d in enumerate(days)]
     a = make_argus([FakeQuotes("fake", {"TSLA": (250, 245)})], history=PerSymbolHistory({"TSLA": bars}),

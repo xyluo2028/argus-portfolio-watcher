@@ -1,6 +1,6 @@
 // One definition per indicator, shared by the dashboard's tabs and the stock page, so both show the
 // same figures under the same names. Values come from /api/fundamentals (and the portfolio and
-// watchlist variants), which add the computed ones (1M return, price CAGR, FCF margin).
+// watchlist variants), which add the computed ones (momentum returns, price CAGR, FCF margin).
 import { big, money, pct, ratio } from "./format";
 
 export type Metrics = Record<string, number | null | undefined>;
@@ -16,6 +16,8 @@ export interface MetricDef {
   kind: Kind;
   /** Needs the live price (distance from the 52-week high, from moving averages). */
   fromPrice?: (m: Metrics, price: number | null | undefined) => number | null;
+  /** Price return over this stock-chart range, from the same base close (the stock page follows the live price). */
+  range?: string;
 }
 
 const rel = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? (a / b - 1) * 100 : null);
@@ -55,12 +57,12 @@ const DEFS: MetricDef[] = [
   { key: "roa_pct", short: "ROA", label: "Return on assets", kind: "pct" },
   { key: "roic_pct", short: "ROIC", label: "Return on invested capital", kind: "pct", title: "Operating profit after tax ÷ debt + equity (TTM)" },
   // momentum (to the latest close; price-relative ones use the live price)
-  { key: "return_1w_pct", short: "1W", label: "1 week", kind: "signed" },
-  { key: "return_1m_pct", short: "1M", label: "1 month", kind: "signed" },
-  { key: "return_3m_pct", short: "3M", label: "3 months", kind: "signed" },
-  { key: "return_6m_pct", short: "6M", label: "6 months", kind: "signed" },
-  { key: "return_ytd_price_pct", short: "YTD", label: "Year to date", kind: "signed" },
-  { key: "return_1y_pct", short: "1Y", label: "1 year", kind: "signed" },
+  { key: "return_1w_pct", short: "1W", label: "1 week", kind: "signed", range: "5D" },
+  { key: "return_1m_pct", short: "1M", label: "1 month", kind: "signed", range: "1M" },
+  { key: "return_3m_pct", short: "3M", label: "3 months", kind: "signed", range: "3M" },
+  { key: "return_6m_pct", short: "6M", label: "6 months", kind: "signed", range: "6M" },
+  { key: "return_ytd_price_pct", short: "YTD", label: "Year to date", kind: "signed", range: "YTD" },
+  { key: "return_1y_pct", short: "1Y", label: "1 year", kind: "signed", range: "1Y" },
   { key: "cagr_3y_pct", short: "CAGR 3Y", label: "Price CAGR 3Y", kind: "signed", title: "Compound annual price return over 3 years (no dividends)" },
   { key: "cagr_5y_pct", short: "CAGR 5Y", label: "Price CAGR 5Y", kind: "signed", title: "Compound annual price return over 5 years (no dividends)" },
   { key: "rel_sp500_1y_pct", short: "vs S&P 1Y", label: "vs S&P 500, 1 year", kind: "signed" },

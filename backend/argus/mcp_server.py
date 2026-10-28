@@ -156,7 +156,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Valuation & profitability: pe_ttm, pe_forward, peg, pb, ps_ttm, ev_ebitda, eps_ttm,
         market_cap, revenue_ttm, revenue_growth_yoy_pct, gross/operating/net_margin_pct, roe_pct,
         fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct, roic_pct,
-        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns, return_1m_pct,
+        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns return_1w/1m/3m/6m/ytd_price/1y_pct
+        (to the latest close, from the same base closes as the stock chart's 5D/1M/3M/6M/YTD/1Y ranges),
         cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct. fcf_ttm is operating cash flow
         minus capex over the last four SEC quarters (source "sec"), else the provider's figure.
         Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
