@@ -336,7 +336,7 @@ class YahooProvider:
         return metrics_from_info(self.get_info(symbol))
 
 
-def metrics_from_info(i: dict) -> dict[str, float | None]:
+def metrics_from_info(i: dict) -> dict[str, float | str | None]:
     """Map Yahoo `info` to normalized fields. Yahoo gives margins/growth as fractions."""
     d2e = _num(i.get("debtToEquity"))
     return {
@@ -373,4 +373,13 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "ytd_return_pct": _num(i.get("ytdReturn")),
         "return_3y_pct": _pct(i.get("threeYearAverageReturn")),
         "return_5y_pct": _pct(i.get("fiveYearAverageReturn")),
+        # The fiscal quarter Yahoo's trailing figures run through, to tell whether SEC's are as recent.
+        "_period_end": _quarter_end(i.get("mostRecentQuarter")),
     }
+
+
+def _quarter_end(epoch) -> str | None:
+    try:
+        return datetime.fromtimestamp(int(epoch), UTC).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None

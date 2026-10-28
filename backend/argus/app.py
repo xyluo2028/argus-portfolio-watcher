@@ -726,7 +726,10 @@ class Argus:
 
     @staticmethod
     def _derived(m: dict) -> dict:
-        """Figures computed from other metrics, so every page shows the same value."""
+        """Figures computed from other metrics, so every page shows the same value. FCF margin comes
+        stored from SEC (FCF ÷ revenue over the same quarters) when it has both."""
+        if m.get("fcf_margin_pct") is not None:
+            return {"fcf_margin_pct": m["fcf_margin_pct"]}
         fcf, rev = m.get("fcf_ttm"), m.get("revenue_ttm")
         return {"fcf_margin_pct": fcf / rev * 100 if fcf is not None and rev else None}
 
@@ -734,7 +737,7 @@ class Argus:
         """One symbol's fundamentals with the same computed figures the portfolio views add (momentum
         returns, 3Y/5Y price CAGR, FCF margin)."""
         sym = normalize_symbol(symbol)
-        computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct", "fcf_margin_pct"}
+        computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct"}
         stored = [f for f in fields if f not in computed] if fields else None
         out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
         if fields and not stored:

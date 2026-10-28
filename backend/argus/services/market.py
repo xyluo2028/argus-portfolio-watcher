@@ -23,7 +23,7 @@ from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
-from argus.providers.sec_edgar import freshness, ttm_free_cash_flow
+from argus.providers.sec_edgar import freshness, ttm_figures, ttm_free_cash_flow
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -33,7 +33,7 @@ METRIC_FIELDS = (
     "revenue_growth_q_yoy_pct", "revenue_growth_3y_pct", "revenue_growth_5y_pct", "eps_growth_yoy_pct",
     "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct", "roa_pct", "roi_pct",
     "payout_ratio_pct", "dividend_growth_5y_pct", "return_1w_pct", "return_3m_pct", "return_6m_pct",
-    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200", "roic_pct",
+    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200", "roic_pct", "fcf_margin_pct",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
@@ -45,7 +45,12 @@ PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_fo
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
-FUNDAMENTALS_VERSION = 8  # bump to invalidate cached rows when merge rules change
+# Trailing figures SEC's quarters supply when they're at least as recent as the providers', so the
+# valuation card agrees with the quarterly statements (Yahoo's revenue and Finnhub's quarterly growth can
+# lag a 10-Q by weeks). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
+SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct")
+SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly different dates
+FUNDAMENTALS_VERSION = 9  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
@@ -55,12 +60,26 @@ PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 
 
 def sec_coverage(meta: dict | None) -> dict | None:
     """The quarters SEC-based fundamentals cover: the latest SEC quarter with its age and `stale` flag
-    (computed now, not when cached), and the four quarter ends in the SEC FCF TTM (newest first)."""
+    (computed now, not when cached), the four quarter ends in the SEC FCF TTM (newest first), and those
+    behind SEC's revenue, EPS and growth figures (`ttm_quarters`; null when the providers' were newer)."""
     if not meta:
         return None
     quarters = meta.get("fcf_ttm_quarters")
     return freshness(meta.get("latest_period")) | {
-        "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None}
+        "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None,
+        "ttm_quarters": meta.get("ttm_quarters")}
+
+
+def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
+    """Whether a provider's trailing figures run through a newer quarter than SEC's: an earnings release
+    is out but its 10-Q isn't in SEC's XBRL yet. Without a provider period, SEC counts as behind only
+    once it's stale (a newer report overdue)."""
+    if sec_latest is None:
+        return True
+    if not provider_periods:
+        return freshness(sec_latest)["stale"]
+    slack = timedelta(days=SEC_PERIOD_SLACK_DAYS)
+    return max(date.fromisoformat(p) for p in provider_periods) > date.fromisoformat(sec_latest) + slack
 
 
 def _aware(dt: datetime) -> datetime:
@@ -357,16 +376,19 @@ class MarketService:
         if self.sec is None or not self.settings.sec_user_agent:
             return {}
         try:
-            fin = self.sec.get_financials(symbol, "quarterly", 4)
+            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 5 for the quarter's growth
         except ProviderError as e:
             if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
                 return {}  # ETFs, funds and foreign filers: the providers' figures stand
             raise
         fcf = ttm_free_cash_flow(fin)
+        ttm = ttm_figures(fin)
         # Which quarters the SEC figures cover, kept beside the sources (see sec_coverage).
+        last4 = [p["period_end"] for p in fin["periods"][:4]]
         meta = {"latest_period": fin["periods"][0]["period_end"] if fin.get("periods") else None,
-                "fcf_ttm_quarters": [p["period_end"] for p in fin["periods"][:4]] if fcf else None}
-        return {"_sec": meta} | ({"fcf_ttm": fcf[0]} if fcf else {})
+                "fcf_ttm_quarters": last4 if fcf else None,
+                "ttm_quarters": last4 if any(f in ttm for f in SEC_WINDOW_FIELDS) else None}
+        return {"_sec": meta} | ({"fcf_ttm": fcf[0]} if fcf else {}) | ttm
 
     def _fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
         """Ask every fundamentals provider and SEC at once (network only) and merge: SEC-derived
@@ -383,6 +405,13 @@ class MarketService:
             answers = list(pool.map(ask, askers))
         by_provider = {name: m for name, m, _ in answers if m is not None}
         errors = {name: e for name, _, e in answers if e}  # provider -> error
+        sec = by_provider.get("sec")
+        if sec and sec.get("_sec"):
+            periods = [m["_period_end"] for n, m in by_provider.items() if n != "sec" and m.get("_period_end")]
+            if provider_ahead_of_sec(sec["_sec"]["latest_period"], periods):
+                # One window per figure family: the providers' newer quarter, not SEC's older one.
+                by_provider["sec"] = {k: v for k, v in sec.items() if k not in SEC_WINDOW_FIELDS} | {
+                    "_sec": sec["_sec"] | {"ttm_quarters": None}}
         names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
         metrics, sources = {}, {}
         for field in METRIC_FIELDS:

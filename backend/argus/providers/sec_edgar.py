@@ -337,13 +337,43 @@ def ttm_free_cash_flow(financials: dict) -> tuple[float, str] | None:
     units = financials.get("units", {})
     if units.get("operating_cash_flow") != "USD" or units.get("capex") != "USD":
         return None
-    last4 = financials.get("periods", [])[:4]
-    if len(last4) < 4 or any(p.get("free_cash_flow") is None for p in last4):
-        return None
-    ends = [date.fromisoformat(p["period_end"]) for p in last4]
-    if not all(_is_quarter((a - b).days) for a, b in pairwise(ends)):
+    last4 = _last_four_quarters(financials)
+    if last4 is None or any(p.get("free_cash_flow") is None for p in last4):
         return None
     return sum(p["free_cash_flow"] for p in last4), last4[0]["period_end"]
+
+
+def _last_four_quarters(financials: dict) -> list[dict] | None:
+    """The four newest quarters of build_financials' quarterly output, if back to back."""
+    last4 = financials.get("periods", [])[:4]
+    if len(last4) < 4:
+        return None
+    ends = [date.fromisoformat(p["period_end"]) for p in last4]
+    return last4 if all(_is_quarter((a - b).days) for a, b in pairwise(ends)) else None
+
+
+def ttm_figures(financials: dict) -> dict[str, float]:
+    """Trailing figures over the same four newest quarters as ttm_free_cash_flow, so they agree with
+    each other and with the quarterly statements: revenue_ttm, eps_ttm (the quarters' diluted EPS
+    summed), fcf_margin_pct (FCF ÷ revenue over those quarters) and revenue_growth_q_yoy_pct (the
+    newest quarter vs the one ending a year earlier). A figure is left out when a quarter lacks it
+    or it isn't in US dollars (it sits beside prices)."""
+    units, out = financials.get("units", {}), {}
+    last4 = _last_four_quarters(financials)
+    usd_rev = units.get("revenue") == "USD"
+    if last4 and usd_rev and all(p.get("revenue") for p in last4):
+        out["revenue_ttm"] = sum(p["revenue"] for p in last4)
+        if fcf := ttm_free_cash_flow(financials):
+            out["fcf_margin_pct"] = fcf[0] / out["revenue_ttm"] * 100
+    if last4 and units.get("eps_diluted") == "USD/shares" and all(p.get("eps_diluted") is not None for p in last4):
+        out["eps_ttm"] = round(sum(p["eps_diluted"] for p in last4), 4)
+    periods = financials.get("periods", [])
+    if periods and usd_rev and periods[0].get("revenue") is not None:
+        newest = date.fromisoformat(periods[0]["period_end"])
+        prior = next((p for p in periods[1:] if _is_year((newest - date.fromisoformat(p["period_end"])).days)), None)
+        if prior and prior.get("revenue", 0) > 0:
+            out["revenue_growth_q_yoy_pct"] = (periods[0]["revenue"] / prior["revenue"] - 1) * 100
+    return out
 
 
 def _num_or_none(v: str | None) -> float | None:
