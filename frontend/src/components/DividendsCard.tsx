@@ -7,6 +7,13 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const pctCell = (v: number | null | undefined) => (v == null ? "–" : `${v.toFixed(2)}%`);
 const compact = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}K` : `$${v.toFixed(v >= 100 ? 0 : 2)}`);
 
+/** A declared ex-date as is, an estimate with "~"; the year only when it's not this one. */
+function nextEx(iso: string, announced: boolean, year: number) {
+  const shown = iso.startsWith(String(year)) ? iso.slice(5) : iso;
+  return announced ? <span title="Declared by the company">{shown}</span>
+    : <span title="Estimated from the payment rhythm">~{shown}</span>;
+}
+
 /** Forward dividend income and yield, and this year's dividends by month (received vs projected). */
 export function DividendsCard({ portfolio }: { portfolio: string }) {
   const [d, setD] = useState<Dividends | null>(null);
@@ -102,7 +109,7 @@ export function DividendsCard({ portfolio }: { portfolio: string }) {
                 <td>{h.pays ? money(h.annual_income) : "–"}</td>
                 <td>{h.received_ytd ? money(h.received_ytd) : "–"}</td>
                 <td>{h.projected_rest_of_year ? money(h.projected_rest_of_year) : "–"}</td>
-                <td>{h.next_ex_date_est ? <span title="Estimated from the payment rhythm">~{h.next_ex_date_est.slice(5)}</span> : "–"}</td>
+                <td>{h.next_ex_date_est ? nextEx(h.next_ex_date_est, h.next_ex_date_announced, d.year) : "–"}</td>
               </tr>
             ))}
           </tbody>

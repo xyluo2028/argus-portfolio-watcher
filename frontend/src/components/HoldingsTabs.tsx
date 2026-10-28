@@ -60,8 +60,9 @@ const COLUMNS: Record<MetricTab, Col[]> = {
       cell: (r) => (r.div?.pays && r.div.yield_on_cost_pct != null ? `${r.div.yield_on_cost_pct.toFixed(2)}%` : "–") },
     fromDef("payout_ratio_pct"),
     fromDef("dividend_growth_5y_pct"),
-    { label: "Next ex-date", title: "Estimated from the payment rhythm", value: (r) => r.div?.next_ex_date_est ?? null,
-      cell: (r) => (r.div?.next_ex_date_est ? `~${day(r.div.next_ex_date_est)}` : "–") },
+    { label: "Next ex-date", title: "Declared by the company, or ~ estimated from the payment rhythm",
+      value: (r) => r.div?.next_ex_date_est ?? null,
+      cell: (r) => (r.div?.next_ex_date_est ? `${r.div.next_ex_date_announced ? "" : "~"}${day(r.div.next_ex_date_est)}` : "–") },
     { label: "Annual income", value: (r) => (r.div?.pays ? r.div.annual_income : null), cell: (r) => (r.div?.pays ? money(r.div.annual_income) : "–") },
   ],
   Earnings: [
