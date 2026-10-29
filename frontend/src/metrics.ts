@@ -54,7 +54,9 @@ const DEFS: MetricDef[] = [
   { key: "gross_margin_pct", short: "Gross", label: "Gross margin", kind: "pct" },
   { key: "operating_margin_pct", short: "Operating", label: "Operating margin", kind: "pct" },
   { key: "net_margin_pct", short: "Net", label: "Net margin", kind: "pct" },
-  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue over the same four quarters (SEC when it has both)" },
+  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue from one source: SEC's four quarters when it has capex, else one provider's FCF and revenue; blank rather than mixing sources" },
+  // Stock page only, in FCF margin's place when SEC's filings tag no capex (not a dashboard column).
+  { key: "ocf_margin_pct", short: "OCF margin", label: "Operating cash flow margin", kind: "pct", title: "Operating cash flow ÷ revenue over SEC's four quarters, shown because the filings don't report capex, so there's no FCF margin" },
   { key: "roe_pct", short: "ROE", label: "Return on equity", kind: "pct" },
   { key: "roa_pct", short: "ROA", label: "Return on assets", kind: "pct" },
   { key: "roic_pct", short: "ROIC", label: "Return on invested capital", kind: "pct", title: "Operating profit after tax ÷ debt + equity (TTM)" },

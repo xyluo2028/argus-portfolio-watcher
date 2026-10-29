@@ -55,8 +55,23 @@ const SECTIONS: { group: GroupName; title: string }[] = [
 function secQuarters(key: string, sec: SecCoverage | null | undefined): string[] | null {
   if (!sec) return null;
   if (key === "fcf_ttm" || key === "fcf_margin_pct") return sec.fcf_ttm_quarters;
-  if (key === "revenue_ttm" || key === "eps_ttm" || key === "revenue_growth_q_yoy_pct") return sec.ttm_quarters ?? null;
+  if (SEC_WINDOW.has(key)) return sec.ttm_quarters ?? null;
   return null;
+}
+
+// Figures that come from SEC's four quarters when current, else a provider: they always say which, so a
+// card mixing the two can't pass one source's figure off as the other's.
+const SEC_WINDOW = new Set(["revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
+  "operating_margin_pct", "net_margin_pct", "ocf_margin_pct"]);
+const LABELED_SOURCE = new Set([...SEC_WINDOW, "fcf_ttm", "fcf_margin_pct"]);
+const SOURCE_NAMES: Record<string, string> = { finnhub: "Finnhub", yahoo: "Yahoo", sec: "SEC" };
+
+/** A section's keys; the stock page adds the OCF margin where FCF margin can't be worked out (no capex filed). */
+function sectionKeys(group: GroupName, m: Metrics): readonly string[] {
+  const keys: readonly string[] = GROUPS[group];
+  if (group !== "Profitability" || m.fcf_margin_pct != null || m.ocf_margin_pct == null) return keys;
+  const at = keys.indexOf("fcf_margin_pct") + 1;
+  return [...keys.slice(0, at), "ocf_margin_pct", ...keys.slice(at)];
 }
 
 export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpdate | null }) {
@@ -245,7 +260,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         {fund ? (
           <div className="fund-groups">
             {SECTIONS.map(({ group, title }) => {
-              const keys = GROUPS[group].filter((k) => metricValue(k, m, quote?.price) != null);
+              const keys = sectionKeys(group, m).filter((k) => metricValue(k, m, quote?.price) != null);
               if (keys.length === 0) return null;
               return (
                 <div key={group}>
@@ -265,7 +280,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                           <dt>{d.label}</dt>
                           <dd className={metricTone(k, v)}>
                             {formatMetric(k, v)}
-                            {quarters?.length ? <span className="ext-line">SEC, {k === "revenue_growth_q_yoy_pct" ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span> : null}
+                            {quarters?.length ? <span className="ext-line">SEC, {k === "revenue_growth_q_yoy_pct" ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span>
+                              : LABELED_SOURCE.has(k) && fund.sources[k] ? <span className="ext-line">{SOURCE_NAMES[fund.sources[k]] ?? fund.sources[k]}</span> : null}
+                            {k === "ocf_margin_pct" && <span className="ext-line">capex not reported</span>}
                           </dd>
                         </div>
                       );

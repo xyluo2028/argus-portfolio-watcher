@@ -355,16 +355,23 @@ def _last_four_quarters(financials: dict) -> list[dict] | None:
 def ttm_figures(financials: dict) -> dict[str, float]:
     """Trailing figures over the same four newest quarters as ttm_free_cash_flow, so they agree with
     each other and with the quarterly statements: revenue_ttm, eps_ttm (the quarters' diluted EPS
-    summed), fcf_margin_pct (FCF ÷ revenue over those quarters) and revenue_growth_q_yoy_pct (the
-    newest quarter vs the one ending a year earlier). A figure is left out when a quarter lacks it
+    summed), gross/operating/net margin and fcf_margin_pct (the quarters' sums ÷ their revenue) and
+    revenue_growth_q_yoy_pct (the newest quarter vs the one ending a year earlier). Without capex in
+    every quarter there's no FCF margin; ocf_margin_pct (operating cash flow ÷ revenue) stands in, so
+    nothing divides another source's FCF by SEC revenue. A figure is left out when a quarter lacks it
     or it isn't in US dollars (it sits beside prices)."""
     units, out = financials.get("units", {}), {}
     last4 = _last_four_quarters(financials)
     usd_rev = units.get("revenue") == "USD"
     if last4 and usd_rev and all(p.get("revenue") for p in last4):
-        out["revenue_ttm"] = sum(p["revenue"] for p in last4)
+        rev = out["revenue_ttm"] = sum(p["revenue"] for p in last4)
+        for f, key in (("gross_profit", "gross_margin_pct"), ("operating_income", "operating_margin_pct"),
+                       ("net_income", "net_margin_pct"), ("operating_cash_flow", "ocf_margin_pct")):
+            if units.get(f) == "USD" and all(p.get(f) is not None for p in last4):
+                out[key] = sum(p[f] for p in last4) / rev * 100
         if fcf := ttm_free_cash_flow(financials):
-            out["fcf_margin_pct"] = fcf[0] / out["revenue_ttm"] * 100
+            out["fcf_margin_pct"] = fcf[0] / rev * 100
+            out.pop("ocf_margin_pct", None)
     if last4 and units.get("eps_diluted") == "USD/shares" and all(p.get("eps_diluted") is not None for p in last4):
         out["eps_ttm"] = round(sum(p["eps_diluted"] for p in last4), 4)
     periods = financials.get("periods", [])
