@@ -175,8 +175,12 @@ class MacroProvider:
             return [{k: clean(x.get(k)) for k in ("gmt", "eventName", "actual", "consensus", "previous")}
                     for x in rows if x.get("country") == "United States" and x.get("eventName")]
 
+        # New York's date, not the server's (UTC): after 8 pm ET the UTC date is already tomorrow and
+        # today's releases, with their actuals, would drop off (B-034). In the key so the window rolls
+        # at New York midnight rather than whenever the 6 h cache expires.
+        today = datetime.now(NY).date()
+
         def fetch():
-            today = date.today()
             # From today's query (yesterday's or today's rows) to one past the last day, to compare with.
             queries = [today + timedelta(days=i) for i in range(days + 3)]
             with ThreadPoolExecutor(max_workers=7) as pool:
@@ -190,4 +194,4 @@ class MacroProvider:
                     out.append({"date": when.isoformat(), "time_et": time_et, "event": x["eventName"],
                                 "actual": x["actual"], "consensus": x["consensus"], "previous": x["previous"]})
             return out
-        return self._memo(f"econ:{days}", 6 * 3600, fetch)
+        return self._memo(f"econ:{days}:{today.isoformat()}", 6 * 3600, fetch)

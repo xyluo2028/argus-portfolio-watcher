@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -101,7 +101,10 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
         return Resp(params["date"])
 
     p = MacroProvider(client=type("C", (), {"get": get})())
-    monkeypatch.setattr("argus.providers.macro.date", type("D", (date,), {"today": classmethod(lambda cls: date(2026, 10, 20))}))
+    # 22:15 ET on 10-20 is already 10-21 in UTC: the calendar still starts on New York's 10-20 (B-034)
+    now = [datetime(2026, 10, 21, 2, 15, tzinfo=UTC)]
+    monkeypatch.setattr("argus.providers.macro.datetime",
+                        type("DT", (datetime,), {"now": classmethod(lambda cls, tz=None: now[0].astimezone(tz))}))
     ev = p.economic_events(20)
     assert min(asked) == "2026-10-20" and max(asked) == "2026-11-11"
     got = {(e["event"], e["date"]): e["time_et"] for e in ev}
@@ -119,6 +122,14 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
     }
     assert all(date.fromisoformat(e["date"]).weekday() < 5 for e in ev)  # releases land on weekdays
     assert next(e for e in ev if e["event"] == "Housing Starts")["actual"] == "1.221M"
+
+    # cached for the New York day; at New York midnight the window moves on
+    asked.clear()
+    now[0] = datetime(2026, 10, 21, 3, 59, tzinfo=UTC)
+    assert p.economic_events(20) == ev and not asked
+    now[0] = datetime(2026, 10, 21, 4, 0, tzinfo=UTC)
+    rolled = p.economic_events(20)
+    assert min(asked) == "2026-10-21" and min(e["date"] for e in rolled) >= "2026-10-21"
 
 
 def _row(sym, price, prev, hi, lo, a50, a200, hi52, lo52):
