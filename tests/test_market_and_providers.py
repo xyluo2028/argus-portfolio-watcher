@@ -321,7 +321,7 @@ def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
     assert m["revenue_growth_q_yoy_pct"] == pytest.approx(22.28, abs=0.01)
     assert m["fcf_margin_pct"] == pytest.approx(39.31, abs=0.01)
     assert {k: src[k] for k in fields} == {"revenue_ttm": "sec", "eps_ttm": "sec", "revenue_growth_q_yoy_pct": "sec",
-                                           "fcf_ttm": "sec", "fcf_margin_pct": "sec", "pe_ttm": "finnhub"}
+                                           "fcf_ttm": "sec", "fcf_margin_pct": "sec", "pe_ttm": "sec"}
     assert out["sec"]["ttm_quarters"] == ["2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"]
     # The portfolio views show the same figure:
     assert a.symbol_fundamentals(["RMBS"])["metrics"]["RMBS"]["fcf_margin_pct"] == pytest.approx(m["fcf_margin_pct"])
@@ -345,6 +345,61 @@ def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
     out = a.fundamentals("SPY", fields)
     assert out["sources"]["revenue_ttm"] == "yahoo" and out["metrics"]["eps_ttm"] == 2.42
     assert out["metrics"]["fcf_margin_pct"] == pytest.approx(202.3 / 756.331 * 100)
+
+
+def test_pe_is_the_current_price_over_the_eps_shown(settings):
+    """RMBS: Finnhub's P/E 35.7 sat beside SEC's $2.43 EPS at $91.03 (37.5); BLLN 142.7 vs 162.9. P/E is
+    now the price ÷ the EPS on the card, with that EPS's source, everywhere the card's figures go."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    quotes = FakeQuotes("finnhub", {"RMBS": (91.03, 88.91), "SPY": (600.0, 598.0), "LOSS": (5.0, 5.0)})
+    yahoo = _Fund("yahoo", {"eps_ttm": 2.42, "pe_ttm": 36.9, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"pe_ttm": 35.7258})
+    sec = _FakeSec(_quarterly_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [quotes], None, [finnhub, yahoo], sec=sec))
+
+    # SEC's EPS: P/E is the price over it, labeled sec, on the card, the portfolio tab, compare and watchlists.
+    out = a.fundamentals("RMBS", ["eps_ttm", "pe_ttm"])
+    assert (out["metrics"]["eps_ttm"], out["sources"]["eps_ttm"]) == (pytest.approx(2.43), "sec")
+    assert out["metrics"]["pe_ttm"] == pytest.approx(91.03 / 2.43)  # 37.5, not Finnhub's 35.7
+    assert out["sources"]["pe_ttm"] == "sec"
+    assert a.symbol_fundamentals(["RMBS"])["metrics"]["RMBS"]["pe_ttm"] == pytest.approx(91.03 / 2.43)
+    assert a.market.get_fundamentals("RMBS", ["pe_ttm"])["metrics"]["pe_ttm"] == pytest.approx(91.03 / 2.43)
+    # It follows the price, not the price when the fundamentals were cached:
+    quotes.prices["RMBS"] = (100.0, 91.03)
+    a.market.store_quotes(quotes.get_quotes(["RMBS"]).values())
+    assert a.fundamentals("RMBS", ["pe_ttm"])["metrics"]["pe_ttm"] == pytest.approx(100 / 2.43)
+
+    # A provider's EPS (not in EDGAR): the price over that EPS, labeled with that provider.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = a.fundamentals("SPY", ["eps_ttm", "pe_ttm"])
+    assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (pytest.approx(600 / 2.42), "yahoo")
+
+    # Losses: no meaningful P/E, rather than the provider's.
+    yahoo.data = {"eps_ttm": -0.4, "pe_ttm": 12.0}
+    out = a.fundamentals("LOSS", ["eps_ttm", "pe_ttm"])
+    assert out["metrics"]["pe_ttm"] is None and out["sources"]["pe_ttm"] == "yahoo"
+    # No EPS at all: the provider's own P/E stands.
+    yahoo.data = {}
+    out = a.fundamentals("LOSS", ["pe_ttm"], refresh=True)
+    assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (35.7258, "finnhub")
+
+
+def test_last_price_is_the_newer_of_quote_and_close(settings):
+    from argus.db import make_engine
+    from argus.providers.base import Quote
+    from argus.services.market import MarketService
+
+    m = MarketService(make_engine(settings.db_path), settings, [], None, [])
+    old, new = datetime(2026, 10, 27, 20, tzinfo=UTC), datetime(2026, 10, 28, 20, tzinfo=UTC)
+    m.store_quotes([Quote("A", 10.0, 9.0, None, None, None, old, "finnhub"),
+                    Quote("B", 20.0, 19.0, None, None, None, new, "finnhub")])
+    m._store_bars("A", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 10.5, 1), Bar(new - timedelta(hours=6), 1, 1, 1, 11.0, 1)])
+    m._store_bars("B", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 19.5, 1)])
+    m._store_bars("C", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 30.0, 1)])
+    assert m.last_prices(["A", "B", "C", "D"]) == {"A": 11.0, "B": 20.0, "C": 30.0}
 
 
 def _margin_facts(capex: bool = True, gross: bool = True):

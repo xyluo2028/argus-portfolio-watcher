@@ -165,7 +165,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         flow ÷ revenue, SEC) stands in: capex not reported. revenue_ttm, eps_ttm (diluted, summed),
         revenue_growth_q_yoy_pct and gross/operating/net_margin_pct also come from those SEC quarters when
         they're at least as recent as the providers' (so they match get_financials), else from the providers.
-        Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
+        pe_ttm is the current price ÷ that eps_ttm, with its source (null when EPS ≤ 0); the provider's
+        P/E only when there's no EPS. Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
         `latest_period` (newest quarter in SEC's XBRL data), its age, `stale` (older than ~135 days:
         SEC's data lacks a newer 10-Q, so SEC figures lag the providers'), `fcf_ttm_quarters` and
         `ttm_quarters` (behind the SEC revenue/EPS/growth/margin figures)."""

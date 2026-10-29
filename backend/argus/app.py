@@ -41,7 +41,7 @@ from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
-from argus.services.market import MarketService
+from argus.services.market import MarketService, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import SnapshotService
@@ -732,10 +732,14 @@ class Argus:
 
     def fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
         """One symbol's fundamentals with the same computed figures the portfolio views add (momentum
-        returns, 3Y/5Y price CAGR, FCF margin)."""
+        returns, 3Y/5Y price CAGR, FCF margin, P/E from the current price)."""
         sym = normalize_symbol(symbol)
         computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct"}
         stored = [f for f in fields if f not in computed] if fields else None
+        try:
+            self.market.get_quotes([sym])  # P/E is the current price ÷ EPS (market.with_pe)
+        except ArgusError as e:
+            log.warning("quote %s: %s", sym, e.message)
         out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
         if fields and not stored:
             out["metrics"] = {}
@@ -1206,7 +1210,13 @@ class Argus:
         a = bundle.get("analysts")
         if a and price and a.get("target_mean"):
             a = a | {"upside_pct": (a["target_mean"] / price - 1) * 100}
-        return bundle | {"price": price, "analysts": a}
+        valuation = bundle.get("valuation")
+        if valuation and price:  # the band's current P/E is the stock page's: this price ÷ the EPS shown
+            cached = self.market.cached_fundamentals([sym]).get(sym)
+            if cached:
+                pe = with_pe(cached["metrics"], cached["sources"], price)[0].get("pe_ttm")
+                valuation = [research_mod.with_current(b, pe) if b["key"] == "peTTM" else b for b in valuation]
+        return bundle | {"price": price, "analysts": a, "valuation": valuation}
 
     def _build_research(self, sym: str) -> dict:
         yahoo, fh = self.market.profile_provider, self.market.directory

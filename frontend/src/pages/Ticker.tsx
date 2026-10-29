@@ -21,7 +21,7 @@ import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { SymbolNotes } from "../components/SymbolNotes";
 import { extLabel, nyTime, pct, price, quoteTime, tone } from "../format";
-import { GROUPS, METRICS, formatMetric, metricTone, metricValue, type GroupName, type Metrics } from "../metrics";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue, notMeaningful, type GroupName, type Metrics } from "../metrics";
 
 const RANGES = [
   { label: "1D", period: "1d", interval: "5m" },
@@ -60,7 +60,7 @@ function secQuarters(key: string, sec: SecCoverage | null | undefined): string[]
 
 // Figures that come from SEC's four quarters when current, else a provider: they always say which, so a
 // card mixing the two can't pass one source's figure off as the other's.
-const SEC_WINDOW = new Set(["revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
+const SEC_WINDOW = new Set(["revenue_ttm", "eps_ttm", "pe_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
   "operating_margin_pct", "net_margin_pct", "ocf_margin_pct"]);
 const LABELED_SOURCE = new Set([...SEC_WINDOW, "fcf_ttm", "fcf_margin_pct"]);
 const SOURCE_NAMES: Record<string, string> = { finnhub: "Finnhub", yahoo: "Yahoo", sec: "SEC" };
@@ -218,7 +218,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         {fund ? (
           <div className="fund-groups">
             {SECTIONS.map(({ group, title }) => {
-              const keys = sectionKeys(group, m).filter((k) => metricValue(k, m, quote?.price) != null);
+              const keys = sectionKeys(group, m).filter((k) => metricValue(k, m, quote?.price) != null || notMeaningful(k, m));
               if (keys.length === 0) return null;
               return (
                 <div key={group}>
@@ -237,7 +237,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                         <div key={k} title={[d.title, covers ?? src].filter(Boolean).join(" · ") || undefined}>
                           <dt>{d.label}</dt>
                           <dd className={metricTone(k, v)}>
-                            {formatMetric(k, v)}
+                            {notMeaningful(k, m) ? "n/m" : formatMetric(k, v)}
                             {quarters?.length ? <span className="ext-line">SEC, {k === "revenue_growth_q_yoy_pct" ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span>
                               : LABELED_SOURCE.has(k) && fund.sources[k] ? <span className="ext-line">{SOURCE_NAMES[fund.sources[k]] ?? fund.sources[k]}</span> : null}
                             {k === "ocf_margin_pct" && <span className="ext-line">capex not reported</span>}
