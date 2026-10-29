@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, type DividendHolding, type EarningsRow } from "../api";
 import { big, money, pct, price, ratio, tone } from "../format";
 import { COMPARE_MAX, compareUrl } from "../compareSessions";
-import { GROUPS, METRICS, formatMetric, metricTone, metricValue } from "../metrics";
+import { GROUPS, METRICS, formatMetric, metricTone, metricValue, notMeaningful } from "../metrics";
 
 /** Rows picked (with checkboxes) to send to Compare. */
 export interface Selection { has: (symbol: string) => boolean; toggle: (symbol: string) => void; full: boolean }
@@ -56,7 +56,7 @@ function fromDef(key: string): Col {
   return {
     label: d.short, title: d.title ?? (d.label !== d.short ? d.label : undefined),
     value: (r) => metricValue(key, r.m, r.p.price),
-    cell: (r) => { const v = metricValue(key, r.m, r.p.price); return <span className={metricTone(key, v)}>{formatMetric(key, v)}</span>; },
+    cell: (r) => { const v = metricValue(key, r.m, r.p.price); return <span className={metricTone(key, v)}>{notMeaningful(key, r.m) ? "n/m" : formatMetric(key, v)}</span>; },
   };
 }
 

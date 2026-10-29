@@ -14,13 +14,22 @@ export interface MetricDef {
   label: string;
   title?: string;
   kind: Kind;
-  /** Needs the live price (distance from the 52-week high, from moving averages). */
+  /** Needs the live price (P/E, distance from the 52-week high, from moving averages). */
   fromPrice?: (m: Metrics, price: number | null | undefined) => number | null;
   /** Price return over this stock-chart range, from the same base close (the stock page follows the live price). */
   range?: string;
 }
 
 const rel = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? (a / b - 1) * 100 : null);
+// P/E follows the live price over the EPS shown beside it (the API's pe_ttm is the same ratio at the last
+// cached price); only without an EPS does the provider's own P/E stand.
+const peTtm = (m: Metrics, p: number | null | undefined) =>
+  m.eps_ttm == null ? m.pe_ttm ?? null : m.eps_ttm > 0 ? (p ? p / m.eps_ttm : m.pe_ttm ?? null) : null;
+
+/** A figure with no meaningful value (P/E on zero or negative EPS): shown as "n/m", not left out. */
+export function notMeaningful(key: string, m: Metrics | undefined): boolean {
+  return key === "pe_ttm" && m?.eps_ttm != null && m.eps_ttm <= 0;
+}
 
 const DEFS: MetricDef[] = [
   // valuation & size
@@ -29,7 +38,8 @@ const DEFS: MetricDef[] = [
     title: "Last four quarters filed with the SEC (source: sec) when they're as recent as the data provider's; otherwise the provider's figure" },
   { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money",
     title: "Diluted EPS summed over the same SEC quarters as revenue (source: sec); otherwise the data provider's figure" },
-  { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", title: "Price ÷ trailing 12-month earnings" },
+  { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", fromPrice: (m, p) => peTtm(m, p),
+    title: "Current price ÷ the EPS (TTM) above, from the same source; n/m when EPS is zero or negative" },
   { key: "pe_forward", short: "Fwd P/E", label: "P/E (forward)", kind: "ratio1", title: "Price ÷ next 12 months' estimated earnings" },
   { key: "peg", short: "PEG", label: "PEG (expected)", kind: "ratio2",
     title: "P/E ÷ analysts' expected EPS growth (Yahoo, 5-year); below 1 can mean growth is cheap" },

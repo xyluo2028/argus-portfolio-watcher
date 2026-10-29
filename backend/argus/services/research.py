@@ -191,11 +191,20 @@ def valuation_bands(series: dict[str, list[dict]], current: dict[str, float | No
             continue
         q = lambda p: vals[min(len(vals) - 1, max(0, round(p * (len(vals) - 1))))]  # noqa: E731
         cur = current.get(key)
-        rank = None if cur is None or cur <= 0 else sum(1 for v in vals if v <= cur) / len(vals) * 100
         out.append({"key": key, "label": label, "current": cur, "min": vals[0], "p25": q(0.25), "median": median(vals),
-                    "p75": q(0.75), "max": vals[-1], "percentile": rank, "points": len(vals),
+                    "p75": q(0.75), "max": vals[-1], "percentile": _percentile(vals, cur), "points": len(vals),
                     "history": [{"date": d.isoformat(), "v": v} for d, v in hist]})
     return out
+
+
+def _percentile(vals: list[float], cur: float | None) -> float | None:
+    return None if cur is None or cur <= 0 else sum(1 for v in vals if v <= cur) / len(vals) * 100
+
+
+def with_current(band: dict, cur: float | None) -> dict:
+    """A band re-rated at a newer current value (the P/E as the price moves), against the same history."""
+    vals = [h["v"] for h in band["history"] if h["v"] > 0]
+    return band | {"current": cur, "percentile": _percentile(vals, cur)}
 
 
 # -- growth ------------------------------------------------------------------------------------

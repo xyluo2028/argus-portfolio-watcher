@@ -74,6 +74,14 @@ def test_valuation_bands_percentile_and_losses_left_out():
     assert pe["percentile"] == pytest.approx(2 / 6 * 100)  # 10 and 20 are at or below 25
 
 
+def test_band_rerated_at_a_new_current_value():
+    hist = [{"period": f"{y}-03-28", "v": v} for y, v in zip(range(2021, 2027), [40, 30, -5, 20, 50, 10])]
+    pe = r.valuation_bands({"peTTM": hist}, {"peTTM": 25.0}, today=date(2026, 10, 9))[0]
+    moved = r.with_current(pe, 45.0)
+    assert moved["current"] == 45.0 and moved["percentile"] == pytest.approx(3 / 4 * 100)  # 2021 is outside 5 years
+    assert r.with_current(pe, None)["percentile"] is None and moved["median"] == pe["median"]
+
+
 def test_tone():
     assert r.tone("Nvidia beats estimates, shares surge on record growth")["label"] == "positive"
     assert r.tone("Shares plunge after guidance cut and SEC probe")["label"] == "negative"

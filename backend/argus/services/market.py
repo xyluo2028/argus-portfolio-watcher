@@ -88,6 +88,23 @@ def with_fcf_margin(metrics: dict, sources: dict) -> tuple[dict, dict]:
     return metrics, sources
 
 
+def with_pe(metrics: dict, sources: dict, price: float | None) -> tuple[dict, dict]:
+    """P/E (TTM) as the latest price ÷ the EPS (TTM) shown beside it, carrying that EPS's source, so the
+    two always agree (Finnhub's own P/E divides its own EPS by its own, older price: BLLN 142.7 beside
+    SEC's $0.70 EPS at $114, which is 162.9). Blank when EPS ≤ 0 (no meaningful P/E) or there's no price.
+    Without an EPS the provider's P/E stands. Worked out on read, as the price moves."""
+    eps = metrics.get("eps_ttm")
+    if eps is None:
+        return metrics, sources
+    metrics, sources = dict(metrics), dict(sources)
+    metrics["pe_ttm"] = price / eps if price and eps > 0 else None
+    if src := sources.get("eps_ttm"):
+        sources["pe_ttm"] = src
+    else:
+        sources.pop("pe_ttm", None)
+    return metrics, sources
+
+
 def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
     """Whether a provider's trailing figures run through a newer quarter than SEC's: an earnings release
     is out but its 10-Q isn't in SEC's XBRL yet. Without a provider period, SEC counts as behind only
@@ -332,7 +349,7 @@ class MarketService:
         unknown = [f for f in fields or [] if f not in METRIC_FIELDS]
         if unknown:
             raise ArgusError("INVALID_ARG", f"Unknown fields: {', '.join(unknown)}", hint=f"Valid: {', '.join(METRIC_FIELDS)}")
-        cached = self.cached_fundamentals([symbol]).get(symbol)
+        cached = self._cached_rows([symbol]).get(symbol)
         if cached and cached["fresh"] and not refresh:
             metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]
         else:
@@ -343,6 +360,7 @@ class MarketService:
                 metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]  # stale beats nothing
             else:
                 raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
+        metrics, sources = with_pe(metrics, sources, self.last_prices([symbol]).get(symbol))
         wanted = fields or list(METRIC_FIELDS)
         return {
             "symbol": symbol,
@@ -353,7 +371,35 @@ class MarketService:
         }
 
     def cached_fundamentals(self, symbols: list[str]) -> dict[str, dict]:
-        """Whatever the cache holds for these symbols, in one query; `fresh` says if it's current."""
+        """Whatever the cache holds for these symbols, in one query; `fresh` says if it's current. P/E is
+        worked out from the latest price (with_pe)."""
+        out = self._cached_rows(symbols)
+        prices = self.last_prices(list(out))
+        for sym, c in out.items():
+            c["metrics"], c["sources"] = with_pe(c["metrics"], c["sources"], prices.get(sym))
+        return out
+
+    def last_prices(self, symbols: list[str]) -> dict[str, float]:
+        """The latest price Argus holds for each symbol, without calling a provider: the cached quote or
+        the last daily close, whichever is newer."""
+        latest: dict[str, tuple[datetime, float]] = {}
+        with session_scope(self.engine) as s:
+            for sym, as_of, price in s.execute(select(QuoteCache.symbol, QuoteCache.as_of, QuoteCache.price)
+                                               .where(QuoteCache.symbol.in_(symbols))):
+                if price:
+                    latest[sym] = (_aware(as_of), price)
+            last_bar = (select(PriceBar.symbol, func.max(PriceBar.ts).label("ts"))
+                        .where(PriceBar.symbol.in_(symbols), PriceBar.interval == "1d").group_by(PriceBar.symbol)
+                        .subquery())
+            for sym, ts, close in s.execute(select(PriceBar.symbol, PriceBar.ts, PriceBar.c).join(
+                    last_bar, (PriceBar.symbol == last_bar.c.symbol) & (PriceBar.ts == last_bar.c.ts))
+                    .where(PriceBar.interval == "1d")):
+                if close and (sym not in latest or _aware(ts) > latest[sym][0]):
+                    latest[sym] = (_aware(ts), close)
+        return {sym: price for sym, (_, price) in latest.items()}
+
+    def _cached_rows(self, symbols: list[str]) -> dict[str, dict]:
+        """The stored rows as merged (the provider's P/E, before with_pe)."""
         now = datetime.now(UTC)
         out: dict[str, dict] = {}
         with session_scope(self.engine) as s:
@@ -370,7 +416,7 @@ class MarketService:
             return {}
         with ThreadPoolExecutor(max_workers=min(workers, len(symbols))) as pool:
             results = dict(zip(symbols, pool.map(self._fetch_fundamentals, symbols)))
-        cached = self.cached_fundamentals(symbols)
+        cached = self._cached_rows(symbols)
         failed = {}
         for sym, (fetched, errors) in results.items():
             if fetched:
@@ -387,11 +433,9 @@ class MarketService:
     def save_fundamentals(self, symbol: str, result: tuple[tuple[dict, dict] | None, dict[str, str]]) -> dict | None:
         """Store what fetch_fundamentals got; returns the cached entry (stale if the fetch got nothing)."""
         fetched, errors = result
-        cached = self.cached_fundamentals([symbol]).get(symbol)
-        if not fetched:
-            return cached
-        metrics, sources, as_of = self._store_fundamentals(symbol, *fetched, errors, cached)
-        return {"metrics": metrics, "sources": sources, "as_of": as_of, "fresh": True}
+        if fetched:
+            self._store_fundamentals(symbol, *fetched, errors, self._cached_rows([symbol]).get(symbol))
+        return self.cached_fundamentals([symbol]).get(symbol)
 
     def _sec_metrics(self, symbol: str) -> dict:
         """Figures Argus computes from SEC filings, which beat the providers' versions: Yahoo's
