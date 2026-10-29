@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-28T02:46:45.556690+00:00",
+ "created_at": "2026-10-29T02:39:01.883699+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1497,7 +1497,7 @@
     "kind": "day_loss_pct",
     "threshold": 4.0,
     "note": "loop-income r004: KO reports 10-27 bmo",
-    "active": true,
+    "active": false,
     "created_by": "cli",
     "created_at": "2026-10-23T02:17:36.070674+00:00"
    },
@@ -2073,6 +2073,28 @@
     "created_by": "cli",
     "created_at": "2026-10-28T02:20:21.021812+00:00",
     "updated_at": "2026-10-28T02:20:21.021820+00:00"
+   },
+   {
+    "id": 51,
+    "symbol": "IEF",
+    "kind": "note",
+    "text": "loop-macro r008 (10-28 22:15 ET): no trade. Fed held 10-28, leaning hawkish (headlines only; Argus calendar no longer shows the decision). 10Y 5.05% (+5bp), 2Y 4.67 (-3bp), 2s10s +38bp bear steepener. 20d corr to SPY IEF -0.47 vs GLD +0.58. Note 48 plan kept: SELL 6 GLD / BUY 24 IEF after PCE 10-29 08:30 (sim net cash +60.66, realized -33.66) unless core PCE > 2.4% cons and 10Y > 5.15%. Own calc: 1y vol 6.14->5.82, 60d 5.19->4.98.",
+    "review_on": "2026-10-29",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-10-29T02:16:57.315424+00:00",
+    "updated_at": "2026-10-29T02:16:57.315428+00:00"
+   },
+   {
+    "id": 52,
+    "symbol": "MSFT",
+    "kind": "note",
+    "text": "loop-income r008: FQ1 beat (SEC rev 92.28B +18.8% y/y, EPS 4.92; est. rev 92.49B), +2.9% after hours. Capex 39.4B/qtr: TTM FCF 59.96B, dividends ~27B = ~45% of FCF (vs 19% of EPS). No add: 1 share at ~546 overshoots the 4% target. Watch for the dividend raise on the 11-19 ex-date (Argus shows 0.91).",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-29T02:19:18.019439+00:00",
+    "updated_at": "2026-10-29T02:19:18.019446+00:00"
    }
   ],
   "peer_list": [],
@@ -4570,6 +4592,56 @@
      "created_by": "cli",
      "created_at": "2026-10-28T02:20:21.021812+00:00",
      "updated_at": "2026-10-28T02:20:21.021820+00:00"
+    }
+   },
+   {
+    "id": 123,
+    "ts": "2026-10-29T02:16:57.316810+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "51",
+    "before": null,
+    "after": {
+     "id": 51,
+     "symbol": "IEF",
+     "kind": "note",
+     "text": "loop-macro r008 (10-28 22:15 ET): no trade. Fed held 10-28, leaning hawkish (headlines only; Argus calendar no longer shows the decision). 10Y 5.05% (+5bp), 2Y 4.67 (-3bp), 2s10s +38bp bear steepener. 20d corr to SPY IEF -0.47 vs GLD +0.58. Note 48 plan kept: SELL 6 GLD / BUY 24 IEF after PCE 10-29 08:30 (sim net cash +60.66, realized -33.66) unless core PCE > 2.4% cons and 10Y > 5.15%. Own calc: 1y vol 6.14->5.82, 60d 5.19->4.98.",
+     "review_on": "2026-10-29",
+     "archived": false,
+     "created_by": "ui",
+     "created_at": "2026-10-29T02:16:57.315424+00:00",
+     "updated_at": "2026-10-29T02:16:57.315428+00:00"
+    }
+   },
+   {
+    "id": 124,
+    "ts": "2026-10-29T02:19:04.687977+00:00",
+    "actor": "cli",
+    "action": "disable",
+    "entity": "alert",
+    "entity_id": "6",
+    "before": null,
+    "after": null
+   },
+   {
+    "id": 125,
+    "ts": "2026-10-29T02:19:18.020773+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "52",
+    "before": null,
+    "after": {
+     "id": 52,
+     "symbol": "MSFT",
+     "kind": "note",
+     "text": "loop-income r008: FQ1 beat (SEC rev 92.28B +18.8% y/y, EPS 4.92; est. rev 92.49B), +2.9% after hours. Capex 39.4B/qtr: TTM FCF 59.96B, dividends ~27B = ~45% of FCF (vs 19% of EPS). No add: 1 share at ~546 overshoots the 4% target. Watch for the dividend raise on the 11-19 ex-date (Argus shows 0.91).",
+     "review_on": "2026-11-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-29T02:19:18.019439+00:00",
+     "updated_at": "2026-10-29T02:19:18.019446+00:00"
     }
    }
   ]
