@@ -34,6 +34,7 @@ METRIC_FIELDS = (
     "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct", "roa_pct", "roi_pct",
     "payout_ratio_pct", "dividend_growth_5y_pct", "return_1w_pct", "return_3m_pct", "return_6m_pct",
     "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200", "roic_pct", "fcf_margin_pct",
+    "ocf_margin_pct",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
@@ -47,10 +48,11 @@ EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
 # Trailing figures SEC's quarters supply when they're at least as recent as the providers', so the
 # valuation card agrees with the quarterly statements (Yahoo's revenue and Finnhub's quarterly growth can
-# lag a 10-Q by weeks). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
-SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct")
+# lag a 10-Q by weeks; Finnhub's margins too). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
+SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
+                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct")
 SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly different dates
-FUNDAMENTALS_VERSION = 9  # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 10 # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
@@ -61,13 +63,28 @@ PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 
 def sec_coverage(meta: dict | None) -> dict | None:
     """The quarters SEC-based fundamentals cover: the latest SEC quarter with its age and `stale` flag
     (computed now, not when cached), the four quarter ends in the SEC FCF TTM (newest first), and those
-    behind SEC's revenue, EPS and growth figures (`ttm_quarters`; null when the providers' were newer)."""
+    behind SEC's revenue, EPS, growth and margin figures (`ttm_quarters`; null when the providers' were newer)."""
     if not meta:
         return None
     quarters = meta.get("fcf_ttm_quarters")
     return freshness(meta.get("latest_period")) | {
         "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None,
         "ttm_quarters": meta.get("ttm_quarters")}
+
+
+def with_fcf_margin(metrics: dict, sources: dict) -> tuple[dict, dict]:
+    """FCF margin from a single source: SEC's own (FCF ÷ revenue over its quarters) when it has one,
+    else the provider's FCF over that same provider's revenue. Never one source's FCF over another's
+    revenue (Yahoo FCF ÷ SEC revenue when SEC lacks capex): that stays blank."""
+    if sources.get("fcf_margin_pct") == "sec" and metrics.get("fcf_margin_pct") is not None:
+        return metrics, sources
+    metrics, sources = dict(metrics), dict(sources)
+    metrics.pop("fcf_margin_pct", None)
+    sources.pop("fcf_margin_pct", None)
+    fcf, rev, src = metrics.get("fcf_ttm"), metrics.get("revenue_ttm"), sources.get("fcf_ttm")
+    if fcf is not None and rev and src and src == sources.get("revenue_ttm"):
+        metrics["fcf_margin_pct"], sources["fcf_margin_pct"] = fcf / rev * 100, src
+    return metrics, sources
 
 
 def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
@@ -440,6 +457,7 @@ class MarketService:
                     continue
                 if src in errors and (field not in metrics or src == "sec") and previous["metrics"].get(field) is not None:
                     metrics[field], sources[field] = previous["metrics"][field], src
+        metrics, sources = with_fcf_margin(metrics, sources)
         as_of = datetime.now(UTC)
         sources = sources | {"_version": FUNDAMENTALS_VERSION}
         with session_scope(self.engine) as s:

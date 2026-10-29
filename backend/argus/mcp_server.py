@@ -160,13 +160,15 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         (to the latest close, from the same base closes as the stock chart's 5D/1M/3M/6M/YTD/1Y ranges),
         cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct. fcf_ttm is operating cash flow
         minus capex over the last four SEC quarters (source "sec"), else the provider's figure;
-        fcf_margin_pct is that FCF ÷ revenue over the same quarters. revenue_ttm, eps_ttm (diluted, summed)
-        and revenue_growth_q_yoy_pct also come from those SEC quarters when they're at least as recent
-        as the providers' (so they match get_financials), else from the providers.
+        fcf_margin_pct is FCF ÷ revenue from one source (SEC's same quarters, else one provider's FCF and
+        revenue), blank rather than mixing sources. When SEC lacks capex, ocf_margin_pct (operating cash
+        flow ÷ revenue, SEC) stands in: capex not reported. revenue_ttm, eps_ttm (diluted, summed),
+        revenue_growth_q_yoy_pct and gross/operating/net_margin_pct also come from those SEC quarters when
+        they're at least as recent as the providers' (so they match get_financials), else from the providers.
         Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
         `latest_period` (newest quarter in SEC's XBRL data), its age, `stale` (older than ~135 days:
         SEC's data lacks a newer 10-Q, so SEC figures lag the providers'), `fcf_ttm_quarters` and
-        `ttm_quarters` (behind the SEC revenue/EPS/growth figures)."""
+        `ttm_quarters` (behind the SEC revenue/EPS/growth/margin figures)."""
         return argus.fundamentals(symbol, fields)
 
     @mcp.tool(annotations=READ)

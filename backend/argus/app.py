@@ -726,12 +726,9 @@ class Argus:
 
     @staticmethod
     def _derived(m: dict) -> dict:
-        """Figures computed from other metrics, so every page shows the same value. FCF margin comes
-        stored from SEC (FCF ÷ revenue over the same quarters) when it has both."""
-        if m.get("fcf_margin_pct") is not None:
-            return {"fcf_margin_pct": m["fcf_margin_pct"]}
-        fcf, rev = m.get("fcf_ttm"), m.get("revenue_ttm")
-        return {"fcf_margin_pct": fcf / rev * 100 if fcf is not None and rev else None}
+        """Figures computed from other metrics, so every page shows the same value. FCF margin is
+        stored with its source (market.with_fcf_margin: never one source's FCF over another's revenue)."""
+        return {"fcf_margin_pct": m.get("fcf_margin_pct")}
 
     def fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
         """One symbol's fundamentals with the same computed figures the portfolio views add (momentum

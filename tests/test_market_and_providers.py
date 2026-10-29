@@ -347,6 +347,86 @@ def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
     assert out["metrics"]["fcf_margin_pct"] == pytest.approx(202.3 / 756.331 * 100)
 
 
+def _margin_facts(capex: bool = True, gross: bool = True):
+    """_quarterly_facts plus gross profit, operating and net income; capex optional (HRMY, TOST: SEC's
+    filings tag none in recent quarters)."""
+    facts = _quarterly_facts()
+    g = facts["facts"]["us-gaap"]
+    q = [(f["start"], f["end"], f["val"]) for f in g["Revenues"]["units"]["USD"]]
+    cols = {"GrossProfit": 0.8, "OperatingIncomeLoss": 0.25, "NetIncomeLoss": 0.2} if gross else \
+        {"OperatingIncomeLoss": 0.25, "NetIncomeLoss": 0.2}
+    for tag, share in cols.items():
+        g[tag] = {"units": {"USD": [_fact(a, b, v * share) for a, b, v in q]}}
+    if not capex:
+        del g["PaymentsToAcquirePropertyPlantAndEquipment"]
+    return facts
+
+
+def test_sec_ttm_margins_and_ocf_margin_without_capex():
+    from argus.providers.sec_edgar import ttm_figures
+
+    t = ttm_figures(build_financials(_margin_facts(), "quarterly", 8))
+    assert (t["gross_margin_pct"], t["operating_margin_pct"], t["net_margin_pct"]) == pytest.approx((80, 25, 20))
+    assert "ocf_margin_pct" not in t  # FCF margin is there
+    # No capex: no FCF margin, and operating cash flow over the same quarters' revenue in its place.
+    t = ttm_figures(build_financials(_margin_facts(capex=False), "quarterly", 8))
+    rev = 218.289 + 207.385 + 180.189 + 190.244
+    assert "fcf_margin_pct" not in t
+    assert t["ocf_margin_pct"] == pytest.approx((312.931 + 40) / rev * 100)
+
+
+def test_valuation_card_margins_and_fcf_margin_from_one_source(settings):
+    """MSFT: Finnhub's margins ran a quarter behind the SEC revenue/EPS/FCF on the same card. HRMY/TOST:
+    SEC tags no capex, so the card showed Yahoo FCF ÷ SEC revenue (19.0% vs ~37% OCF margin on SEC)."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    yahoo = _Fund("yahoo", {"revenue_ttm": 756.331, "fcf_ttm": 182.8, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"gross_margin_pct": 79.0, "operating_margin_pct": 24.0, "net_margin_pct": 19.0,
+                                "roe_pct": 30.0})
+    sec = _FakeSec(_margin_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [], None, [finnhub, yahoo], sec=sec))
+    fields = ["gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_ttm", "fcf_margin_pct",
+              "ocf_margin_pct", "roe_pct"]
+    out = a.fundamentals("MSFT", fields)
+    m, src = out["metrics"], out["sources"]
+    assert (m["gross_margin_pct"], m["operating_margin_pct"], m["net_margin_pct"]) == pytest.approx((80, 25, 20))
+    assert {k: src[k] for k in ("gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_margin_pct")} == \
+        dict.fromkeys(("gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_margin_pct"), "sec")
+    assert m.get("ocf_margin_pct") is None and src["roe_pct"] == "finnhub"
+    assert out["sec"]["ttm_quarters"] == ["2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"]
+
+    # A margin SEC lacks falls back to the provider's, labeled as such:
+    sec.facts = _margin_facts(gross=False)
+    out = a.fundamentals("MSFT", fields, refresh=True)
+    assert (out["metrics"]["gross_margin_pct"], out["sources"]["gross_margin_pct"]) == (79.0, "finnhub")
+    assert out["sources"]["operating_margin_pct"] == "sec"
+
+    # Providers a quarter ahead of SEC: their margins, not SEC's older ones.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("MSFT", fields, refresh=True)
+    assert {out["sources"][k] for k in ("operating_margin_pct", "net_margin_pct")} == {"finnhub"}
+    yahoo.data = yahoo.data | {"_period_end": "2026-06-30"}
+
+    # No SEC capex (HRMY): Yahoo's FCF stays labeled yahoo, but isn't divided by SEC revenue; SEC's
+    # operating cash flow margin over the same quarters stands in.
+    sec.facts = _margin_facts(capex=False)
+    out = a.fundamentals("HRMY", fields, refresh=True)
+    m, src = out["metrics"], out["sources"]
+    assert (m["fcf_ttm"], src["fcf_ttm"]) == (182.8, "yahoo")
+    assert m.get("fcf_margin_pct") is None and "fcf_margin_pct" not in src
+    assert src["ocf_margin_pct"] == "sec" and m["ocf_margin_pct"] == pytest.approx(352.931 / 796.107 * 100)
+    assert a.symbol_fundamentals(["HRMY"])["metrics"]["HRMY"]["fcf_margin_pct"] is None
+
+    # Both from one provider (SEC behind, so Yahoo supplies revenue too): that provider's ratio, labeled.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("HRMY", fields, refresh=True)
+    assert out["sources"]["fcf_margin_pct"] == "yahoo"
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(182.8 / 756.331 * 100)
+    assert out["metrics"].get("ocf_margin_pct") is None
+
+
 def test_provider_ahead_of_sec():
     from datetime import date
 
