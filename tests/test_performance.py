@@ -144,3 +144,12 @@ def test_after_close_buy_is_invested_from_the_next_session():
     assert pts[0].flow_in == pytest.approx(1000) and pts[0].value == pytest.approx(1000)
     assert pts[1].flow_in == pytest.approx(101)
     assert pts[1].ret == pytest.approx(11 * 110 / (1000 + 101) - 1)
+
+
+def test_after_close_sell_still_holds_the_shares_through_the_session():
+    # Sold 22:18 ET on D[1]: D[1]'s step is the 18 shares' move, matching the summary's Day P&L (B-117).
+    closes = {"X": {D[0]: 100, D[1]: 95, D[2]: 97}}
+    txns = [T(1, "OPENING", "X", at(D[0], 15), 18, 50), T(2, "SELL", "X", datetime(2026, 9, 23, 2, 18, tzinfo=UTC), 6, 95)]
+    pts = compute_series(txns, D[:3], closes)
+    assert pts[1].flow_out == pytest.approx(0) and pts[1].value - pts[0].value == pytest.approx(18 * -5)
+    assert pts[2].flow_out == pytest.approx(6 * 95) and pts[2].value == pytest.approx(12 * 97)

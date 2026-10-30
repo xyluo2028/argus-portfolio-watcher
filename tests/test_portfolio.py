@@ -127,6 +127,57 @@ def test_buy_after_the_close_at_a_post_market_price_shows_only_after_hours(argus
         10 * (322 - 319.38) + (322 - 317))
 
 
+def test_sell_after_the_close_at_the_close_price_leaves_the_session_alone(argus):
+    session_close = at(2026, 9, 25, 20)  # Fri 16:00 ET
+    q = {"X": Quote("X", 110.0, 100.0, None, None, None, session_close, "fake"),
+         "Y": Quote("Y", 45.0, 50.0, None, None, None, session_close, "fake")}
+    argus.portfolios.add_transactions("growth", [
+        TxnInput("BUY", "X", at(2026, 9, 1), 18, 50),
+        TxnInput("BUY", "Y", at(2026, 9, 1), 4, 40),
+    ])
+    before = argus.portfolios.summary("growth", q)
+    argus.portfolios.add_transactions("growth", [
+        TxnInput("SELL", "X", at(2026, 9, 26, 2), 6, 110),  # Fri 22:00 ET, at the close price
+        TxnInput("SELL", "Y", at(2026, 9, 26, 2), 4, 45),  # sold out
+    ])
+    s = argus.portfolios.summary("growth", q)
+    row = s["positions"][0]
+    assert row["qty"] == 12 and row["market_value"] == pytest.approx(1320)
+    assert row["day_pnl"] == pytest.approx(18 * 10) and row["change_pct"] == pytest.approx(10)
+    assert [r["symbol"] for r in s["positions"]] == ["X"]  # nothing held in Y, but its session still counts
+    assert s["totals"]["day_pnl"] == pytest.approx(before["totals"]["day_pnl"]) == pytest.approx(180 - 20)
+    assert s["totals"]["day_pnl_pct"] == pytest.approx(before["totals"]["day_pnl_pct"])
+    assert s["totals"]["day_pnl_pct"] == pytest.approx(160 / (1800 + 200) * 100)
+    assert s["totals"]["ext_pnl"] is None
+    # After hours, only the shares still held count.
+    q["X"] = Quote("X", 110.0, 100.0, None, None, None, session_close, "fake",
+                   ext_price=111.0, ext_as_of=at(2026, 9, 26, 1), ext_session="post")
+    s = argus.portfolios.summary("growth", q)
+    assert s["totals"]["ext_pnl"] == pytest.approx(12 * 1)
+    assert s["totals"]["day_pnl"] == pytest.approx(160)
+
+
+def test_sell_after_the_close_at_a_post_market_price_leaves_the_session_alone(argus):
+    session_close = at(2026, 9, 25, 20)
+    argus.portfolios.add_transactions("growth", [
+        TxnInput("BUY", "GLD", at(2026, 9, 1), 10, 300),
+        TxnInput("BUY", "GLD", at(2026, 9, 25, 15), 8, 330),  # bought in the session: its day runs from the fill
+        TxnInput("SELL", "GLD", at(2026, 9, 26, 2) + timedelta(minutes=18), 14, 317),
+    ])
+    q = {"GLD": Quote("GLD", 319.38, 320.0, None, None, None, session_close, "fake",
+                      ext_price=317.0, ext_as_of=at(2026, 9, 26, 2), ext_session="post")}
+    s = argus.portfolios.summary("growth", q)
+    row = s["positions"][0]
+    day = 10 * (319.38 - 320) + 8 * (319.38 - 330)
+    assert row["qty"] == 4 and row["day_pnl"] == pytest.approx(day)
+    assert s["totals"]["day_pnl"] == pytest.approx(day)
+    assert s["totals"]["day_pnl_pct"] == pytest.approx(day / (10 * 320 + 8 * 330) * 100)
+    assert row["ext_pnl"] == pytest.approx(4 * (317 - 319.38))  # the 14 sold aren't held after hours
+    # Next session: only the 4 left count, from Friday's close.
+    q = {"GLD": Quote("GLD", 322.0, 319.38, None, None, None, at(2026, 9, 28, 20), "fake")}
+    assert argus.portfolios.summary("growth", q)["totals"]["day_pnl"] == pytest.approx(4 * (322 - 319.38))
+
+
 def test_summary_without_quotes_leaves_market_fields_empty(argus):
     argus.portfolios.add_transactions("growth", [TxnInput("BUY", "X", at(2026, 9, 1), 2, 10)])
     s = argus.portfolios.summary("growth")

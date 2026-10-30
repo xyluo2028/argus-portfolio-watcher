@@ -20,7 +20,7 @@ from argus.db import make_engine, session_scope, upsert
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
-from argus.market_calendar import NY, market_status, session_date, sessions_between
+from argus.market_calendar import NY, market_status, session_date, sessions_between, trade_session
 from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
                           Target)
 from argus.providers.base import ProviderError, Quote
@@ -197,8 +197,13 @@ class Argus:
             self.describe_instruments(open_syms)
         except Exception as e:  # never block the summary on metadata
             log.warning("instrument metadata: %s", e)
-        quotes = {s: live_quotes[s] for s in open_syms if live_quotes and s in live_quotes}
-        missing = [s for s in open_syms if s not in quotes]
+        # A position sold out after the last close was still held through that session (B-117): price it too.
+        last = session_date(datetime.now(UTC))
+        sold_out = [s for s, p in state.items() if not p.is_open and any(
+            r.ts.astimezone(NY).date() >= last and trade_session(r.ts) > last for r in p.realized)]
+        priced = open_syms + sold_out
+        quotes = {s: live_quotes[s] for s in priced if live_quotes and s in live_quotes}
+        missing = [s for s in priced if s not in quotes]
         errors: dict[str, str] = {}
         if with_quotes and missing:
             got, errors = self.market.get_quotes(missing)

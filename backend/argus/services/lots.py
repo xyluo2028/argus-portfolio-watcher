@@ -49,6 +49,8 @@ class Realization:
     qty: float
     proceeds: float
     cost: float
+    lot_opened: datetime | None = None  # when the lot sold from was opened, and its kind
+    lot_kind: str | None = None
 
     @property
     def pnl(self) -> float:
@@ -139,7 +141,8 @@ def _apply_sell(pos: PositionState, t: TxnLike) -> None:
         lot = pos.lots[0]
         take = min(lot.qty, remaining)
         pos.realized.append(
-            Realization(t.id, lot.txn_id, t.symbol, t.ts, take, take * proceeds_per_share, take * lot.cost_per_share)
+            Realization(t.id, lot.txn_id, t.symbol, t.ts, take, take * proceeds_per_share, take * lot.cost_per_share,
+                        lot.opened, lot.kind)
         )
         lot.qty -= take
         remaining -= take
