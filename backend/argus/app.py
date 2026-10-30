@@ -124,7 +124,7 @@ class Argus:
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
         self.factors = FrenchFactors(self.settings.cache_dir)
-        self.macro = MacroProvider()
+        self.macro = MacroProvider(cache_dir=self.settings.cache_dir)
         self.screener = screener_mod.ScreenerService(self.settings.cache_dir, self.market.sec, self.market.profile_provider)
         self.screener_progress: str | None = None
         self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)

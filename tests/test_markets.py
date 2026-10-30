@@ -86,7 +86,7 @@ def test_fomc_parsing(monkeypatch):
 # except some dates that answer with their own day.
 US = "United States"
 NASDAQ_ROWS = {
-    "2026-10-20": [{"gmt": "11:30", "country": US, "eventName": "3-Month Bill Auction"}],  # yesterday: dropped
+    "2026-10-20": [{"gmt": "11:30", "country": US, "eventName": "3-Month Bill Auction"}],  # the day before yesterday: dropped
     "2026-10-21": [{"gmt": "08:30", "country": US, "eventName": "Housing Starts", "actual": "1.221M"},
                    {"gmt": "02:00", "country": "United Kingdom", "eventName": "Claimant Count Change"}],
     "2026-10-26": [{"gmt": "08:30", "country": US, "eventName": "Chicago Fed National Activity"}],  # Monday's own
@@ -129,6 +129,7 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
     assert min(asked) == "2026-10-20" and max(asked) == "2026-11-11"
     got = {(e["event"], e["date"]): e["time_et"] for e in ev}
     assert got == {
+        ("3-Month Bill Auction", "2026-10-19"): "11:30",         # yesterday's releases stay on the calendar
         ("Housing Starts", "2026-10-20"): "08:30",               # before DST ends: same clock, day before
         ("Chicago Fed National Activity", "2026-10-26"): "08:30",
         ("CB Consumer Confidence", "2026-10-27"): "10:00",       # once
@@ -149,7 +150,97 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
     assert p.economic_events(20) == ev and not asked
     now[0] = datetime(2026, 10, 21, 4, 0, tzinfo=UTC)
     rolled = p.economic_events(20)
-    assert min(asked) == "2026-10-21" and min(e["date"] for e in rolled) >= "2026-10-21"
+    assert min(asked) == "2026-10-21" and min(e["date"] for e in rolled) >= "2026-10-20"
+
+
+def _nasdaq_client(answers, asked=None):
+    """A fake Nasdaq: `answers` maps a queried date to its raw rows, and can be changed between fetches."""
+    class Resp:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"rows": self.rows}}
+
+    def get(self, url, params=None, **kw):
+        if asked is not None:
+            asked.append(params["date"])
+        return Resp(answers.get(params["date"], []))
+    return type("C", (), {"get": get})()
+
+
+def _at(monkeypatch, now):
+    monkeypatch.setattr("argus.providers.macro.datetime",
+                        type("DT", (datetime,), {"now": classmethod(lambda cls, tz=None: now[0].astimezone(tz))}))
+    monkeypatch.setattr("argus.providers.macro.time.monotonic", lambda: now[0].timestamp())
+
+
+def test_economic_events_keep_todays_releases_when_nasdaq_flips(monkeypatch, tmp_path):
+    # 10-29, 22:15 ET. First fetch: `date=10-30` answers with 10-29's rows, actuals in, PCE still blank.
+    pce = {"gmt": "08:30", "country": US, "eventName": "Core PCE Price Index MoM", "consensus": "0.2%"}
+    pce_yoy = pce | {"actual": "3.1%", "consensus": "3.1%"}  # Nasdaq names MoM and YoY alike
+    gdp = {"gmt": "08:30", "country": US, "eventName": "GDP Growth Rate QoQ", "actual": "3.4%", "consensus": "3.2%"}
+    answers = {"2026-10-29": [{"gmt": "08:30", "country": US, "eventName": "Initial Jobless Claims", "actual": "229K"}],
+               "2026-10-30": [pce, pce_yoy, gdp],
+               "2026-10-31": [{"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"}]}
+    now = [datetime(2026, 10, 30, 2, 15, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    p = MacroProvider(client=_nasdaq_client(answers), cache_dir=tmp_path)
+    first = {(e["date"], e["event"]): e["actual"] for e in p.economic_events(5)}
+    assert first[("2026-10-29", "GDP Growth Rate QoQ")] == "3.4%"
+    assert first[("2026-10-28", "Initial Jobless Claims")] == "229K"  # yesterday, from today's query
+
+    # Minutes later the mapping flips: `date=10-30` and `10-31` both answer with 10-30's rows, so 10-29's
+    # come from no query.
+    answers.update({"2026-10-29": [], "2026-10-30": [{"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"}]})
+    now[0] = datetime(2026, 10, 30, 2, 21, tzinfo=UTC)
+    p._cache.clear()  # past the 6 h cache: the flipped fetch is the one under test
+    ev = p.economic_events(5)
+    today = {e["event"]: e for e in ev if e["date"] == "2026-10-29"}
+    assert set(today) == {"Core PCE Price Index MoM", "GDP Growth Rate QoQ"}
+    assert today["GDP Growth Rate QoQ"]["actual"] == "3.4%"
+    assert any(e["date"] == "2026-10-28" and e["event"] == "Initial Jobless Claims" for e in ev)
+    assert [e["date"] for e in ev] == sorted(e["date"] for e in ev)
+
+    # That answer is retried soon; now only PCE comes back, with its actual and without a consensus.
+    answers["2026-10-30"] = [pce | {"actual": "0.2%", "consensus": None}]
+    now[0] += timedelta(minutes=11)
+    rows = [e for e in p.economic_events(5) if e["date"] == "2026-10-29"]
+    assert [e["consensus"] for e in rows if e["event"] == pce["eventName"]] == ["0.2%", "3.1%"]
+    assert {e["event"] for e in rows} == {"Core PCE Price Index MoM", "GDP Growth Rate QoQ"}  # nothing deleted
+    mom = rows[0]  # the first of the two PCE rows, as Nasdaq lists them
+    assert mom["actual"] == "0.2%"  # a later actual fills the blank...
+    assert mom["consensus"] == "0.2%"  # ...and a later blank erases nothing
+
+    # Kept across a restart.
+    answers.clear()
+    fresh = MacroProvider(client=_nasdaq_client(answers), cache_dir=tmp_path)
+    assert {e["event"] for e in fresh.economic_events(5) if e["date"] == "2026-10-29"} == set(today)
+
+
+def test_economic_events_retry_soon_when_today_is_missing(monkeypatch):
+    asked = []
+    answers = {"2026-10-31": [{"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"}]}
+    now = [datetime(2026, 10, 29, 20, 0, tzinfo=UTC)]  # a Thursday; `date=10-30` came back empty
+    _at(monkeypatch, now)
+    p = MacroProvider(client=_nasdaq_client(answers, asked))
+    assert not any(e["date"] == "2026-10-29" for e in p.economic_events(3))
+
+    asked.clear()
+    now[0] += timedelta(minutes=9)
+    p.economic_events(3)
+    assert not asked  # cached briefly...
+    now[0] += timedelta(minutes=2)
+    answers["2026-10-30"] = [{"gmt": "08:30", "country": US, "eventName": "GDP Growth Rate QoQ", "actual": "3.4%"}]
+    assert any(e["date"] == "2026-10-29" for e in p.economic_events(3)) and asked  # ...not for 6 h
+
+    asked.clear()
+    now[0] += timedelta(hours=1)
+    p.economic_events(3)
+    assert not asked  # a full answer is held as before
 
 
 def _row(sym, price, prev, hi, lo, a50, a200, hi52, lo52):
