@@ -50,10 +50,24 @@ PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 MAJOR = re.compile(r"\b(CPI|PPI|Nonfarm Payrolls|Unemployment Rate|GDP|PCE|Retail Sales|ISM|JOLTS|"
                    r"Michigan Consumer Sentiment|Initial Jobless Claims|Fed Chair|Powell|FOMC (Statement|Minutes|"
                    r"Economic Projections)|Fed Interest Rate Decision|Durable Goods|Housing Starts|"
-                   r"Consumer Confidence|Average Hourly Earnings|Industrial Production)\b", re.I)
+                   r"Consumer Confidence|Average Hourly Earnings|Industrial Production|Employment Cost Index)\b", re.I)
 SPEAKER = re.compile(r"\bSpeaks\b", re.I)
-NOISE = re.compile(r"\bIndex\b|n\.s\.a|Cleveland", re.I)  # raw index levels and unadjusted variants
+NOISE = re.compile(r"n\.s\.a|Cleveland", re.I)  # unadjusted and alternative variants
+LEVEL = re.compile(r"\bIndex\b", re.I)  # mostly raw index levels ("CPI Index, s.a" 336.30)...
+# ...except these, which are reported as % changes: the Fed's PCE gauge (m/m, y/y), ECI and the GDP deflator.
+KEEP = re.compile(r"\b(PCE Price Index|Employment Cost Index|GDP Price Index)\b", re.I)
+# The GDP report's price figures are quarterly annualized, unlike the monthly PCE release's.
+QOQ_ANN = re.compile(r"^((Core )?PCE Prices|GDP Price Index)$", re.I)
 CURVE_TENORS = ["1 Mo", "3 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
+
+
+def _noise(name: str) -> bool:
+    return bool(NOISE.search(name) or (LEVEL.search(name) and not KEEP.search(name)))
+
+
+def _label(e: dict) -> dict:
+    name = (e["event"] or "").strip()
+    return {**e, "event": f"{name} (QoQ ann.)"} if QOQ_ANN.match(name) else e
 
 
 def _weekday(d: date, step: int) -> date:
@@ -319,10 +333,11 @@ def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, floa
 
     calendar = None
     if events is not None or fomc is not None:
-        seen, upcoming = set(), []
+        seen, upcoming, all_count = set(), [], len(events or [])
+        events = [_label(e) for e in events or [] if not _noise(e["event"] or "")] if events is not None else None
         for e in events or []:
             name = e["event"] or ""
-            if not MAJOR.search(name) or NOISE.search(name) or (SPEAKER.search(name) and not re.search(r"Powell|Fed Chair", name)):
+            if not MAJOR.search(name) or (SPEAKER.search(name) and not re.search(r"Powell|Fed Chair", name)):
                 continue
             key = (e["date"], e["time_et"], name, e["consensus"], e["previous"])
             if key not in seen:  # Nasdaq lists some releases twice
@@ -331,8 +346,8 @@ def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, floa
         calendar = {
             "fomc": [m for m in (fomc or []) if m["date"] >= today.isoformat()][:4],
             "events": upcoming,
-            "all_events": [e for e in events or [] if not NOISE.search(e["event"] or "")],
-            "all_count": len(events or []),
+            "all_events": events or [],
+            "all_count": all_count,
         }
 
     return {"as_of": today.isoformat(), "gauges": gauges, "sectors": sectors, "periods": PERIODS,

@@ -40,6 +40,26 @@ def test_build_breadth_and_calendar_filter():
     assert [f["date"] for f in out["calendar"]["fomc"]] == ["2026-10-28"]
 
 
+def test_calendar_keeps_pce_price_index_eci_and_labels_gdp_report_prices():
+    def ev(name, prev, day="2026-10-29"):
+        return {"date": day, "time_et": "08:30", "event": name, "consensus": None, "previous": prev, "actual": None}
+    events = [ev("Core PCE Price Index", "0.3%"), ev("Core PCE Price Index", "3.0%"), ev("PCE price index", "0.3%"),
+              ev("PCE Price index", "3.4%"), ev("GDP Price Index", "6.1%"), ev("Employment Cost Index", "0.9%", "2026-10-30"),
+              ev("Core PCE Prices", "3.30%"), ev("PCE Prices", "5.0%"), ev("GDP", "2.2%"),
+              ev("CPI Index, s.a", "336.30"), ev("CPI Index, n.s.a.", "336.94"), ev("CPI, n.s.a", "0.59%"),
+              ev("Cleveland CPI", "0.2%"), ev("House Price Index", "433.1"), ev("NAHB Housing Market Index", "29")]
+    cal = mc.build({}, None, None, events, date(2026, 10, 29))["calendar"]
+    shown = [e["event"] for e in cal["all_events"]]
+    assert shown == ["Core PCE Price Index", "Core PCE Price Index", "PCE price index", "PCE Price index",
+                     "GDP Price Index (QoQ ann.)", "Employment Cost Index", "Core PCE Prices (QoQ ann.)",
+                     "PCE Prices (QoQ ann.)", "GDP"]
+    assert cal["all_count"] == len(events)
+    curated = [e["event"] for e in cal["events"]]
+    assert curated.count("Core PCE Price Index") == 2 and "Employment Cost Index" in curated
+    assert "PCE price index" in curated and "Core PCE Prices (QoQ ann.)" in curated
+    assert events[6]["event"] == "Core PCE Prices"  # input rows aren't mutated
+
+
 FED_HTML = """
 <h4>2026 FOMC Meetings</h4>
 <div class="fomc-meeting__month"><strong>January</strong></div><div class="fomc-meeting__date">27-28</div>
