@@ -8,12 +8,14 @@ from __future__ import annotations
 import csv
 import html
 import io
+import json
 import logging
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -35,21 +37,30 @@ MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", 
 NASDAQ_LAG = timedelta(days=1)
 NASDAQ_TZ = timezone(timedelta(hours=-4))
 NY = ZoneInfo("America/New_York")
+# Nasdaq's per-date answers shift within minutes, so a fetch can drop or misdate a whole day (B-034):
+# rows seen for yesterday and today are kept and merged into later fetches, and an answer with no rows
+# for a weekday today is retried soon rather than held for the usual 6 h.
+ECON_TTL_S = 6 * 3600
+ECON_RETRY_S = 10 * 60
+ECON_KEEP_DAYS = 7
 TENORS = ["1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
 
 
 class MacroProvider:
-    def __init__(self, client: httpx.Client | None = None):
+    def __init__(self, client: httpx.Client | None = None, cache_dir: Path | None = None):
         self._client = client or httpx.Client(timeout=20, follow_redirects=True,
                                               headers={"User-Agent": "Mozilla/5.0 (argus portfolio monitor)",
                                                        "Accept": "application/json, text/csv, text/html"})
-        self._cache: dict[str, tuple[float, object]] = {}
+        self._cache: dict[str, tuple[float, object, float]] = {}
         self._lock = threading.Lock()
+        self._releases_path = cache_dir / "econ_releases.json" if cache_dir else None
+        self._releases: dict[str, dict] | None = None  # "date|time|event" -> row, loaded on first use
 
-    def _memo(self, key: str, ttl: float, fn):
+    def _memo(self, key: str, ttl, fn):
+        """`ttl` in seconds, or a function of the fetched value giving it."""
         with self._lock:
             hit = self._cache.get(key)
-        if hit and time.monotonic() - hit[0] < ttl:
+        if hit and time.monotonic() - hit[0] < hit[2]:
             return hit[1]
         try:
             value = fn()
@@ -59,7 +70,7 @@ class MacroProvider:
                 return hit[1]
             raise ProviderError(f"{key}: {e}") from e
         with self._lock:
-            self._cache[key] = (time.monotonic(), value)
+            self._cache[key] = (time.monotonic(), value, ttl(value) if callable(ttl) else ttl)
         return value
 
     # -- prices ------------------------------------------------------------------------------
@@ -164,8 +175,9 @@ class MacroProvider:
         return out
 
     def economic_events(self, days: int = 21) -> list[dict]:
-        """US releases from Nasdaq's economic calendar for today and the next `days` days. Times are
-        Eastern; values are as published ("1,716K", "3.6%")."""
+        """US releases from Nasdaq's economic calendar for yesterday, today and the next `days` days.
+        Times are Eastern; values are as published ("1,716K", "3.6%"). Yesterday's and today's rows
+        are every row seen for those days, kept across fetches and restarts (B-034)."""
         clean = lambda v: (html.unescape(v or "").strip() or None)  # noqa: E731
 
         def day(d: date) -> list[dict]:
@@ -179,6 +191,7 @@ class MacroProvider:
         # today's releases, with their actuals, would drop off (B-034). In the key so the window rolls
         # at New York midnight rather than whenever the 6 h cache expires.
         today = datetime.now(NY).date()
+        fetched_today = [False]
 
         def fetch():
             # From today's query (yesterday's or today's rows) to one past the last day, to compare with.
@@ -187,11 +200,59 @@ class MacroProvider:
                 per_day = list(pool.map(day, queries))
             out = []
             for d, rows in self._nasdaq_days(queries, per_day):
-                if not today <= d <= today + timedelta(days=days):
+                if not today - timedelta(days=1) <= d <= today + timedelta(days=days):
                     continue
                 for x in rows:
                     when, time_et = self.nasdaq_slot(d, x["gmt"])
                     out.append({"date": when.isoformat(), "time_et": time_et, "event": x["eventName"],
                                 "actual": x["actual"], "consensus": x["consensus"], "previous": x["previous"]})
-            return out
-        return self._memo(f"econ:{days}:{today.isoformat()}", 6 * 3600, fetch)
+            fetched_today[0] = any(e["date"] == today.isoformat() for e in out)
+            if not fetched_today[0] and today.weekday() < 5:
+                log.warning("economic calendar: no rows for %s; per-query answers %s", today, [
+                    (q.isoformat(), len(rows), rows[0]["eventName"] if rows else None) for q, rows in zip(queries, per_day)])
+            return self._keep_releases(out, today)
+
+        ttl = lambda _: ECON_TTL_S if fetched_today[0] or today.weekday() >= 5 else ECON_RETRY_S  # noqa: E731
+        return self._memo(f"econ:{days}:{today.isoformat()}", ttl, fetch)
+
+    def _keep_releases(self, rows: list[dict], today: date) -> list[dict]:
+        """Merge yesterday's and today's rows into the kept store and return the window with every row
+        seen for today and yesterday: a later actual fills a blank, a row missing from this fetch stays."""
+        recent = {(today - timedelta(days=1)).isoformat(), today.isoformat()}
+        # Nasdaq gives month-on-month and year-on-year rows the same name and time ("Core PCE Price
+        # Index" twice at 08:30): the key counts repeats, in the order Nasdaq lists them.
+        seen: dict[tuple, int] = {}
+
+        def key(e: dict) -> str:
+            k = (e["date"], e["time_et"], e["event"])
+            seen[k] = seen.get(k, 0) + 1
+            return "|".join(map(str, k + (seen[k],)))
+        with self._lock:
+            if self._releases is None:
+                self._releases = {}
+                if self._releases_path and self._releases_path.exists():
+                    try:
+                        self._releases = json.loads(self._releases_path.read_text())
+                    except (OSError, ValueError) as e:
+                        log.warning("econ_releases.json unreadable, starting over: %s", e)
+            store = self._releases
+            for e in rows:
+                if e["date"] in recent:
+                    k = key(e)
+                    old = store.get(k, {})
+                    store[k] = old | {f: v for f, v in e.items() if v is not None or f not in old}
+            cutoff = (today - timedelta(days=ECON_KEEP_DAYS)).isoformat()
+            for k in [k for k, e in store.items() if e["date"] < cutoff]:
+                del store[k]
+            kept = [dict(e) for e in store.values() if e["date"] in recent]
+            if self._releases_path:
+                try:
+                    self._releases_path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = self._releases_path.with_suffix(".tmp")
+                    tmp.write_text(json.dumps(store))
+                    tmp.replace(self._releases_path)
+                except OSError as e:
+                    log.warning("econ_releases.json not saved: %s", e)
+        # By date, then clock time ("All Day" and "Tentative" first), as Nasdaq lists them.
+        slot = lambda e: (e["date"], e["time_et"] if re.fullmatch(r"\d{2}:\d{2}", e["time_et"] or "") else "")  # noqa: E731
+        return sorted(kept, key=slot) + [e for e in rows if e["date"] > today.isoformat()]
