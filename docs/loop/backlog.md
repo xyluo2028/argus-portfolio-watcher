@@ -83,18 +83,19 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-016 Market context figures frozen up to 15 min with no fetched-at time (XLI 1D 0.00%)
 - kind: bug · severity: medium
-- reported by: macro r001, macro r005, macro r006, macro r008
+- reported by: macro r001, macro r005, macro r006, macro r008, macro r009
 - evidence: XLI `1D: 0.0` while its quote is +0.05%; `as_of` is a date only (rounds/001/investor-macro.md)
 - r003: didn't reproduce (sector 1D matched quotes; macro r003)
 - r005: weekend Markets header says "as of Fri 4:00 PM ET" while oil, gold, USD/JPY and BTC show Sunday-night prices with no time tag (macro r005 #2; see B-055)
 - r006: Markets reads "as of Mon, Oct 26, 4:00 PM ET" while WTI, gold, USD/JPY and BTC are 10-27 overnight prices with no tag (macro r006)
 - r007: oil and gold "1D" show the overnight move under "as of 4:00 PM": oil +1.37% / gold −0.33% while on 10-27 oil fell 1.8% and gold rose 0.9%; CL=F/GC=F history has no 10-27 settle, the 10-27 bar holds the overnight price (macro r007 #1)
 - r008: WTI −0.98% and gold +0.57% on the cards while the 10-28 session was oil +2.9%, gold −0.6%; history's 10-28 bar is the overnight price, the settle is missing (macro r008 #2)
+- r009: WTI card "+2.29%" under "Market closed as of 4:00 PM" is the overnight move; the 10-29 session was 102.78 → 102.00 (−0.76%); CL=F/gold 10-29 history bars hold the overnight price, not the settle (macro r009 #5)
 - status: open
 
 ### B-017 Asset-class view: bonds, TIPS, gold, commodities and cash show as "Unclassified"; no asset-class targets or duration
 - kind: feature · severity: high
-- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003, macro r006, macro r008, income r008
+- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003, macro r006, macro r008, income r008, income r009
 - evidence: look-through "Unclassified" 39.3% (loop-macro) and 35.5% (loop-income); `funds_without_profile`
   lists BND/VCIT/VGIT/SCHP; can't check a bond floor or set drift targets by asset class; no rate-shock scenario
 - r003: still 39.3% (loop-macro) / 35.5% (loop-income) Unclassified (macro r003, income r003)
@@ -103,6 +104,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r006: /t/IEF has the N-PORT holdings (maturities, coupons) but shows no weighted maturity or duration; Peers lists TLT, EDV, ZROZ (17–27y duration) next to IEF (~7y); 39.1% Unclassified (macro r006 #3)
 - r007: still no duration on bond ETF pages; UUP (long dollar futures) shows asset mix "Cash 100%" (macro r007 #9)
 - r008: 39.3% Unclassified (macro); bond ETFs show no duration/YTM though N-PORT maturities and coupons are loaded: VGIT WAM 5.1 y, SCHP 6.8 y, BND 8.8 y; no rates +100 bp scenario (income r008 #4)
+- r009: bond sleeve 34.7% "Unclassified"; BND/VCIT/VGIT/SCHP near 52-week lows; no ±100 bp scenario though N-PORT maturities are loaded (income r009 #3)
 - status: open
 
 ### B-018 Notes (and cost alerts) aren't tied to a portfolio
@@ -115,7 +117,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-019 Screener has only the last calendar year: no TTM or latest-quarter growth
 - kind: feature · severity: medium
-- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008
+- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008, multibagger r009
 - evidence: `fiscal_year: 2025` on 2026-10-20; LOAR +23% CY vs +36–39% latest quarters
 - r003: misled a screen — DUOL and ODD topped it on last year's growth but are now decelerating or shrinking (multibagger r003)
 - r004: XZO +62% in the screener vs +3% latest SEC quarter; COLL and HIMS likewise (multibagger r004 #4)
@@ -123,6 +125,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r006: fifth round: LQDT FY growth +31.2% vs +8.1/+3.7/−0.9% latest quarters; HROW op. margin +11.2% vs −15.6%/−50.0%; HIMS +4.5% vs −12.9% (3 of 8 hits; multibagger r006 #8)
 - r007: DUOL tops the screen on FY growth 38.7% / P/E 15.9; latest quarter +18.3% and the P/E rests on a tax gain (multibagger r007 #5, see B-071)
 - r008: PSIX ranked at FY2025 +51.8% while its latest quarter is −20.5%; KVYO +31.6% is 26.4% and slowing; asks for `revenue_growth_q_yoy_pct` from SEC (multibagger r008 #4)
+- r009: XZO FY +62% vs latest quarter +3%; NUTX +82% vs −13.6%; CRMD +617% with Q2 down 20% q/q; fourth round the top growth names fail research; SEC `revenue_growth_q_yoy_pct` already exists per symbol (multibagger r009 #3)
 - status: open
 
 ### B-020 Rows missing gross margin silently drop out of a gross-margin filter
@@ -159,6 +162,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r006: simulate SELL 6 GLD / BUY 24 IEF returns no risk before/after (computed by hand: vol 6.09→5.67, beta 0.255→0.236, VaR $575→$543); `value_after` drops by the $20.04 cash released (macro r006 #5)
 - r007: still no before/after risk; `value_after` drops by exactly the $47.28 the trade frees (macro r007 #8)
 - r008: simulate still has no risk before/after (macro r008)
+- r009: `value_after` grows by the cash spent (+$201.16); no `annual_income_after` (income r009 #8)
 - status: open
 
 ### B-024 No cash line: targets under 100% produce phantom sells in drift
@@ -173,13 +177,14 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-026 Risk, events and the brief take 11–15 s on first load after a trade
 - kind: perf · severity: medium
-- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008
+- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009
 - r003: worse — cold `/risk` 33.4 s (income), 18.6 s (macro); brief 6.1 s
 - r004: cold `/risk` 24.1 s (macro), 21.5 s (income); cold portfolio fundamentals 26.8 s then all 17 "pending" (income r004 #7)
 - r005: cold `/risk` 15.5 s; portfolio fundamentals now 2.2 s (was 26.8 s) (income r005 #8)
 - r006: first `/risk` after start 8.26 s (warm 0.64 s) (macro r006)
 - r007: first /risk of the session 15.7 s (macro r007 #7) and 24.5 s (income r007 #4); later calls 0.8–3.4 s
 - r008: first `/risk` 30.8 s (24.5 s r007, 13.0 s r006), then ~1 s (income r008 #5)
+- r009: first `/risk` 23.4 s (income); Analysis risk card still "Loading… (the first time downloads…)" at 7.2 s with the API warm at 1.4 s (income r009 #5); cold brief 7.5 s, cold watchlist 6.4 s (multibagger r009 #8)
 - status: open
 
 ### B-027 Screener universe isn't built until someone runs a screen (breadth unavailable meanwhile)
@@ -222,28 +227,17 @@ Format, one item per heading, newest IDs at the bottom of their section:
   >$100M have null net income, incl. AVGO, ANET, SCHW, IBKR, MDT, BSX (multibagger r002)
 - status: open
 
-### B-034 Economic calendar starts on the UTC date: after 8 pm ET that day's releases and actuals disappear
-- kind: bug · severity: high
-- reported by: macro r002, macro r003, macro r006, macro r008
-- evidence: at 22:15 ET 10-20, `calendar.all_events` starts 10-21 and the 10-20 housing prints are missing;
-  `providers/macro.py::economic_events` uses `date.today()` on a UTC server (rounds/002/investor-macro.md #2)
-- r003: still present at 22:13 ET 10-21 (EIA crude draw, 20y auction missing; macro r003 #4)
-- r004: third round; 10-22 claims (194K vs 200K) and LEI missing at 22:12 ET; next week's claims row lost "previous" (macro r004 #2)
-- r006: at 22:14 ET 10-26 the calendar starts on 10-27 (macro r006)
-- acceptance: the economic calendar (`calendar.events` and `all_events` in `/api/market-context`, and the Markets page) starts on the America/New_York date, not the UTC date, so after 8 pm ET that day's releases (with any actuals) are still listed; any cache key that includes the date uses the same New York date; a test with a fixed clock at 22:15 ET (02:15 UTC next day) shows that day's events
-- r008: at 22:13 ET on FOMC day (10-28) the calendar starts 10-29, so the statement, decision and press conference rows vanish; the decision appears only in ETF headlines (macro r008 #1)
-- status: done (r008, 2476971)
-
 ### B-035 Calendar shows no recent actuals or surprise vs consensus; 6 h cache leaves 08:30 actuals blank
 - kind: feature · severity: medium
 - reported by: macro r002, macro r008
 - r005: still open (macro r005)
 - r008: no actual or outcome for the 10-28 FOMC decision anywhere; the FOMC strip still reads "October 27-28" with no outcome (macro r008 #1)
+- r009: PCE/GDP actuals from 10-29 gone from the calendar the same evening (see B-034 r009) (macro r009 #1)
 - status: open
 
 ### B-036 Fear & greed jumps (24.6 → 38.3) when breadth loads; no component count; new-highs scored differently
 - kind: ux · severity: medium
-- reported by: macro r002, macro r003, macro r005, macro r006, macro r008
+- reported by: macro r002, macro r003, macro r005, macro r006, macro r008, macro r009
 - evidence: 22 highs vs 2 lows reads "Extreme greed" (rounds/002/investor-macro.md #4)
 - r003: 27.0 with 5 readings → 39.8 with 7 within minutes; Price strength 86.7 on 26 highs vs 4 lows (macro r003 #5)
 - r004: 9.5 → 27.8 when breadth loaded (macro r004 #3)
@@ -251,6 +245,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r006: 11.7 "Extreme fear" (5 readings) → 25.4 "Fear" (7) when breadth loads (macro r006 #7)
 - r007: 16.7 "Extreme fear" with 5 readings, then 29.9 "Fear" with 7 once breadth loads (macro r007 #3)
 - r008: 21.0 Extreme fear (5 readings) → 33.6 Fear (7) once breadth loads (macro r008 #5)
+- r009: 18.3 "Extreme fear" (5 readings) → 35 "Fear" (7) once breadth loaded; page doesn't show the reading count (macro r009 #6)
 - status: open
 
 ### B-037 Markets has no 10y real yield, breakeven, dollar index or credit spreads
@@ -261,10 +256,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-038 The brief has no macro events (next FOMC, major releases this week)
 - kind: feature · severity: low
-- reported by: macro r002, macro r006, macro r008
+- reported by: macro r002, macro r006, macro r008, macro r009
 - r006: still no FOMC (10-28) or this week's releases in the brief (macro r006)
 - r007: no FOMC in the brief the night before the decision (macro r007 #6)
 - r008: 12 theses due 10-29 "after FOMC/PCE", no macro section (macro r008 #6)
+- r009: no `macro` key; no PCE/GDP actuals, tomorrow's ECI/Chicago PMI or overnight ES −1.1% / NQ −2.4% (macro r009 #7)
 - status: open
 
 ### B-039 VIX and yield cards color a falling VIX/yield red and a yield rise green
@@ -297,9 +293,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-044 "Where the risk comes from" card drops holdings without saying so (15 of 17)
 - kind: ux · severity: low
-- reported by: income r002, income r003
+- reported by: income r002, income r003, income r009
 - r003: still 15 of 17 (income r003)
 - r005: still lists 15 of 17 (income r005)
+- r009: still 15 of 17 rows; SCHP and MSFT (the only beta-1 holding) missing (income r009 #6)
 - status: open
 
 ### B-045 Earnings dates disagree on one stock page and drift day to day
@@ -376,6 +373,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: ES=F −0.46% and SPY −0.47% post-market while Markets shows only the close (rounds/003/investor-macro.md #3)
 - r005: see B-016: Sunday-night futures/FX prices shown without a time tag (macro r005 #2)
 - r006: see B-016 (macro r006)
+- r009: oil 1D is the overnight move shown as the session change (macro r009 #5)
 - status: open
 
 ### B-057 Q4 revenue isn't derived when quarters and the full year use different revenue tags (CRMD)
@@ -386,12 +384,13 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-059 News tone counts articles about other companies (RMBS 6 positive, none about Rambus)
 - kind: bug · severity: medium
-- reported by: multibagger r003, multibagger r006, income r008
+- reported by: multibagger r003, multibagger r006, income r008, income r009
 - evidence: rounds/003/investor-multibagger.md #5
 - r004: still present; RMBS −7.6% day has no sector context (multibagger r004 #7)
 - r006: RMBS earnings night scored 10 positive / 0 negative; "…as Shares Slip" scored positive, "Rambus falls…" neutral; five "positive" articles about other companies (multibagger r006 #6)
 - r007: brief headlines for XOM are Chevron and Texas Pacific Land stories, KO gets a WPP story (income r007 #6)
 - r008: JNJ headlines about Bausch + Lomb, Genmab, GSK; NEE about PG&E and Southern (income r008 #9)
+- r009: HD headlines are "Dow Jones Top Movers…" and a Target story; O's include a Verizon FCF story (income r009 #7)
 - status: open
 
 ### B-060 Screener rows have no sector or industry; no sector filter
@@ -413,6 +412,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r004: see B-070 (FCF payout ratio)
 - r005: still present (Payout O 236.4%, ABBV 189.8%; income r005)
 - r008: O 236.4%, ABBV 189.8% on GAAP EPS (income r008 #8)
+- r009: ABBV 189.8% (Finnhub) vs 6.92 ÷ 3.54 = 195% (income r009 #2)
 - status: open
 
 ### B-063 Dividends footnote "Annual rate = latest payment × payments per year" is wrong since B-010
@@ -453,9 +453,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-070 Payout ratio on free cash flow
 - kind: feature · severity: medium
-- reported by: income r004, income r008
+- reported by: income r004, income r008, income r009
 - evidence: ABBV 190% on earnings vs ~67% on SEC FCF (rounds/004/investor-income.md #5; related to B-062)
 - r008: MSFT 19.8% on EPS vs ~45% of SEC FCF after capex doubled (income r008 #8)
+- r009: ABBV payout 189.8% (Finnhub) / 195% on SEC EPS vs ~67% of SEC FCF TTM ($18.21B); O 236% on EPS vs ~74% of OCF (income r009 #2)
 - status: open
 
 ### B-071 P/E, net margin and ROE include one-off tax benefits with no warning
@@ -464,6 +465,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: LIF P/E 24.6 and net margin 25.7% on ~0% operating margin; TMDX shows P/E 13.1, 16.4 and 18.8 in different places (rounds/004/investor-multibagger.md #3)
 - r007: DUOL low P/E from a one-off tax gain (multibagger r007 #5)
 - r008: cash-flow version: INOD FCF margin 58.0% from one prepayment quarter (OCF $127.2M on $92.1M revenue); ~26% without it; see B-111 (multibagger r008 #5)
+- r009: ABBV EPS depressed by charges (SEC diluted 0.10 and 0.39 in two quarters), P/E 82 (income r009 #2)
 - status: open
 
 ### B-072 Suggested peers are irrelevant (LIF lists bitcoin miners CORZ, CIFR)
@@ -478,19 +480,21 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - status: open
 ### B-075 Bitcoin 1D covers only the hours since midnight UTC; its history skips the 10-25 bar
 - kind: bug · severity: medium
-- reported by: macro r005 (follow-up to B-066), macro r006, macro r008
+- reported by: macro r005 (follow-up to B-066), macro r006, macro r008, macro r009
 - evidence: BTC quote `prev_close` is the 00:00 UTC open, so 1D at 22:15 ET Sunday covers ~2 h (rounds/005/investor-macro.md #1)
 - r006: wrong sign: card −0.09% / −0.14% vs about +0.6% over a real 24 h; daily history now skips the 10-26 bar; quote `session_date` 10-26 for a 10-27 02:15 price (macro r006 #1)
 - r007: BTC 1D +0.14% vs real 24h +1.6%; daily history skips the 10-27 bar (macro r007 #5)
 - r008: history skips 10-28 (10-27 → 10-29); prev_close = open = high, the 00:00 UTC bar (macro r008 #7)
+- r009: BTC history again jumps 10-28 → 10-30 (macro r009 #5)
 - status: open
 
 ### B-076 Brief "near_52w_extremes" lists every holding
 - kind: ux · severity: low
-- reported by: macro r005, macro r006, income r006, macro r008
+- reported by: macro r005, macro r006, income r006, macro r008, macro r009
 - evidence: 11 rows for 11 positions (SGOV 0.07% from its high, SPY 2.8% from its high) (rounds/005/investor-macro.md #8)
 - r006: loop-macro still lists all 11 holdings; loop-income lists 9 of 17, the two checked are right (macro r006, income r006)
 - r008: 9 of 11 holdings listed (macro r008 #6)
+- r009: still lists 11 of 11 holdings (macro r009 #7)
 - status: open
 
 ### B-077 Asking for BTC-USD returns symbol "BTC.USD"
@@ -582,8 +586,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-091 Economic calendar figures have no unit or period (PCE QoQ annualized read as monthly)
 - kind: ux · severity: medium
-- reported by: macro r006, macro r008
+- reported by: macro r006, macro r008, macro r009
 - evidence: "Core PCE Prices · Previous 3.30%" on GDP day is QoQ SAAR; same-named Core CPI and Core PPI pairs; footnote says MoM/YoY (rounds/006/investor-macro.md #2; related to the B-002 r002 note)
+- r009: "Core PCE Prices 2.50%" is the GDP report's QoQ annualized figure; the Fed's y/y 3.1% is hidden (see B-116) (macro r009 #2)
 - status: open
 
 ### B-092 ETF pages request SEC financials (502) and show an empty ownership card
@@ -604,9 +609,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-094 Curated economic calendar drops the FOMC press conference, personal income/spending, ECI and Chicago PMI
 - kind: bug · severity: medium
-- reported by: macro r007, macro r008
+- reported by: macro r007, macro r008, macro r009
 - evidence: the `MAJOR` regex in `backend/argus/services/market_context.py` leaves out the 10-28 14:30 press conference, personal income and spending, ECI and Chicago PMI, yet lets in "Dallas Fed PCE" and "GDP Sales" (rounds/007/investor-macro.md #2; related to B-091)
 - r008: personal income/spending (10-29), ECI and Chicago PMI (10-30) still only in `all_events` (macro r008)
+- r009: ECI (10-30) can't be found even in `all_events`: the `\bIndex\b` noise filter drops it (see B-116) (macro r009 #2)
 - status: open
 
 ### B-095 P/E isn't price ÷ the EPS shown on the same card (INOD 32.7 vs 34.7, RMBS 39.6 vs 36.7)
@@ -622,11 +628,13 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: feature · severity: medium
 - reported by: multibagger r007
 - evidence: INOD −25.3% on 10-27 on layoff reports; the headline is only in the brief API and Research → News at the bottom of the page (rounds/007/investor-multibagger.md #4)
+- r009: nothing explains HD +3.6%, the day's top gainer (income r009 #7)
 - status: open
 
 ### B-097 Peers card takes ~6.4 s on an uncached symbol and still reads "Loading…" after 8–10 s
 - kind: perf · severity: low
-- reported by: multibagger r007
+- reported by: multibagger r007, multibagger r009
+- r009: Peers on /t/INOD still "Loading…" after 5 s (multibagger r009 #8)
 - status: open
 
 ### B-098 Quote open above its high (MNTN open 9.56, high 9.521)
@@ -673,14 +681,16 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-105 The brief's 2-day news fetch is cached by symbol and served to Research → News for an hour
 - kind: bug · severity: medium
-- reported by: multibagger r008
+- reported by: multibagger r008, multibagger r009
 - evidence: `EventService.news(symbol, days, limit)` caches by symbol only; the brief calls it with days=2 for the top/bottom 3 movers, Research with days=7. After a brief load, TMDX and LOAR (movers) show 0 headlines, KRYS/TOST (not movers) 5–7 back to 10-22 (rounds/008/investor-multibagger.md #1)
+- r009: Research → News for TOST holds only 5 items dated 10-29 after the brief ran; RMBS has 25 back to 10-27 (multibagger r009 #7)
 - status: open
 
 ### B-106 The brief ignores named watchlists: no watchlist movers or watchlist earnings
 - kind: bug · severity: medium
-- reported by: multibagger r008
+- reported by: multibagger r008, multibagger r009
 - evidence: `/api/brief/loop-growth` `watchlist_movers: []` while growth-candidates has DUOL −4.3%, XZO +6.1%, BCRX +3.3%; the brief reads only the default watchlist; MNTN/DUOL/XZO/PTCT earnings missing (keep B-033 fixed) (rounds/008/investor-multibagger.md #3)
+- r009: `watchlist_movers: []` while VICR −4.63% / PEGA −3.56% (multibagger r009 #7)
 - status: open
 
 ### B-107 "YTD total return" on the stock page is Yahoo's undated month-end figure next to a live YTD price return
@@ -691,20 +701,23 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-108 After-hours P&L counts stale single prints (QUAL +1.04% from 5:44 PM while QQQ −1.05%)
 - kind: bug · severity: medium
-- reported by: macro r008
+- reported by: macro r008, macro r009
 - evidence: Dashboard "After hours +$298.88" while ES=F −0.45%; QUAL +$122.96 from a 4.5 h-old print; no print time on the row; `ext_coverage_pct 100` (rounds/008/investor-macro.md #4; related to B-055)
+- r009: after-hours +$112.91 while ES −1.1%: XLP +1.36% print (+$109) implausible, DBC print from 4:09 PM six hours old (−$83); `ext_coverage_pct` 100 (macro r009 #4)
 - status: open
 
 ### B-109 Simulate prices trades at the 4 pm close during extended hours and doesn't say which price it used
 - kind: bug · severity: medium
-- reported by: income r008
+- reported by: income r008, income r009
 - evidence: simulate BUY 1 MSFT → `price 531.01` while `ext_price 546.30` (post, after its report) (rounds/008/investor-income.md #2)
+- r009: post-market simulate priced MSFT at 530.14 while `ext_price` 529.05 (income r009 #8)
 - status: open
 
 ### B-110 The brief leaves out extended-hours moves and headlines for holdings that just reported
 - kind: feature · severity: medium
-- reported by: income r008
+- reported by: income r008, multibagger r009
 - evidence: MSFT +2.9% after hours on its report (largest AH P&L) is absent from movers and headlines; revenue miss not shown next to the EPS beat (rounds/008/investor-income.md #3; related to B-055, B-096)
+- r009: RMBS −4.9% and INOD −6.2% post-market, `totals.ext_pnl` −$851 not in the brief (multibagger r009 #7)
 - status: open
 
 ### B-111 A one-quarter cash windfall shows as a high FCF margin with no warning (INOD 58%)
@@ -737,7 +750,83 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: `tests/test_p2.py::test_dividend_events_follow_ex_date_ownership_and_projection` fails on 2026-10-28 (also on the r007 head): the fake monthly history is built with `add_months(target, -k)` from target 10-31, which clamps to 9-30, so the projection is 10-30 while the test expects `session_on_or_after(10-31)` = 11-02. The test needs a target day ≤ 28 (or an expectation derived the same way); check whether month-end payers project the right day in production
 - status: open
 
+### B-118 A portfolio can't be opened by URL (`/p/<name>` opens whichever is in localStorage)
+- kind: ux · severity: low
+- reported by: macro r009
+- evidence: `/p/loop-macro` rendered loop-growth; portfolio comes only from `localStorage["argus.portfolio"]` (rounds/009/investor-macro.md #8)
+- status: open
+
+### B-119 Two EPS consensus figures for the same quarter on one stock page (INOD 0.17 vs 0.27)
+- kind: bug · severity: medium
+- reported by: multibagger r009
+- evidence: Events card / "EPS est." (Finnhub `next.eps_estimate`) vs Research → Estimates "This quarter" (Yahoo `trend.0q`): INOD 0.17 vs 0.27, BLLN 0.15 vs 0.30, TOST 0.26 vs 0.37, HRMY 1.17 vs 1.47; likely GAAP vs adjusted, neither labeled (rounds/009/investor-multibagger.md #1)
+- status: open
+
+### B-120 Forward P/E is unlabeled and uses next fiscal year's adjusted consensus (HRMY 5.5 vs trailing GAAP 12.5)
+- kind: ux · severity: medium
+- reported by: multibagger r009
+- evidence: `pe_forward` 5.51 = price ÷ `trend["+1y"]` 7.00 (FY2027); FY2026 consensus 5.22 would give 7.4 (rounds/009/investor-multibagger.md #2)
+- status: open
+
+### B-121 No SEC filings list on the stock page; Research → News drops the summary
+- kind: feature · severity: medium
+- reported by: multibagger r009
+- evidence: TOST's FTC lawsuit reached the investor as two headlines; `research.news` has no summary field; no 8-K/10-Q list though Argus reads EDGAR (rounds/009/investor-multibagger.md #4)
+- status: open
+
+### B-122 Yahoo FCF beside an SEC OCF margin that implies twice the cash flow (HRMY $183M vs ~$355M)
+- kind: bug · severity: low
+- reported by: multibagger r009
+- evidence: /t/HRMY "Free cash flow (TTM) 182.84M, Yahoo" next to "OCF margin 37.0%, SEC" on $959.9M revenue; TOST $474M vs $635M (rounds/009/investor-multibagger.md #5; follow-up to B-104)
+- status: open
+
+### B-123 Two PEGs, neither from the P/E shown, both under 1 while consensus EPS falls (TMDX)
+- kind: bug · severity: low
+- reported by: multibagger r009
+- evidence: TMDX `peg` 0.573 (Yahoo, compare) and `peg_ttm` 0.176 (Finnhub, stock page) with `eps_forward` 2.25 < `eps_ttm` 3.86 (rounds/009/investor-multibagger.md #6; related to B-028, B-095)
+- status: open
+
+### B-124 Valuation card mixes Finnhub gross margin with SEC operating and net margin (ABBV, O)
+- kind: bug · severity: low
+- reported by: income r009
+- evidence: `/api/fundamentals/ABBV` gross 72.79 (finnhub) beside SEC operating 26.20 / net 9.80 (4Q to 06-30); SEC gross profit for 1 of 4 quarters; O gross and operating Finnhub, net SEC (rounds/009/investor-income.md #4; follow-up to B-104)
+- status: open
+
+### B-125 "Coming up" marks announced dividend amounts with "≈"
+- kind: ux · severity: low
+- reported by: income r009
+- evidence: "Fri, Oct 30 · O · Ex-dividend · ≈ $19.31" though O's $0.272 and date are announced (`estimated_date: False`) (rounds/009/investor-income.md #9)
+- status: open
+
 ## Done
+
+### B-117 Selling after the close removes the sold shares' session loss from Day P&L
+- kind: bug · severity: medium
+- reported by: macro r009
+- evidence: loop-macro `day_pnl` 438.52 before SELL 6 GLD @ 368.57 at 22:18 ET, 468.16 after (GLD's −88.92 became −59.28 on 12 sh); `/performance` keeps +$438.52 for the 10-28 → 10-29 step; the sell-side twin of B-046 (rounds/009/investor-macro.md #3)
+- acceptance: shares sold by a SELL timestamped after the regular-session close of the quote's session (next-session money, as in B-046) still count as held for that session: Day P&L and Day % (portfolio totals, per-position rows, header, brief totals) are unchanged by such a sale and equal the performance series' step for that session; after-hours P&L doesn't count the sold shares; a regression test mirroring the B-046 one (sell after close at the close price and at a post-market price)
+- status: done (r009, e883e3d)
+
+### B-116 The calendar's "Index" noise filter hides core PCE y/y, ECI and the GDP price index
+- kind: bug · severity: high
+- reported by: macro r009
+- evidence: `NOISE = re.compile(r"\bIndex\b|n\.s\.a|Cleveland")` in `services/market_context.py` drops "Core PCE Price Index" (3.1% y/y), "PCE price index", "GDP Price Index" and "Employment Cost Index" from both `events` and `all_events`; what's left as "Core PCE Prices 2.50%" is the GDP report's QoQ annualized figure, so the page reports core inflation as 2.5% vs the Fed's 3.1% (rounds/009/investor-macro.md #2; related to B-091, B-094)
+- acceptance: "Core PCE Price Index", "PCE Price Index", "Employment Cost Index" and "GDP Price Index" rows (any case) appear in `all_events`, and core PCE and ECI appear in the curated `events`; rows that are index levels or otherwise noise (e.g. "Cleveland…", n.s.a., level-only index rows like a house price index level) stay filtered; the GDP-report "Core PCE Prices"/"PCE Prices" rows are labeled as quarterly annualized (e.g. "(QoQ ann.)") so they can't be read as the monthly measure; tests with tonight's names
+- status: done (r009, 79928cf)
+
+### B-034 Economic calendar starts on the UTC date: after 8 pm ET that day's releases and actuals disappear
+- kind: bug · severity: high
+- reported by: macro r002, macro r003, macro r006, macro r008, macro r009, income r009
+- evidence: at 22:15 ET 10-20, `calendar.all_events` starts 10-21 and the 10-20 housing prints are missing;
+  `providers/macro.py::economic_events` uses `date.today()` on a UTC server (rounds/002/investor-macro.md #2)
+- r003: still present at 22:13 ET 10-21 (EIA crude draw, 20y auction missing; macro r003 #4)
+- r004: third round; 10-22 claims (194K vs 200K) and LEI missing at 22:12 ET; next week's claims row lost "previous" (macro r004 #2)
+- r006: at 22:14 ET 10-26 the calendar starts on 10-27 (macro r006)
+- acceptance: the economic calendar (`calendar.events` and `all_events` in `/api/market-context`, and the Markets page) starts on the America/New_York date, not the UTC date, so after 8 pm ET that day's releases (with any actuals) are still listed; any cache key that includes the date uses the same New York date; a test with a fixed clock at 22:15 ET (02:15 UTC next day) shows that day's events
+- r008: at 22:13 ET on FOMC day (10-28) the calendar starts 10-29, so the statement, decision and press conference rows vanish; the decision appears only in ETF headlines (macro r008 #1)
+- r009: reopened. The r008 fix (New York date) works in a fresh call but not in the running server: at 22:14–22:16 ET 10-29 the calendar starts 10-30 and PCE/GDP/claims with actuals are gone. Nasdaq's per-date answers shift within minutes (at 02:15 UTC `date=10-29` and `10-30` both returned the 10-29 rows; at 02:21 the PCE/GDP rows came from no query); `_nasdaq_days` infers each answer's day from its neighbours, so a flip drops or misdates a whole day, and the bad result is cached 6 h under `econ:21:<date>` (rounds/009/investor-macro.md #1, investor-income.md #1)
+- acceptance (r009): rows already seen are kept: each fetched release row is stored by (release date, time, name) and new fetches merge into the store (a later actual fills in, a row missing from a later fetch is not deleted), so the calendar for today and yesterday (New York) always shows every row Argus has seen; an answer with no rows for today's New York date on a weekday is cached only briefly (≤10 min), not 6 h; tests: (a) a fetch with today's rows followed by a fetch where Nasdaq's mapping flips and today's rows are missing still returns today's rows with actuals, (b) the empty-today answer isn't held for 6 h
+- status: done (r009, 5a9da29)
 
 ### B-013 Upcoming dividends disagree across Dividends, Coming up, the brief and events
 - kind: bug · severity: medium

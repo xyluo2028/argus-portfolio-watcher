@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-29T02:39:01.883699+00:00",
+ "created_at": "2026-10-30T02:40:01.633660+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1188,6 +1188,54 @@
     "external_id": "loop-income-r007-ko",
     "deleted": false,
     "created_at": "2026-10-28T02:20:10.328231+00:00"
+   },
+   {
+    "id": 45,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "MSFT",
+    "qty": 1.0,
+    "price": 529.05,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-30T02:18:43.665805+00:00",
+    "note": "r009: MSFT -0.32pp under 4% target; idle cash, buy 1 at post-market quote",
+    "source": "cli",
+    "external_id": "loop-income-r009-msft",
+    "deleted": false,
+    "created_at": "2026-10-30T02:18:44.509090+00:00"
+   },
+   {
+    "id": 46,
+    "portfolio_id": 3,
+    "type": "SELL",
+    "symbol": "GLD",
+    "qty": 6.0,
+    "price": 368.57,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-30T02:18:55.496479+00:00",
+    "note": "r009 macro: GLD->IEF switch per note 51 (post-PCE)",
+    "source": "cli",
+    "external_id": "r009-macro-gld-sell",
+    "deleted": false,
+    "created_at": "2026-10-30T02:18:56.051422+00:00"
+   },
+   {
+    "id": 47,
+    "portfolio_id": 3,
+    "type": "BUY",
+    "symbol": "IEF",
+    "qty": 24.0,
+    "price": 91.25,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-10-30T02:18:57.482031+00:00",
+    "note": "r009 macro: GLD->IEF switch per note 51 (post-PCE)",
+    "source": "cli",
+    "external_id": "r009-macro-ief-buy",
+    "deleted": false,
+    "created_at": "2026-10-30T02:18:58.219255+00:00"
    }
   ],
   "target": [
@@ -1303,13 +1351,13 @@
     "portfolio_id": 3,
     "level": "symbol",
     "key": "GLD",
-    "weight_pct": 7.0
+    "weight_pct": 4.5
    },
    {
     "portfolio_id": 3,
     "level": "symbol",
     "key": "IEF",
-    "weight_pct": 5.0
+    "weight_pct": 7.5
    },
    {
     "portfolio_id": 3,
@@ -2095,6 +2143,39 @@
     "created_by": "cli",
     "created_at": "2026-10-29T02:19:18.019439+00:00",
     "updated_at": "2026-10-29T02:19:18.019446+00:00"
+   },
+   {
+    "id": 53,
+    "symbol": "MSFT",
+    "kind": "note",
+    "text": "loop-income r009: bought 1 at 529.05 (post-market) to close the -0.32pp gap to the 4% target with idle cash; weight now ~4.2%. Thesis unchanged from note 52: payout ~45% of SEC FCF after capex doubled; watch the 11-19 ex-date for the annual raise (last 0.91/qtr).",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-30T02:19:07.125159+00:00",
+    "updated_at": "2026-10-30T02:19:07.125166+00:00"
+   },
+   {
+    "id": 54,
+    "symbol": "IEF",
+    "kind": "thesis",
+    "text": "loop-macro r009 (10-29 22:20 ET): EXECUTED note 51. SELL 6 GLD @368.57 / BUY 24 IEF @91.25 (net cash +21.42, realized -63.30). PCE 10-29: core 0.3% m/m, 3.1% y/y in line; Q3 core PCE prices 2.50% vs 2.40% (beat) but 10Y fell 6bp to 4.99%, so the stop (10Y>5.15%) did not trigger. GDP 3.4% vs 3.2%. 20d corr to SPY IEF -0.49 vs GLD +0.60. Own calc 1y vol 6.13->5.83%, 60d 5.25->5.07%. Targets GLD 7->4.5, IEF 5->7.5. ES -1.1%/NQ -2.4% overnight after megacap reports. Stop: 10Y > 5.25%.",
+    "review_on": "2026-11-06",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-30T02:19:20.017043+00:00",
+    "updated_at": "2026-10-30T02:19:20.017048+00:00"
+   },
+   {
+    "id": 55,
+    "symbol": "TOST",
+    "kind": "note",
+    "text": "[loop-growth] r009 (10-29 close 31.50, -1.4% on the day, -3.0% on cost): FTC sued Toast on 10-29; company denies the charges (Research > News headlines only, no detail on the allegations in Argus). Market shrugged (-1.4% vs IWM +1.0%). Thesis (note 31) is growth/op-margin based and untouched for now. Hold, no add, until the 11-03 Q3 report. Exit if Q3 revenue growth < 18% y/y (SEC Q2 +23.1%), or if management quantifies FTC exposure as a change to fees/pricing on its payments take rate. Consensus Q3 revenue .01B (Finnhub) = +23% vs Q3-25 1.633B.",
+    "review_on": "2026-11-03",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-10-30T02:21:26.420658+00:00",
+    "updated_at": "2026-10-30T02:21:26.420666+00:00"
    }
   ],
   "peer_list": [],
@@ -4643,6 +4724,262 @@
      "created_at": "2026-10-29T02:19:18.019439+00:00",
      "updated_at": "2026-10-29T02:19:18.019446+00:00"
     }
+   },
+   {
+    "id": 126,
+    "ts": "2026-10-30T02:18:44.515456+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "45",
+    "before": null,
+    "after": {
+     "id": 45,
+     "type": "BUY",
+     "symbol": "MSFT",
+     "qty": 1.0,
+     "price": 529.05,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-30T02:18:43.665805+00:00",
+     "note": "r009: MSFT -0.32pp under 4% target; idle cash, buy 1 at post-market quote",
+     "source": "cli",
+     "external_id": "loop-income-r009-msft",
+     "deleted": false
+    }
+   },
+   {
+    "id": 127,
+    "ts": "2026-10-30T02:18:56.055618+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "46",
+    "before": null,
+    "after": {
+     "id": 46,
+     "type": "SELL",
+     "symbol": "GLD",
+     "qty": 6.0,
+     "price": 368.57,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-30T02:18:55.496479+00:00",
+     "note": "r009 macro: GLD->IEF switch per note 51 (post-PCE)",
+     "source": "cli",
+     "external_id": "r009-macro-gld-sell",
+     "deleted": false
+    }
+   },
+   {
+    "id": 128,
+    "ts": "2026-10-30T02:18:58.224471+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "47",
+    "before": null,
+    "after": {
+     "id": 47,
+     "type": "BUY",
+     "symbol": "IEF",
+     "qty": 24.0,
+     "price": 91.25,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-30T02:18:57.482031+00:00",
+     "note": "r009 macro: GLD->IEF switch per note 51 (post-PCE)",
+     "source": "cli",
+     "external_id": "r009-macro-ief-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 129,
+    "ts": "2026-10-30T02:19:07.127318+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "53",
+    "before": null,
+    "after": {
+     "id": 53,
+     "symbol": "MSFT",
+     "kind": "note",
+     "text": "loop-income r009: bought 1 at 529.05 (post-market) to close the -0.32pp gap to the 4% target with idle cash; weight now ~4.2%. Thesis unchanged from note 52: payout ~45% of SEC FCF after capex doubled; watch the 11-19 ex-date for the annual raise (last 0.91/qtr).",
+     "review_on": "2026-11-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-30T02:19:07.125159+00:00",
+     "updated_at": "2026-10-30T02:19:07.125166+00:00"
+    }
+   },
+   {
+    "id": 130,
+    "ts": "2026-10-30T02:19:08.170510+00:00",
+    "actor": "cli",
+    "action": "set_targets",
+    "entity": "portfolio",
+    "entity_id": "3",
+    "before": null,
+    "after": {
+     "level": "symbol",
+     "weights": {
+      "SGOV": 13.0,
+      "XLV": 12.0,
+      "QUAL": 12.0,
+      "XLE": 10.0,
+      "SPY": 10.0,
+      "USMV": 8.0,
+      "XLP": 8.0,
+      "VTIP": 8.0,
+      "GLD": 4.5,
+      "DBC": 6.0,
+      "IEF": 7.5
+     }
+    }
+   },
+   {
+    "id": 131,
+    "ts": "2026-10-30T02:19:20.018958+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "54",
+    "before": null,
+    "after": {
+     "id": 54,
+     "symbol": "IEF",
+     "kind": "thesis",
+     "text": "loop-macro r009 (10-29 22:20 ET): EXECUTED note 51. SELL 6 GLD @368.57 / BUY 24 IEF @91.25 (net cash +21.42, realized -63.30). PCE 10-29: core 0.3% m/m, 3.1% y/y in line; Q3 core PCE prices 2.50% vs 2.40% (beat) but 10Y fell 6bp to 4.99%, so the stop (10Y>5.15%) did not trigger. GDP 3.4% vs 3.2%. 20d corr to SPY IEF -0.49 vs GLD +0.60. Own calc 1y vol 6.13->5.83%, 60d 5.25->5.07%. Targets GLD 7->4.5, IEF 5->7.5. ES -1.1%/NQ -2.4% overnight after megacap reports. Stop: 10Y > 5.25%.",
+     "review_on": "2026-11-06",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-30T02:19:20.017043+00:00",
+     "updated_at": "2026-10-30T02:19:20.017048+00:00"
+    }
+   },
+   {
+    "id": 132,
+    "ts": "2026-10-30T02:21:26.422380+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "55",
+    "before": null,
+    "after": {
+     "id": 55,
+     "symbol": "TOST",
+     "kind": "note",
+     "text": "[loop-growth] r009 (10-29 close 31.50, -1.4% on the day, -3.0% on cost): FTC sued Toast on 10-29; company denies the charges (Research > News headlines only, no detail on the allegations in Argus). Market shrugged (-1.4% vs IWM +1.0%). Thesis (note 31) is growth/op-margin based and untouched for now. Hold, no add, until the 11-03 Q3 report. Exit if Q3 revenue growth < 18% y/y (SEC Q2 +23.1%), or if management quantifies FTC exposure as a change to fees/pricing on its payments take rate. Consensus Q3 revenue .01B (Finnhub) = +23% vs Q3-25 1.633B.",
+     "review_on": "2026-11-03",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-30T02:21:26.420658+00:00",
+     "updated_at": "2026-10-30T02:21:26.420666+00:00"
+    }
+   },
+   {
+    "id": 133,
+    "ts": "2026-10-30T02:38:54.817403+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": null,
+    "after": {
+     "name": "dev-b117",
+     "benchmark": "SPY"
+    }
+   },
+   {
+    "id": 134,
+    "ts": "2026-10-30T02:38:57.038862+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "48",
+    "before": null,
+    "after": {
+     "id": 48,
+     "type": "BUY",
+     "symbol": "GLD",
+     "qty": 10.0,
+     "price": 360.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-26T20:00:00+00:00",
+     "note": null,
+     "source": "cli",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 135,
+    "ts": "2026-10-30T02:38:59.082629+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "49",
+    "before": null,
+    "after": {
+     "id": 49,
+     "type": "BUY",
+     "symbol": "IEF",
+     "qty": 10.0,
+     "price": 90.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-26T20:00:00+00:00",
+     "note": null,
+     "source": "cli",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 136,
+    "ts": "2026-10-30T02:39:01.177747+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "50",
+    "before": null,
+    "after": {
+     "id": 50,
+     "type": "SELL",
+     "symbol": "GLD",
+     "qty": 10.0,
+     "price": 368.57,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-10-30T02:20:00+00:00",
+     "note": null,
+     "source": "cli",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 137,
+    "ts": "2026-10-30T02:39:24.387196+00:00",
+    "actor": "cli",
+    "action": "delete",
+    "entity": "portfolio",
+    "entity_id": "4",
+    "before": {
+     "id": 4,
+     "name": "dev-b117",
+     "benchmark": "SPY",
+     "counts": {
+      "transactions": 3,
+      "targets": 0,
+      "nav_days": 0,
+      "open_positions": 1
+     }
+    },
+    "after": null
    }
   ]
  }
