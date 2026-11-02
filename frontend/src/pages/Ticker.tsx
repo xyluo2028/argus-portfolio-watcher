@@ -86,6 +86,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   });
   const [fundSeries, setFundSeries] = useState<FundamentalSeries | null>(null);
   const [historyErr, setHistoryErr] = useState<ApiError | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyRequest, setHistoryRequest] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(() => matchMedia("(min-width: 641px)").matches);
   const [fund, setFund] = useState<Fundamentals | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
   const [polled, setPolled] = useState<Quote | null>(null);
@@ -95,10 +98,12 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   useEffect(() => {
     let stale = false;
     setHistoryErr(null);
+    setHistoryLoading(true);
     api.history(symbol, range.period, range.interval, indicators).then(
-      (h) => !stale && setHistory(h), (e) => !stale && setHistoryErr(e));
+      (h) => { if (!stale) { setHistory(h); setHistoryLoading(false); } },
+      (e) => { if (!stale) { setHistoryErr(e); setHistoryLoading(false); } });
     return () => { stale = true; };
-  }, [symbol, range, indicators]);
+  }, [symbol, range, indicators, historyRequest]);
 
   // Valuation ratios / revenue for the chart's panes: daily ranges only, fetched once any is on.
   const daily = range.interval === "1d";
@@ -197,9 +202,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         </div>
       </section>
 
-      <section className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-          <div className="seg ranges" role="group" aria-label="Range">
+      <section className="card ticker-chart" aria-label={`${symbol} price chart`}>
+          <div className="seg ranges chart-ranges" role="group" aria-label="Chart range">
             {RANGES.map((r) => {
               const ret = rangeReturn(r.label);
               const base = r.label === "1D" ? null : bases?.bases[r.label];
@@ -214,7 +218,12 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               );
             })}
           </div>
-          <div className="row">
+          <div className="chart-status small muted" role="status">
+            {historyLoading ? `Loading ${range.label} chart…` : `${range.label} chart`}
+          </div>
+        <details className="chart-settings" open={settingsOpen} onToggle={(e) => setSettingsOpen(e.currentTarget.open)}>
+          <summary>Indicators <span className="small muted">{overlays.length + panes.length + metricPanes.length} selected</span></summary>
+          <div className="row indicator-options" role="group" aria-label="Technical indicators">
             {OVERLAYS.map((o) => (
               <button key={o.key} className="chip" aria-pressed={overlays.includes(o.key)}
                       onClick={() => setOverlays((l) => toggle(l, o.key))}>
@@ -226,7 +235,6 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                       onClick={() => setPanes((l) => toggle(l, p.key))}>{p.label}</button>
             ))}
           </div>
-        </div>
         <div className="row small" style={{ gap: 8, marginBottom: 8 }} role="group" aria-label="Fundamentals panes">
           <span className="muted" title="Each in its own pane under the price">Fundamentals</span>
           {METRIC_PANES.map((m) => (
@@ -240,10 +248,14 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
             <span className="muted">· no {missing.map((k) => METRIC_PANES.find((m) => m.key === k)!.label).join(", ")} history for {symbol}</span>
           )}
         </div>
-        {historyErr ? <div className="error">{historyErr.message}</div>
+        </details>
+        <div aria-busy={historyLoading}>
+        {historyErr ? <div className="error">{historyErr.message}{" "}
+            <button className="btn" onClick={() => setHistoryRequest((n) => n + 1)}>Retry chart</button></div>
           : history ? <CandleChart data={history} overlays={overlays} panes={panes} live={quote}
                                    metrics={metricPanes} fundamentals={wantsFund ? fundSeries : null} />
           : <div className="chart-box muted">Loading chart…</div>}
+        </div>
         {wantsFund && fundSeries && metricPanes.some((k) => k !== "revenue") && (
           <p className="small muted" style={{ margin: "6px 0 0" }}>
             Ratios move with the daily price over each quarter's trailing figures (Finnhub), applied from the quarter's end;

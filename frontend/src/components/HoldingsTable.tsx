@@ -52,7 +52,7 @@ export function HoldingsTable({ positions, sel }: { positions: Position[]; sel?:
             {sel && <th className="pick" aria-label="Select to compare" />}
             <th className="rank" title="Rank in the current sort order">#</th>
             {COLS.map((c) => (
-              <th key={c.key} onClick={() => onSort(c.key)} className={c.key === "symbol" ? "left" : undefined}
+              <th key={c.key} onClick={() => onSort(c.key)} className={c.key === "symbol" ? "left symbol-col" : undefined}
                   aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
                 {c.label}{sort.key === c.key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
               </th>
@@ -67,7 +67,7 @@ export function HoldingsTable({ positions, sel }: { positions: Position[]; sel?:
                 onKeyDown={(e) => e.key === "Enter" && navigate(`/t/${p.symbol}`)}>
               {sel && <PickCell symbol={p.symbol} sel={sel} />}
               <td className="rank">{i + 1}</td>
-              <td className="left"><span className="sym">{p.symbol}</span><span className="name">{p.name ?? ""}</span></td>
+              <td className="left symbol-col"><span className="sym">{p.symbol}</span><span className="name">{p.name ?? ""}</span></td>
               <td>{p.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
               <td>{price(p.avg_cost)}</td>
               <td>{price(p.price)}</td>

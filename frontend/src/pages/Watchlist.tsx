@@ -54,7 +54,7 @@ function WatchTable({ items, live, sel, onRemove }: {
             <th className="pick" aria-label="Select to compare" />
             <th className="rank" title="Rank in the current sort order">#</th>
             {COLS.map((c) => (
-              <th key={c.key} onClick={() => pick(c.key)} className={c.key === "symbol" || c.key === "note" ? "left" : undefined}
+              <th key={c.key} onClick={() => pick(c.key)} className={c.key === "symbol" ? "left symbol-col" : c.key === "note" ? "left" : undefined}
                   aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
                 {c.label}{sort?.key === c.key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
               </th>
@@ -69,7 +69,7 @@ function WatchTable({ items, live, sel, onRemove }: {
               <tr key={i.symbol} onClick={() => navigate(`/t/${i.symbol}`)}>
                 <PickCell symbol={i.symbol} sel={sel} />
                 <td className="rank">{n + 1}</td>
-                <td className="left"><span className="sym">{i.symbol}</span></td>
+                <td className="left symbol-col"><span className="sym">{i.symbol}</span></td>
                 <td>{price(q?.price)}</td>
                 <td className={tone(q?.change_pct)}>
                   {pct(q?.change_pct)}

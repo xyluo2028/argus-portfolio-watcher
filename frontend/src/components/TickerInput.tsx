@@ -66,6 +66,7 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
   return (
     <div className="combo" style={style}>
       <input className="input" value={value} placeholder={placeholder} aria-label={label} autoComplete="off" required={required}
+             autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="go"
              role="combobox" aria-expanded={shown.length > 0} aria-controls={listId} aria-autocomplete="list"
              aria-activedescendant={shown.length ? `${listId}-${active}` : undefined}
              onChange={(e) => { onChange(e.target.value); setOpen(true); }}
@@ -75,7 +76,8 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
           {shown.map((h, i) => (
             <li key={h.symbol} id={`${listId}-${i}`} role="option" aria-selected={i === active}
                 className={i === active ? "active" : undefined}
-                onMouseDown={(e) => { e.preventDefault(); pick(h); }} onMouseEnter={() => setActive(i)}>
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => pick(h)} onPointerEnter={() => setActive(i)}>
               <strong>{h.symbol}</strong>
               <span className="combo-name">{h.name}</span>
               {h.type && h.type !== "Common Stock" && <span className="tag">{h.type === "ETP" ? "ETF" : h.type}</span>}

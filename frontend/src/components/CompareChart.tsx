@@ -19,6 +19,7 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
   });
   const [data, setData] = useState<CompareHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -28,7 +29,10 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
     if (!symbols.length) return;
     let stale = false;
     setError(null);
-    api.compareHistory(symbols, period).then((d) => !stale && setData(d), (e) => !stale && setError(e.message));
+    setLoading(true);
+    api.compareHistory(symbols, period).then(
+      (d) => { if (!stale) { setData(d); setLoading(false); setHover(null); } },
+      (e) => { if (!stale) { setError(e.message); setLoading(false); } });
     return () => { stale = true; };
   }, [key, period]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -39,7 +43,7 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
     ro.observe(el);
     setWidth(el.clientWidth);
     return () => ro.disconnect();
-  }, []);
+  }, [error]);
 
   const pick = (p: string) => {
     setPeriod(p);
@@ -78,7 +82,7 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
   const ranked = [...symbols].filter((s) => series[s]).sort((a, b) => (last(b) ?? -Infinity) - (last(a) ?? -Infinity));
   const direct = ranked.length <= 4; // few lines: label them at their ends too
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!dates.length) return;
     const r = e.currentTarget.getBoundingClientRect();
     const f = (e.clientX - r.left - PAD.l) / plotW;
@@ -89,10 +93,11 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
     <section className="card">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Price performance <span className="muted small">· price return since the start of the range, no dividends</span></h2>
-        <div className="seg" role="group" aria-label="Range">
+        <div className="seg chart-ranges" role="group" aria-label="Comparison range">
           {PERIODS.map(([p, label]) => <button key={p} aria-pressed={period === p} onClick={() => pick(p)}>{label}</button>)}
         </div>
       </div>
+      <div className="chart-status small muted" role="status">{loading ? "Loading price performance…" : ""}</div>
       {error ? <div className="error">{error}</div> : (
         <>
           <div className="row small" style={{ gap: 14, flexWrap: "wrap", marginBottom: 6 }} aria-label="Legend">
@@ -110,7 +115,8 @@ export function CompareChart({ symbols, styleOf }: { symbols: string[]; styleOf:
           </div>
           <div ref={box} className="compare-chart" style={{ height: H, opacity: data ? 1 : 0.4 }}>
             {width > 0 && dates.length > 1 && (
-              <svg width={width} height={H} onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img"
+              <svg width={width} height={H} onPointerDown={onMove} onPointerMove={onMove}
+                   onPointerLeave={() => setHover(null)} onPointerCancel={() => setHover(null)} role="img"
                    aria-label={`Price return over ${period}: ${ranked.map((s) => `${s} ${pct(last(s), 1)}`).join(", ")}`}>
                 {ticks.map((t) => (
                   <g key={t}>

@@ -71,7 +71,7 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Performance vs {perf?.benchmark ?? "benchmark"}
           <span className="muted small"> · time-weighted{perf?.provisional_today ? " · today is provisional" : ""}</span></h2>
-        <div className="seg" role="group" aria-label="Range">
+        <div className="seg chart-ranges" role="group" aria-label="Performance range">
           {RANGES.map((r) => (
             <button key={r.key} aria-pressed={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>
           ))}

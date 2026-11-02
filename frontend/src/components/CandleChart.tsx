@@ -6,12 +6,13 @@ import {
   LineSeries,
   LineStyle,
   LineType,
+  TrackingModeExitMode,
   type IChartApi,
   type MouseEventParams,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { FundamentalSeries, HistoryResponse, Quote } from "../api";
 import { big, pct, price } from "../format";
 
@@ -105,6 +106,10 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
       rightPriceScale: { borderColor: css("--axis") },
       timeScale: { borderColor: css("--axis"), timeVisible: intraday, secondsVisible: false },
       crosshair: { horzLine: { labelBackgroundColor: css("--text-2") }, vertLine: { labelBackgroundColor: css("--text-2") } },
+      // A vertical swipe belongs to the page. Keep horizontal panning and pinch zoom in the chart.
+      handleScroll: { vertTouchDrag: false, horzTouchDrag: true, mouseWheel: false },
+      handleScale: { pinch: true, mouseWheel: false },
+      trackingMode: { exitMode: TrackingModeExitMode.OnTouchEnd },
     });
     chartRef.current = chart;
 
@@ -245,9 +250,15 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
 
   const extra = data.interval === "1d" && fundamentals ? metrics.length : 0;
   return (
-    <div className="chart-box" style={extra ? { height: 460 + 110 * extra } : undefined}>
-      <div className="chart-legend num">{legend}</div>
-      <div ref={el} style={{ position: "absolute", inset: 0 }} />
-    </div>
+    <>
+      <div className="chart-readout">
+        <div className="chart-legend num">{legend}</div>
+        <button className="btn small" onClick={() => chartRef.current?.timeScale().fitContent()}>Reset zoom</button>
+      </div>
+      <div className="chart-box" style={{ "--chart-extra-height": `${110 * extra}px` } as CSSProperties}>
+        <div ref={el} className="chart-canvas" />
+      </div>
+      <p className="chart-touch-hint small muted">Swipe sideways to pan · pinch to zoom · hold to inspect</p>
+    </>
   );
 }

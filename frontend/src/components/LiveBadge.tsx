@@ -16,10 +16,13 @@ export function LiveBadge({ live, connected }: { live: StreamUpdate | null; conn
           ? "polling each minute (no Finnhub key)"
           : `polling · stream ${stream.state}`;
   return (
-    <span className={`badge ${streaming ? "live" : ""}`} title={connected ? "Connected to Argus" : "Reconnecting to Argus…"}>
-      <span className="dot" aria-hidden />
-      <strong>{LABEL[market.session]}</strong>
-      <span className="muted">{connected ? detail : "reconnecting…"}</span>
-    </span>
+    <details className="market-status">
+      <summary className={`badge ${streaming ? "live" : ""}`}>
+        <span className="dot" aria-hidden />
+        <strong>{LABEL[market.session]}</strong>
+        <span className="muted">{connected ? "Details ▾" : "Reconnecting…"}</span>
+      </summary>
+      <div className="market-detail">{connected ? detail : `Reconnecting to Argus… · ${detail}`}</div>
+    </details>
   );
 }
