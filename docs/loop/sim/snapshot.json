@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-10-30T02:40:01.633660+00:00",
+ "created_at": "2026-11-02T02:46:14.401597+00:00",
  "tables": {
   "portfolio": [
    {
@@ -257,6 +257,15 @@
     "sector": "Real Estate",
     "industry": "REIT - Retail",
     "updated_at": "2026-10-20T15:23:00.623842+00:00"
+   },
+   {
+    "symbol": "PAYS",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-02T02:18:54.775856+00:00"
    },
    {
     "symbol": "PEGA",
@@ -1459,6 +1468,12 @@
    },
    {
     "watchlist_id": 1,
+    "symbol": "PAYS",
+    "note": "r010 screen: rev +48%/+51% last 2Q, op margin 8%->25%, no debt; FCF inflated by customer funds; insiders net sellers; report 11-09",
+    "added_at": "2026-11-02T02:18:54.772347+00:00"
+   },
+   {
+    "watchlist_id": 1,
     "symbol": "PEGA",
     "note": "round 001 candidates not bought",
     "added_at": "2026-10-20T15:26:44.419308+00:00"
@@ -1555,7 +1570,7 @@
     "kind": "day_loss_pct",
     "threshold": 6.0,
     "note": "loop-income r005: MSFT reports 10-28 amc",
-    "active": true,
+    "active": false,
     "created_by": "cli",
     "created_at": "2026-10-26T02:18:36.945030+00:00"
    },
@@ -1565,7 +1580,7 @@
     "kind": "day_loss_pct",
     "threshold": 5.0,
     "note": "loop-income r006: ABBV reports 10-30 bmo; payout safety check if it drops 5%+",
-    "active": true,
+    "active": false,
     "created_by": "cli",
     "created_at": "2026-10-27T02:19:44.775758+00:00"
    }
@@ -2176,6 +2191,61 @@
     "created_by": "cli",
     "created_at": "2026-10-30T02:21:26.420658+00:00",
     "updated_at": "2026-10-30T02:21:26.420666+00:00"
+   },
+   {
+    "id": 56,
+    "symbol": "GLD",
+    "kind": "note",
+    "text": "loop-macro r010 (11-01): no trade. GLD -3.5% on 10-30 risk-off day (SPY -1.8%); 20d corr to SPY +0.76 (60d +0.54), 0.3% above 52w low. Not hedging; IEF is (20d corr -0.52, +0.56% on 10-30). Exit remaining 12 sh into IEF (simulated: net cash +48.40, realized -280.08) if GLD closes below its 52w low after NFP 11-06 or 20d corr still >0.5 on review. Supersedes thesis 22's 10-29 review.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-02T02:18:20.511816+00:00",
+    "updated_at": "2026-11-02T02:18:20.511823+00:00"
+   },
+   {
+    "id": 57,
+    "symbol": "DBC",
+    "kind": "note",
+    "text": "loop-macro r010 (11-01): hold 6%. WTI 104.12 settle 10-30, -2.5% Sunday night; DBC 20d corr to SPY -0.22, diversifying. Review after NFP. Supersedes thesis 21's 10-29 review.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-02T02:18:22.403056+00:00",
+    "updated_at": "2026-11-02T02:18:22.403064+00:00"
+   },
+   {
+    "id": 58,
+    "symbol": "PAYS",
+    "kind": "note",
+    "text": "[loop-growth] r010 candidate (10-30 close 13.93, mcap $0.79B). Screener (FY2025 rev +40.5%, GM 59%) then research: SEC quarters +45.8% / +50.8% / +48.1% y/y, operating margin 8.1% -> 23.8% -> 24.8% (operating leverage), no debt, insiders own ~21%. Consensus EPS revised up (0q 0.073 -> 0.13 in 60 days). Caveats: SEC FCF margin 73% is customer-fund float, not earnings (NI margin 15.7%); 19 insider sales ($7.5M) and no buys in 12 months; stock +168% 1y. Not buying before the 11-09 Q3 report; cash is $2.2k. Buy case after 11-09: Q3 growth >= 35% and op margin >= 20%, funded from any holding that breaks this week.",
+    "review_on": "2026-11-10",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-02T02:18:54.793420+00:00",
+    "updated_at": "2026-11-02T02:18:54.793426+00:00"
+   },
+   {
+    "id": 59,
+    "symbol": "ABBV",
+    "kind": "note",
+    "text": "loop-income r010: Q3 (10-30 bmo) adj. EPS 3.82 vs 3.823 est, revenue 17.40B vs 17.66B est (-1.4%), FY26 guide raised; stock +1.41% to 294.89, near 52w high. Dividend raised ~5.2% per Argus news (1.73 -> ~1.82/qtr) but Argus still projects 1.73. Coverage: adj EPS ~45%, SEC FCF TTM 18.21B vs ~12.2B dividends (~67%). Hold at 5% target.",
+    "review_on": "2027-01-15",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-02T02:21:50.331484+00:00",
+    "updated_at": "2026-11-02T02:21:50.331492+00:00"
+   },
+   {
+    "id": 60,
+    "symbol": "XOM",
+    "kind": "note",
+    "text": "loop-income r010: Q3 (10-30 bmo) EPS 4.23 vs 4.12 est (+2.7%), revenue 113.2B vs 104.1B; stock +2.16% to 187.25. Dividend raised ~3.9% per Argus news (1.03 -> ~1.07) but Argus still projects 1.03 for the announced 11-16 ex-date. Oil ~102, payout ~42%. Hold at 4% target; beta -0.69 diversifies the book.",
+    "review_on": "2027-01-29",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-02T02:21:52.532762+00:00",
+    "updated_at": "2026-11-02T02:21:52.532772+00:00"
    }
   ],
   "peer_list": [],
@@ -4980,6 +5050,140 @@
      }
     },
     "after": null
+   },
+   {
+    "id": 138,
+    "ts": "2026-11-02T02:18:20.513576+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "56",
+    "before": null,
+    "after": {
+     "id": 56,
+     "symbol": "GLD",
+     "kind": "note",
+     "text": "loop-macro r010 (11-01): no trade. GLD -3.5% on 10-30 risk-off day (SPY -1.8%); 20d corr to SPY +0.76 (60d +0.54), 0.3% above 52w low. Not hedging; IEF is (20d corr -0.52, +0.56% on 10-30). Exit remaining 12 sh into IEF (simulated: net cash +48.40, realized -280.08) if GLD closes below its 52w low after NFP 11-06 or 20d corr still >0.5 on review. Supersedes thesis 22's 10-29 review.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-02T02:18:20.511816+00:00",
+     "updated_at": "2026-11-02T02:18:20.511823+00:00"
+    }
+   },
+   {
+    "id": 139,
+    "ts": "2026-11-02T02:18:22.404951+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "57",
+    "before": null,
+    "after": {
+     "id": 57,
+     "symbol": "DBC",
+     "kind": "note",
+     "text": "loop-macro r010 (11-01): hold 6%. WTI 104.12 settle 10-30, -2.5% Sunday night; DBC 20d corr to SPY -0.22, diversifying. Review after NFP. Supersedes thesis 21's 10-29 review.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-02T02:18:22.403056+00:00",
+     "updated_at": "2026-11-02T02:18:22.403064+00:00"
+    }
+   },
+   {
+    "id": 140,
+    "ts": "2026-11-02T02:18:54.774935+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "PAYS"
+     ]
+    }
+   },
+   {
+    "id": 141,
+    "ts": "2026-11-02T02:18:54.794865+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "58",
+    "before": null,
+    "after": {
+     "id": 58,
+     "symbol": "PAYS",
+     "kind": "note",
+     "text": "[loop-growth] r010 candidate (10-30 close 13.93, mcap $0.79B). Screener (FY2025 rev +40.5%, GM 59%) then research: SEC quarters +45.8% / +50.8% / +48.1% y/y, operating margin 8.1% -> 23.8% -> 24.8% (operating leverage), no debt, insiders own ~21%. Consensus EPS revised up (0q 0.073 -> 0.13 in 60 days). Caveats: SEC FCF margin 73% is customer-fund float, not earnings (NI margin 15.7%); 19 insider sales ($7.5M) and no buys in 12 months; stock +168% 1y. Not buying before the 11-09 Q3 report; cash is $2.2k. Buy case after 11-09: Q3 growth >= 35% and op margin >= 20%, funded from any holding that breaks this week.",
+     "review_on": "2026-11-10",
+     "archived": false,
+     "created_by": "ui",
+     "created_at": "2026-11-02T02:18:54.793420+00:00",
+     "updated_at": "2026-11-02T02:18:54.793426+00:00"
+    }
+   },
+   {
+    "id": 142,
+    "ts": "2026-11-02T02:21:46.464030+00:00",
+    "actor": "cli",
+    "action": "disable",
+    "entity": "alert",
+    "entity_id": "7",
+    "before": null,
+    "after": null
+   },
+   {
+    "id": 143,
+    "ts": "2026-11-02T02:21:48.490438+00:00",
+    "actor": "cli",
+    "action": "disable",
+    "entity": "alert",
+    "entity_id": "8",
+    "before": null,
+    "after": null
+   },
+   {
+    "id": 144,
+    "ts": "2026-11-02T02:21:50.333362+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "59",
+    "before": null,
+    "after": {
+     "id": 59,
+     "symbol": "ABBV",
+     "kind": "note",
+     "text": "loop-income r010: Q3 (10-30 bmo) adj. EPS 3.82 vs 3.823 est, revenue 17.40B vs 17.66B est (-1.4%), FY26 guide raised; stock +1.41% to 294.89, near 52w high. Dividend raised ~5.2% per Argus news (1.73 -> ~1.82/qtr) but Argus still projects 1.73. Coverage: adj EPS ~45%, SEC FCF TTM 18.21B vs ~12.2B dividends (~67%). Hold at 5% target.",
+     "review_on": "2027-01-15",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-02T02:21:50.331484+00:00",
+     "updated_at": "2026-11-02T02:21:50.331492+00:00"
+    }
+   },
+   {
+    "id": 145,
+    "ts": "2026-11-02T02:21:52.535811+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "60",
+    "before": null,
+    "after": {
+     "id": 60,
+     "symbol": "XOM",
+     "kind": "note",
+     "text": "loop-income r010: Q3 (10-30 bmo) EPS 4.23 vs 4.12 est (+2.7%), revenue 113.2B vs 104.1B; stock +2.16% to 187.25. Dividend raised ~3.9% per Argus news (1.03 -> ~1.07) but Argus still projects 1.03 for the announced 11-16 ex-date. Oil ~102, payout ~42%. Hold at 4% target; beta -0.69 diversifies the book.",
+     "review_on": "2027-01-29",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-02T02:21:52.532762+00:00",
+     "updated_at": "2026-11-02T02:21:52.532772+00:00"
+    }
    }
   ]
  }
