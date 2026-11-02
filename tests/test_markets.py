@@ -244,6 +244,7 @@ def test_economic_events_after_dst_ends(monkeypatch):
     p = MacroProvider(client=_nasdaq_client(NASDAQ_ROWS_EST))
     got = {(e["event"], e["date"]): e["time_et"] for e in p.economic_events(10)}
     assert got == {
+        ("Atlanta Fed GDPNow", "2026-10-31"): "20:00",        # the window starts on Friday's session (B-126)
         ("OPEC Meeting", "2026-11-01"): "05:00",              # yesterday, Sunday: doesn't push Monday's rows to Tuesday
         ("ISM Manufacturing PMI", "2026-11-02"): "10:00",
         ("Construction Spending", "2026-11-02"): "10:00",
@@ -298,6 +299,52 @@ def test_econ_store_from_the_old_dating_is_dropped(monkeypatch, tmp_path):
     fresh = MacroProvider(client=_nasdaq_client({}), cache_dir=tmp_path)  # the new store is read back
     assert [e["event"] for e in fresh.economic_events(5) if e["date"] == "2026-11-02"] == ["ISM Manufacturing PMI",
                                                                                          "Construction Spending"]
+
+
+# Friday 10-30's releases as Nasdaq served them on Sunday evening (EST clock): in `date=10-31`'s answer.
+NASDAQ_ROWS_WEEKEND = {
+    "2026-10-30": [{"gmt": "07:30", "country": US, "eventName": "Initial Jobless Claims", "actual": "229K"}],  # Thursday
+    "2026-10-31": [{"gmt": "07:30", "country": US, "eventName": "Employment Cost Index QoQ", "actual": "0.8%"},
+                   {"gmt": "07:30", "country": US, "eventName": "Personal Income MoM", "actual": "0.4%"},
+                   {"gmt": "08:45", "country": US, "eventName": "Chicago PMI", "actual": "55.3"},
+                   {"gmt": "09:00", "country": US, "eventName": "Michigan Consumer Sentiment", "actual": "53.6"}],
+    "2026-11-03": [{"gmt": "10:00", "country": US, "eventName": "ISM Manufacturing PMI"}],
+}
+
+
+def test_session_before_skips_weekends_and_holidays():
+    from argus.market_calendar import session_before
+    assert session_before(date(2026, 11, 3)) == date(2026, 11, 2)   # Tuesday: Monday
+    for d in (date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2)):
+        assert session_before(d) == date(2026, 10, 30)               # Saturday, Sunday, Monday: Friday
+    assert session_before(date(2026, 9, 8)) == date(2026, 9, 4)      # the Tuesday after Labor Day: Friday
+    assert session_before(date(2099, 6, 1)) == date(2099, 5, 29)     # past the calendar: weekends only
+
+
+def test_economic_events_on_a_weekend_and_monday_start_on_friday(monkeypatch, tmp_path):
+    # Sunday 11-01, 20:30 EST: the calendar starts on Friday's session, with its actuals (B-126).
+    asked = []
+    answers = dict(NASDAQ_ROWS_WEEKEND)
+    now = [datetime(2026, 11, 2, 1, 30, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    p = MacroProvider(client=_nasdaq_client(answers, asked), cache_dir=tmp_path)
+    ev = p.economic_events(5)
+    assert min(asked) == "2026-10-31"  # the query holding Friday's rows
+    friday = {e["event"]: (e["time_et"], e["actual"]) for e in ev if e["date"] == "2026-10-30"}
+    assert friday == {"Employment Cost Index QoQ": ("08:30", "0.8%"), "Personal Income MoM": ("08:30", "0.4%"),
+                      "Chicago PMI": ("09:45", "55.3"), "Michigan Consumer Sentiment": ("10:00", "53.6")}
+    assert min(e["date"] for e in ev) == "2026-10-30"  # Thursday's claims are before the window
+
+    # Monday 10:00 EST: still Friday's rows, and kept even when Nasdaq stops serving them.
+    answers.pop("2026-10-31")
+    now[0] = datetime(2026, 11, 2, 15, 0, tzinfo=UTC)
+    ev = p.economic_events(5)
+    assert {e["event"] for e in ev if e["date"] == "2026-10-30"} == set(friday)
+    assert any(e["date"] == "2026-11-02" and e["event"] == "ISM Manufacturing PMI" for e in ev)
+
+    # On Tuesday the window moves to Monday and Friday's rows leave it.
+    now[0] = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
+    assert min(e["date"] for e in p.economic_events(5)) >= "2026-11-02"
 
 
 def test_economic_events_retry_soon_when_today_is_missing(monkeypatch):

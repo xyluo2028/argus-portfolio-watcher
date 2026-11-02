@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from argus.market_calendar import session_before
 from argus.providers.base import ProviderError
 
 log = logging.getLogger("argus.macro")
@@ -44,7 +45,7 @@ NASDAQ_ANCHORS = {"Initial Jobless Claims": "08:30", "Continuing Jobless Claims"
                   "Crude Oil Inventories": "10:30", "Natural Gas Storage": "10:30", "Fed Interest Rate Decision": "14:00"}
 NY = ZoneInfo("America/New_York")
 # Nasdaq's per-date answers shift within minutes, so a fetch can drop or misdate a whole day (B-034):
-# rows seen for yesterday and today are kept and merged into later fetches, and an answer with no rows
+# rows seen since the last session are kept and merged into later fetches, and an answer with no rows
 # for a weekday today is retried soon rather than held for the usual 6 h.
 ECON_TTL_S = 6 * 3600
 ECON_RETRY_S = 10 * 60
@@ -198,9 +199,10 @@ class MacroProvider:
         return out
 
     def economic_events(self, days: int = 21) -> list[dict]:
-        """US releases from Nasdaq's economic calendar for yesterday, today and the next `days` days.
-        Times are Eastern; values are as published ("1,716K", "3.6%"). Yesterday's and today's rows
-        are every row seen for those days, kept across fetches and restarts (B-034)."""
+        """US releases from Nasdaq's economic calendar from the last trading session before today through
+        the next `days` days. Times are Eastern; values are as published ("1,716K", "3.6%"). Rows from
+        that session through today are every row seen for those days, kept across fetches and restarts
+        (B-034)."""
         clean = lambda v: (html.unescape(v or "").strip() or None)  # noqa: E731
 
         def day(d: date) -> list[dict]:
@@ -214,18 +216,22 @@ class MacroProvider:
         # today's releases, with their actuals, would drop off (B-034). In the key so the window rolls
         # at New York midnight rather than whenever the 6 h cache expires.
         today = datetime.now(NY).date()
+        # From the last session, not yesterday: on a weekend, a Monday or after a holiday, yesterday has no
+        # releases and the last session's actuals are the ones to read (B-126).
+        start = session_before(today)
         fetched_today = [False]
 
         def fetch():
-            # From today's query (yesterday's or today's rows) to one past the last day, to compare with.
-            queries = [today + timedelta(days=i) for i in range(days + 3)]
+            # From the query after the last session (that session's rows) to one past the last day, to
+            # compare with.
+            queries = [start + timedelta(days=i) for i in range(1, (today - start).days + days + 3)]
             with ThreadPoolExecutor(max_workers=7) as pool:
                 per_day = list(pool.map(day, queries))
             out = []
             answers = self._nasdaq_days(queries, per_day)
             offset = self.nasdaq_offset(answers)
             for d, rows in answers:
-                if not today - timedelta(days=1) <= d <= today + timedelta(days=days):
+                if not start <= d <= today + timedelta(days=days):
                     continue
                 for x in rows:
                     when, time_et = self.nasdaq_slot(d, x["gmt"], offset)
@@ -235,15 +241,16 @@ class MacroProvider:
             if not fetched_today[0] and today.weekday() < 5:
                 log.warning("economic calendar: no rows for %s; per-query answers %s", today, [
                     (q.isoformat(), len(rows), rows[0]["eventName"] if rows else None) for q, rows in zip(queries, per_day)])
-            return self._keep_releases(out, today)
+            return self._keep_releases(out, start, today)
 
         ttl = lambda _: ECON_TTL_S if fetched_today[0] or today.weekday() >= 5 else ECON_RETRY_S  # noqa: E731
         return self._memo(f"econ:{days}:{today.isoformat()}", ttl, fetch)
 
-    def _keep_releases(self, rows: list[dict], today: date) -> list[dict]:
-        """Merge yesterday's and today's rows into the kept store and return the window with every row
-        seen for today and yesterday: a later actual fills a blank, a row missing from this fetch stays."""
-        recent = {(today - timedelta(days=1)).isoformat(), today.isoformat()}
+    def _keep_releases(self, rows: list[dict], start: date, today: date) -> list[dict]:
+        """Merge the rows from `start` (the last session) through today into the kept store and return the
+        window with every row seen for those days: a later actual fills a blank, a row missing from this
+        fetch stays."""
+        recent = {(start + timedelta(days=i)).isoformat() for i in range((today - start).days + 1)}
         # Nasdaq gives month-on-month and year-on-year rows the same name and time ("Core PCE Price
         # Index" twice at 08:30): the key counts repeats, in the order Nasdaq lists them.
         seen: dict[tuple, int] = {}
