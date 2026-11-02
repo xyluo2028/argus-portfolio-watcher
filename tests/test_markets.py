@@ -82,15 +82,15 @@ def test_fomc_parsing(monkeypatch):
                                                           ("2027-01-01", False)]
 
 
-# Raw rows as Nasdaq serves them (checked Oct 2026): `?date=D` holds the day before D, clock at fixed UTC-4,
-# except some dates that answer with their own day.
+# Raw rows as Nasdaq served them in October (EDT): `?date=D` holds the day before D, clock at a fixed UTC-4
+# for every row (November's an hour late), except when an answer flips to its own day and the next repeats it.
 US = "United States"
 NASDAQ_ROWS = {
     "2026-10-20": [{"gmt": "11:30", "country": US, "eventName": "3-Month Bill Auction"}],  # the day before yesterday: dropped
     "2026-10-21": [{"gmt": "08:30", "country": US, "eventName": "Housing Starts", "actual": "1.221M"},
                    {"gmt": "02:00", "country": "United Kingdom", "eventName": "Claimant Count Change"}],
-    "2026-10-26": [{"gmt": "08:30", "country": US, "eventName": "Chicago Fed National Activity"}],  # Monday's own
-    "2026-10-27": [{"gmt": "10:00", "country": US, "eventName": "CB Consumer Confidence"}],  # still its own day...
+    "2026-10-26": [{"gmt": "06:00", "country": US, "eventName": "OPEC Meeting"}],  # Monday's query: Sunday's lone row
+    "2026-10-27": [{"gmt": "10:00", "country": US, "eventName": "CB Consumer Confidence"}],  # its own day...
     "2026-10-28": [{"gmt": "10:00", "country": US, "eventName": "CB Consumer Confidence", "actual": "95"}],  # ...repeated
     "2026-10-29": [{"gmt": "14:00", "country": US, "eventName": "Fed Interest Rate Decision", "actual": "&nbsp;"}],
     "2026-10-31": [{"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"},
@@ -131,7 +131,7 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
     assert got == {
         ("3-Month Bill Auction", "2026-10-19"): "11:30",         # yesterday's releases stay on the calendar
         ("Housing Starts", "2026-10-20"): "08:30",               # before DST ends: same clock, day before
-        ("Chicago Fed National Activity", "2026-10-26"): "08:30",
+        ("OPEC Meeting", "2026-10-25"): "06:00",                 # a Sunday meeting stays on Sunday
         ("CB Consumer Confidence", "2026-10-27"): "10:00",       # once
         ("Fed Interest Rate Decision", "2026-10-28"): "14:00",   # the FOMC end date, not Thursday
         ("Michigan Consumer Sentiment", "2026-10-30"): "10:00",
@@ -141,7 +141,7 @@ def test_economic_events_shift_nasdaq_dates_and_dst(monkeypatch):
         ("Michigan Consumer Sentiment", "2026-11-06"): "10:00",
         ("Wholesale Inventories", "2026-11-09"): "10:00",         # once, on the Monday
     }
-    assert all(date.fromisoformat(e["date"]).weekday() < 5 for e in ev)  # releases land on weekdays
+    assert all(date.fromisoformat(e["date"]).weekday() < 5 for e in ev if e["event"] != "OPEC Meeting")  # releases on weekdays
     assert next(e for e in ev if e["event"] == "Housing Starts")["actual"] == "1.221M"
 
     # cached for the New York day; at New York midnight the window moves on
@@ -219,6 +219,85 @@ def test_economic_events_keep_todays_releases_when_nasdaq_flips(monkeypatch, tmp
     answers.clear()
     fresh = MacroProvider(client=_nasdaq_client(answers), cache_dir=tmp_path)
     assert {e["event"] for e in fresh.economic_events(5) if e["date"] == "2026-10-29"} == set(today)
+
+
+# Raw rows as Nasdaq served them after DST ended (fetched 11-02 02:25 UTC): still the day before D, the
+# clock now at a fixed UTC-5 for every row, so November's rows read as New York time.
+NASDAQ_ROWS_EST = {
+    "2026-11-01": [{"gmt": "19:00", "country": US, "eventName": "Atlanta Fed GDPNow", "actual": "3.3%"}],
+    "2026-11-02": [{"gmt": "05:00", "country": US, "eventName": "OPEC Meeting", "actual": "&nbsp;"}],  # Sunday's lone row
+    "2026-11-03": [{"gmt": "10:00", "country": US, "eventName": "ISM Manufacturing PMI"},
+                   {"gmt": "10:00", "country": US, "eventName": "Construction Spending"}],
+    "2026-11-04": [{"gmt": "10:00", "country": US, "eventName": "JOLTS Job Openings"}],
+    "2026-11-05": [{"gmt": "10:00", "country": US, "eventName": "ISM Non-Manufacturing PMI"}],
+    "2026-11-06": [{"gmt": "08:30", "country": US, "eventName": "Initial Jobless Claims"},
+                   {"gmt": "16:30", "country": US, "eventName": "Fed's Balance Sheet"}],
+    "2026-11-07": [{"gmt": "08:30", "country": US, "eventName": "Nonfarm Payrolls"},
+                   {"gmt": "10:00", "country": US, "eventName": "Michigan Consumer Sentiment"}],
+    "2026-11-10": [{"gmt": "10:00", "country": US, "eventName": "Wholesale Inventories"}],
+}
+
+
+def test_economic_events_after_dst_ends(monkeypatch):
+    now = [datetime(2026, 11, 2, 15, 0, tzinfo=UTC)]  # Monday 10:00 EST
+    _at(monkeypatch, now)
+    p = MacroProvider(client=_nasdaq_client(NASDAQ_ROWS_EST))
+    got = {(e["event"], e["date"]): e["time_et"] for e in p.economic_events(10)}
+    assert got == {
+        ("OPEC Meeting", "2026-11-01"): "05:00",              # yesterday, Sunday: doesn't push Monday's rows to Tuesday
+        ("ISM Manufacturing PMI", "2026-11-02"): "10:00",
+        ("Construction Spending", "2026-11-02"): "10:00",
+        ("JOLTS Job Openings", "2026-11-03"): "10:00",
+        ("ISM Non-Manufacturing PMI", "2026-11-04"): "10:00",
+        ("Initial Jobless Claims", "2026-11-05"): "08:30",    # Thursday
+        ("Fed's Balance Sheet", "2026-11-05"): "16:30",
+        ("Nonfarm Payrolls", "2026-11-06"): "08:30",          # Friday, not Saturday
+        ("Michigan Consumer Sentiment", "2026-11-06"): "10:00",
+        ("Wholesale Inventories", "2026-11-09"): "10:00",
+    }
+
+
+def test_nasdaq_clock_offset_is_read_from_the_rows(monkeypatch):
+    # The clock is one offset for every row, whatever the row's date: tonight's answer for `date=10-30`
+    # lists Thursday's PCE at 07:30, which is 08:30 EDT.
+    est, edt = timedelta(hours=-5), timedelta(hours=-4)
+    assert MacroProvider.nasdaq_slot(date(2026, 10, 29), "07:30", est) == (date(2026, 10, 29), "08:30")
+    assert MacroProvider.nasdaq_slot(date(2026, 11, 6), "08:30", est) == (date(2026, 11, 6), "08:30")
+    assert MacroProvider.nasdaq_slot(date(2026, 11, 6), "09:30", edt) == (date(2026, 11, 6), "08:30")
+    assert MacroProvider.nasdaq_slot(date(2026, 11, 6), "All Day", est) == (date(2026, 11, 6), "All Day")
+    pce = [{"gmt": "07:30", "eventName": "Initial Jobless Claims"}, {"gmt": "07:30", "eventName": "Core PCE Price Index"}]
+    nfp = [{"gmt": "08:30", "eventName": "Nonfarm Payrolls"}, {"gmt": "10:00", "eventName": "Michigan Consumer Sentiment"}]
+    assert MacroProvider.nasdaq_offset([(date(2026, 10, 29), pce), (date(2026, 11, 6), nfp)]) == est
+
+    # Whatever offset the feed uses, the anchor releases tell: an EDT clock fetched after DST ended...
+    now = [datetime(2026, 11, 2, 15, 0, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    shifted = {d: [x | {"gmt": f"{int(x['gmt'][:2]) + 1:02d}{x['gmt'][2:]}"} for x in rows]
+               for d, rows in NASDAQ_ROWS_EST.items()}
+    ev = MacroProvider(client=_nasdaq_client(shifted)).economic_events(10)
+    assert {(e["event"], e["date"], e["time_et"]) for e in ev} >= {
+        ("Nonfarm Payrolls", "2026-11-06", "08:30"), ("ISM Manufacturing PMI", "2026-11-02", "10:00")}
+    # ...and without any anchor, New York's offset at the time of the fetch.
+    assert MacroProvider.nasdaq_offset([(date(2026, 11, 2), [{"gmt": "05:00", "eventName": "OPEC Meeting"}])]) == est
+
+
+def test_econ_store_from_the_old_dating_is_dropped(monkeypatch, tmp_path):
+    # Rows kept before the fix were dated and timed the old way (ISM on Tuesday 09:00): they'd sit next to
+    # the right ones as duplicates, so a store without the current version starts over.
+    import json
+    old = {"2026-11-03|09:00|ISM Manufacturing PMI|1": {"date": "2026-11-03", "time_et": "09:00",
+                                                        "event": "ISM Manufacturing PMI", "actual": "49.1"}}
+    (tmp_path / "econ_releases.json").write_text(json.dumps(old))
+    now = [datetime(2026, 11, 3, 15, 0, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    p = MacroProvider(client=_nasdaq_client(NASDAQ_ROWS_EST), cache_dir=tmp_path)
+    ism = [(e["date"], e["time_et"]) for e in p.economic_events(5) if e["event"] == "ISM Manufacturing PMI"]
+    assert ism == [("2026-11-02", "10:00")]
+    saved = json.loads((tmp_path / "econ_releases.json").read_text())
+    assert saved["version"] == 2 and all(e["date"] != "2026-11-03" or e["time_et"] != "09:00" for e in saved["rows"].values())
+    fresh = MacroProvider(client=_nasdaq_client({}), cache_dir=tmp_path)  # the new store is read back
+    assert [e["event"] for e in fresh.economic_events(5) if e["date"] == "2026-11-02"] == ["ISM Manufacturing PMI",
+                                                                                         "Construction Spending"]
 
 
 def test_economic_events_retry_soon_when_today_is_missing(monkeypatch):
