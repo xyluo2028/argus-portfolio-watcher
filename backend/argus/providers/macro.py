@@ -29,13 +29,19 @@ FED_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 NASDAQ_URL = "https://api.nasdaq.com/api/calendar/economicevents"
 # By first three letters: the Fed writes "January" but also "Apr/May", "Oct/Nov" for meetings across a month end.
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-# Nasdaq's calendar is off from what it looks like. The "gmt" column is a clock time at a fixed UTC-4
-# (EDT) all year, so in winter it runs an hour ahead of New York (payrolls at "09:30"). And `?date=D`
-# usually returns the releases of the day before D, but some dates answer with D's own (cached per date,
-# it seems): a Monday query with Monday's releases, or two queries in a row with the same rows.
-# Checked against the raw feed in Oct 2026 (B-006); `_nasdaq_days` sorts out which day each answer is.
+# Nasdaq's calendar is off from what it looks like (raw feed checked Oct and Nov 2026, B-006).
+# `?date=D` answers with the releases of the day before D; only when Nasdaq's answers flip (B-034) does a
+# date answer with its own day, and then the next date repeats it. The "gmt" column is a clock at one
+# fixed offset for every row, whatever the row's date: New York's offset at the time of the fetch (EDT
+# in October, so November's payrolls showed "09:30"; EST since Nov 1, so October's showed an hour early).
+# The offset is read off releases whose New York time never changes, and is New York's current one
+# when no such row is in the answer.
 NASDAQ_LAG = timedelta(days=1)
-NASDAQ_TZ = timezone(timedelta(hours=-4))
+NASDAQ_ANCHORS = {"Initial Jobless Claims": "08:30", "Continuing Jobless Claims": "08:30", "Nonfarm Payrolls": "08:30",
+                  "Unemployment Rate": "08:30", "Core CPI": "08:30", "Retail Sales": "08:30", "Housing Starts": "08:30",
+                  "ISM Manufacturing PMI": "10:00", "ISM Non-Manufacturing PMI": "10:00", "JOLTS Job Openings": "10:00",
+                  "CB Consumer Confidence": "10:00", "Michigan Consumer Sentiment": "10:00",
+                  "Crude Oil Inventories": "10:30", "Natural Gas Storage": "10:30", "Fed Interest Rate Decision": "14:00"}
 NY = ZoneInfo("America/New_York")
 # Nasdaq's per-date answers shift within minutes, so a fetch can drop or misdate a whole day (B-034):
 # rows seen for yesterday and today are kept and merged into later fetches, and an answer with no rows
@@ -43,6 +49,8 @@ NY = ZoneInfo("America/New_York")
 ECON_TTL_S = 6 * 3600
 ECON_RETRY_S = 10 * 60
 ECON_KEEP_DAYS = 7
+# Bumped when the way rows are dated changes, so rows kept under the old dating are dropped, not doubled.
+ECON_STORE_VERSION = 2
 TENORS = ["1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
 
 
@@ -147,31 +155,46 @@ class MacroProvider:
 
     # -- US economic releases ----------------------------------------------------------------
     @staticmethod
-    def nasdaq_slot(day: date, gmt: str | None) -> tuple[date, str | None]:
-        """(New York date, "HH:MM" Eastern) for a row of Nasdaq's calendar for `day`. Non-clock values
-        ("All Day", "Tentative") keep the day and the text as is."""
+    def nasdaq_offset(days: list[tuple[date, list[dict]]]) -> timedelta:
+        """The fixed UTC offset of the "gmt" clock in one fetch of Nasdaq's calendar: the most common one
+        the anchor releases (fixed New York times) give, else New York's offset now."""
+        votes: dict[timedelta, int] = {}
+        for d, rows in days:
+            for x in rows:
+                m = re.fullmatch(r"(\d{1,2}):(\d{2})", x["gmt"] or "")
+                et = NASDAQ_ANCHORS.get(x["eventName"])
+                if not (m and et):
+                    continue
+                h, mi = map(int, et.split(":"))
+                real = datetime(d.year, d.month, d.day, h, mi, tzinfo=NY)
+                off = timedelta(hours=int(m[1]) - h, minutes=int(m[2]) - mi) + real.utcoffset()
+                votes[off] = votes.get(off, 0) + 1
+        return max(votes, key=votes.get) if votes else datetime.now(NY).utcoffset()
+
+    @staticmethod
+    def nasdaq_slot(day: date, gmt: str | None, offset: timedelta) -> tuple[date, str | None]:
+        """(New York date, "HH:MM" Eastern) for a row of Nasdaq's calendar for `day`, its clock at
+        `offset`; New York's offset is the one on that date. Non-clock values ("All Day", "Tentative")
+        keep the day and the text as is."""
         m = re.fullmatch(r"(\d{1,2}):(\d{2})", gmt or "")
         if not m:
             return day, gmt
-        t = datetime(day.year, day.month, day.day, int(m[1]), int(m[2]), tzinfo=NASDAQ_TZ).astimezone(NY)
+        t = datetime(day.year, day.month, day.day, int(m[1]), int(m[2]), tzinfo=timezone(offset)).astimezone(NY)
         return t.date(), t.strftime("%H:%M")
 
     @staticmethod
     def _nasdaq_days(queries: list[date], per_day: list[list[dict]]) -> list[tuple[date, list[dict]]]:
-        """(release day, rows) for the answers to consecutive daily queries.
-        A query answers with the day before (the usual case) or its own day. Its own day when: the next
-        query repeats its rows; it's a Monday with releases (the day before is Sunday); or the query
-        before answered with its own day and this one doesn't repeat it (a query never skips a day)."""
+        """(release day, rows) for the answers to consecutive daily queries. A query answers with the
+        day before, unless the next query repeats its rows: then it answered with its own day and the
+        copy is skipped. Nothing else moves an answer, so a sparse day (Sunday's lone OPEC row on
+        Monday's query) can't shift the days after it."""
         sig = lambda rows: [(x["gmt"], x["eventName"]) for x in rows]  # noqa: E731  actuals fill in between fetches
-        out, own_prev = [], False
+        out = []
         for i, (q, rows) in enumerate(zip(queries, per_day)):
             if i and rows and sig(rows) == sig(per_day[i - 1]):
-                own_prev = False  # the copy of the previous answer, already placed
-                continue
-            repeated = i + 1 < len(per_day) and sig(rows) == sig(per_day[i + 1])
-            own = (bool(rows) and (repeated or q.weekday() == 0)) or (own_prev and bool(per_day[i - 1]))
+                continue  # the copy of the previous answer, already placed
+            own = bool(rows) and i + 1 < len(per_day) and sig(rows) == sig(per_day[i + 1])
             out.append((q if own else q - NASDAQ_LAG, rows))
-            own_prev = own
         return out
 
     def economic_events(self, days: int = 21) -> list[dict]:
@@ -199,11 +222,13 @@ class MacroProvider:
             with ThreadPoolExecutor(max_workers=7) as pool:
                 per_day = list(pool.map(day, queries))
             out = []
-            for d, rows in self._nasdaq_days(queries, per_day):
+            answers = self._nasdaq_days(queries, per_day)
+            offset = self.nasdaq_offset(answers)
+            for d, rows in answers:
                 if not today - timedelta(days=1) <= d <= today + timedelta(days=days):
                     continue
                 for x in rows:
-                    when, time_et = self.nasdaq_slot(d, x["gmt"])
+                    when, time_et = self.nasdaq_slot(d, x["gmt"], offset)
                     out.append({"date": when.isoformat(), "time_et": time_et, "event": x["eventName"],
                                 "actual": x["actual"], "consensus": x["consensus"], "previous": x["previous"]})
             fetched_today[0] = any(e["date"] == today.isoformat() for e in out)
@@ -232,8 +257,12 @@ class MacroProvider:
                 self._releases = {}
                 if self._releases_path and self._releases_path.exists():
                     try:
-                        self._releases = json.loads(self._releases_path.read_text())
-                    except (OSError, ValueError) as e:
+                        saved = json.loads(self._releases_path.read_text())
+                        if isinstance(saved, dict) and saved.get("version") == ECON_STORE_VERSION:
+                            self._releases = saved["rows"]
+                        else:
+                            log.info("econ_releases.json from an older dating of Nasdaq's rows: starting over")
+                    except (OSError, ValueError, KeyError) as e:
                         log.warning("econ_releases.json unreadable, starting over: %s", e)
             store = self._releases
             for e in rows:
@@ -249,7 +278,7 @@ class MacroProvider:
                 try:
                     self._releases_path.parent.mkdir(parents=True, exist_ok=True)
                     tmp = self._releases_path.with_suffix(".tmp")
-                    tmp.write_text(json.dumps(store))
+                    tmp.write_text(json.dumps({"version": ECON_STORE_VERSION, "rows": store}))
                     tmp.replace(self._releases_path)
                 except OSError as e:
                     log.warning("econ_releases.json not saved: %s", e)
