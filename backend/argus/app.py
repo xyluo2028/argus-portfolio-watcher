@@ -1264,7 +1264,7 @@ class Argus:
         quotes, _ = self.market.get_quotes([sym])
         status = market_status()
         built = earnings_mod.build(periods, yahoo, calendar, results, bars, today, quotes.get(sym), status["session"])
-        return {"symbol": sym, "as_of": today.isoformat(), **built}
+        return {"symbol": sym, "as_of": today.isoformat(), **built, "reports": built["reports"][:limit]}
 
     def earnings_overview(self, ref: str) -> dict:
         """Per holding: the last reported quarter (EPS/revenue vs estimate) and the next report date."""
