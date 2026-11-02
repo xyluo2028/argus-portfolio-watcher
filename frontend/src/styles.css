@@ -294,7 +294,7 @@ a.btn { text-decoration: none; display: inline-block; }
 /* live badge */
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.market-status { position: relative; }
+.market-status { position: relative; display: none; }  /* phones only; wide screens show .market-inline */
 .market-status summary { list-style: none; cursor: pointer; min-height: 32px; }
 .market-status summary::-webkit-details-marker { display: none; }
 .badge .dot, .badge strong { flex-shrink: 0; }
@@ -428,6 +428,8 @@ td.pick input, th.pick input { cursor: pointer; }
   .theme-label { display: none; }
   .menu-toggle { display: block; grid-column: 4; grid-row: 1; }
   .topbar > .spacer { display: none; }
+  .market-inline { display: none; }
+  .market-status { display: block; }
   .topbar > .badge, .market-status { grid-column: 1 / -1; grid-row: 2; }
   .market-status summary { min-height: 40px; width: 100%; }
   .market-detail { top: 100%; left: 0; right: auto; }

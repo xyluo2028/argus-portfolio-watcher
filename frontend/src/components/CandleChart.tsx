@@ -93,6 +93,7 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
   useEffect(() => {
     if (!el.current) return;
     const intraday = data.interval !== "1d";
+    const coarse = matchMedia("(pointer: coarse)").matches; // primary input is touch
     const chart = createChart(el.current, {
       autoSize: true,
       layout: {
@@ -106,9 +107,10 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
       rightPriceScale: { borderColor: css("--axis") },
       timeScale: { borderColor: css("--axis"), timeVisible: intraday, secondsVisible: false },
       crosshair: { horzLine: { labelBackgroundColor: css("--text-2") }, vertLine: { labelBackgroundColor: css("--text-2") } },
-      // A vertical swipe belongs to the page. Keep horizontal panning and pinch zoom in the chart.
-      handleScroll: { vertTouchDrag: false, horzTouchDrag: true, mouseWheel: false },
-      handleScale: { pinch: true, mouseWheel: false },
+      // On a touch screen a vertical swipe belongs to the page (horizontal panning and pinch zoom stay in
+      // the chart); with a mouse or trackpad the wheel still zooms and scrolls the chart.
+      handleScroll: { vertTouchDrag: false, horzTouchDrag: true, mouseWheel: !coarse },
+      handleScale: { pinch: true, mouseWheel: !coarse },
       trackingMode: { exitMode: TrackingModeExitMode.OnTouchEnd },
     });
     chartRef.current = chart;
