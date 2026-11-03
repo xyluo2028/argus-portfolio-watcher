@@ -42,6 +42,57 @@ def test_daily_history_is_cached(make_argus):
     assert 360 <= len(first) <= 367 and len(second) < len(first)
 
 
+def test_yahoo_history_drops_bars_without_a_close(monkeypatch):
+    # Yahoo served SPY's 2026-11-02 bar (the first session after DST ended) with Close NaN.
+    import pandas as pd
+
+    from argus.providers import yahoo
+
+    nan = float("nan")
+    idx = pd.DatetimeIndex(["2026-10-29", "2026-10-30", "2026-11-02"]).tz_localize("America/New_York")
+    df = pd.DataFrame({"Open": [768.79, 761.38, 759.45], "High": [770.76, 761.46, 763.85],
+                       "Low": [765.0, 754.0, 757.0], "Close": [769.36, 755.72, nan],
+                       "Volume": [40299600, nan, 50778592]}, index=idx)
+
+    class Ticker:
+        def __init__(self, sym):
+            pass
+
+        def history(self, **kw):
+            return df
+
+    monkeypatch.setattr(yahoo, "_yf", lambda: type("yf", (), {"Ticker": Ticker}))
+    bars = yahoo.YahooProvider().get_history("SPY", datetime(2026, 10, 28, tzinfo=UTC), None)
+    assert [b.c for b in bars] == [769.36, 755.72]
+    assert bars[1].v == 0.0
+
+
+def test_incomplete_bar_is_skipped_and_filled_once_the_close_arrives(make_argus, monkeypatch):
+    from argus.market_calendar import market_status
+    from argus.services import market
+
+    last_close = datetime.fromisoformat(market_status()["last_close"])
+    good = [Bar(last_close - timedelta(days=i), 1, 2, 0.5, 1.5, 100) for i in range(40, 0, -1)]
+    hist = FakeHistory(good + [Bar(last_close, 1.4, 1.6, 1.3, float("nan"), 100)])
+    a = make_argus(history=hist)
+
+    bars = a.market.get_history("AAA", "1mo")
+    assert bars and bars[-1].ts < last_close and all(b.c == 1.5 for b in bars)
+    a.market.get_history("AAA", "1mo")
+    assert hist.calls == 1  # the missing session isn't re-asked on every read
+
+    # A bad bar never replaces a stored good one; the good bars of the same batch still land.
+    a.market._store_bars("AAA", "1d", [Bar(good[-1].ts, 1, 2, 0.5, None, 1), Bar(good[-1].ts + timedelta(hours=1), 1, 2, 0.5, 1.7, 1)])
+    stored = {b.ts: b.c for b in a.market.get_history("AAA", "1mo")}
+    assert stored[good[-1].ts] == 1.5 and stored[good[-1].ts + timedelta(hours=1)] == 1.7
+
+    # Yahoo fills the close in later: the next attempt after the back-off stores it.
+    hist.bars = good + [Bar(last_close, 1.4, 1.6, 1.3, 1.55, 100)]
+    a.market._behind["AAA"] -= market.BEHIND_RETRY_S
+    bars = a.market.get_history("AAA", "1mo")
+    assert hist.calls == 2 and bars[-1].ts == last_close and bars[-1].c == 1.55
+
+
 def test_finnhub_quote_parsing_and_unknown_symbol():
     def handler(req: httpx.Request):
         sym = req.url.params["symbol"]

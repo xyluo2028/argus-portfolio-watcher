@@ -10,6 +10,7 @@ Freshness rules:
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -55,6 +56,10 @@ SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly differen
 FUNDAMENTALS_VERSION = 10 # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
+
+# A symbol whose bars stop short of the last session (Yahoo withheld the latest bar, e.g. a NaN
+# close) is re-asked at most this often, not on every read.
+BEHIND_RETRY_S = 15 * 60
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
@@ -132,6 +137,7 @@ class MarketService:
         self.directory = directory  # FinnhubProvider (symbol_directory) or None
         self.profile_provider = profile_provider  # YahooProvider (get_info) or None
         self.figi = figi  # OpenFigiProvider (ISIN/CUSIP -> ticker) or None
+        self._behind: dict[str, float] = {}  # symbol -> monotonic time bars last came back short of the last session
 
     # -- quotes ---------------------------------------------------------------
     def get_quotes(self, symbols: list[str], max_age_s: int | None = None) -> tuple[dict[str, Quote], dict[str, str]]:
@@ -304,7 +310,7 @@ class MarketService:
                 todo[sym] = start
             elif first > start + timedelta(days=5) and not (earliest and first <= earliest + timedelta(days=1)):
                 todo[sym] = start
-            elif last < last_session:
+            elif last < last_session and time.monotonic() - self._behind.get(sym, -BEHIND_RETRY_S) >= BEHIND_RETRY_S:
                 todo[sym] = last - timedelta(days=3)  # re-fetch a few bars to pick up late corrections
         if not todo:
             return
@@ -316,6 +322,10 @@ class MarketService:
                                                   todo.items())))
         for sym, bars in fetched.items():
             self._store_bars(sym, "1d", bars)
+            if not any(b.ts >= last_session and b.complete for b in bars):
+                self._behind[sym] = time.monotonic()
+            else:
+                self._behind.pop(sym, None)
             if bars and todo[sym] == start and bars[0].ts > start + timedelta(days=5):
                 with session_scope(self.engine) as s:
                     upsert(s, RefreshLog, key=f"bars-first:{sym}", at=bars[0].ts)
@@ -329,9 +339,11 @@ class MarketService:
             raise ArgusError("PROVIDER_ERROR", str(e), hint="Yahoo may be rate limiting; retry shortly.") from e
 
     def _store_bars(self, symbol: str, interval: str, bars: list[Bar]) -> None:
-        if not bars:
+        # An incomplete bar is skipped, never stored over a good one; the rest of the batch still lands.
+        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v)
+                for b in bars if b.complete]
+        if not rows:
             return
-        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v) for b in bars]
         with session_scope(self.engine) as s:
             for i in range(0, len(rows), 500):
                 stmt = insert(PriceBar).values(rows[i:i + 500])
