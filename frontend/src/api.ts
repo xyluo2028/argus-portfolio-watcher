@@ -230,6 +230,28 @@ const enc = encodeURIComponent;
 const send = <T>(method: string, path: string, body?: unknown) =>
   get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
 
+export type DcfMetricKey = "free_cash_flow" | "operating_cash_flow" | "net_income" | "revenue";
+export interface DcfMetric {
+  label: string; currency: string;
+  base: number | null; base_end: string | null; base_basis: string | null;
+  annual: { period_end: string; value: number }[];
+  growth: { hist_3y: number | null; hist_5y: number | null; analyst: number | null; analyst_basis: string | null };
+  multiple: { current: number | null; median_5y: number | null; p25_5y: number | null; p75_5y: number | null; points: number;
+              history: { date: string; v: number }[] };
+}
+/** Saved calculator inputs; percentages are in percent (10 = 10%). */
+export interface DcfInputs {
+  metric: DcfMetricKey; base: number; years: number; growth: number; decay: number; multiple: number;
+  target_return: number; dps: number; dividend_growth: number; share_change: number;
+}
+export interface DcfSaved { inputs: DcfInputs; updated_at: string }
+export interface DcfData {
+  symbol: string; company: string | null; price: number | null; market_cap: number | null; shares: number | null;
+  dps: number; dividend_growth_5y: number | null; share_change: number | null; share_change_years: number | null;
+  analyst_target: number | null; analyst_count: number | null;
+  metrics: Record<DcfMetricKey, DcfMetric>; saved: DcfSaved | null;
+}
+
 export interface PortfolioDeletion {
   portfolio: PortfolioRef; dry_run: boolean; backup?: string;
   counts: { transactions: number; open_positions: number; targets: number; nav_days: number };
@@ -505,6 +527,10 @@ export const api = {
   research: (symbol: string) => get<Research>(`/api/research/${enc(symbol)}`),
   returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  valuation: (symbol: string) => get<DcfData>(`/api/valuation/${enc(symbol)}`),
+  valuationModels: () => get<{ symbol: string; metric: DcfMetricKey; updated_at: string }[]>("/api/valuation"),
+  saveValuation: (symbol: string, inputs: DcfInputs | null) =>
+    send<{ saved: DcfSaved | null }>("PUT", `/api/valuation/${enc(symbol)}`, { inputs }),
   peerList: (symbol: string) => get<{ symbol: string; peers: string[]; custom: boolean }>(`/api/peers/${enc(symbol)}?metrics=false`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),

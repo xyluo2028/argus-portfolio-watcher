@@ -13,6 +13,7 @@ const Screener = lazy(() => import("./pages/Screener").then((m) => ({ default: m
 const Markets = lazy(() => import("./pages/Markets").then((m) => ({ default: m.Markets })));
 const Analysis = lazy(() => import("./pages/Analysis").then((m) => ({ default: m.Analysis })));
 const Compare = lazy(() => import("./pages/Compare").then((m) => ({ default: m.Compare })));
+const Dcf = lazy(() => import("./pages/Dcf").then((m) => ({ default: m.Dcf })));
 const Data = lazy(() => import("./pages/Data").then((m) => ({ default: m.Data })));
 const Ticker = lazy(() => import("./pages/Ticker").then((m) => ({ default: m.Ticker })));
 const Transactions = lazy(() => import("./pages/Transactions").then((m) => ({ default: m.Transactions })));
@@ -126,6 +127,7 @@ function Main() {
           <NavLink to="/markets">Markets</NavLink>
           <NavLink to="/screener">Screener</NavLink>
           <NavLink to="/compare">Compare</NavLink>
+          <NavLink to="/dcf">DCF</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
           <NavLink to="/data">Data</NavLink>
         </nav>
@@ -161,6 +163,8 @@ function Main() {
               <Route path="/watchlist" element={<Watchlist live={live} />} />
               <Route path="/transactions" element={<Transactions portfolio={current} />} />
               <Route path="/compare" element={<Compare portfolio={current} />} />
+              <Route path="/dcf" element={<Dcf />} />
+              <Route path="/dcf/:symbol" element={<Dcf />} />
               <Route path="/analysis" element={<Analysis portfolio={current} />} />
               <Route path="/markets" element={<Markets />} />
               <Route path="/screener" element={<Screener />} />

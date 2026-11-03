@@ -169,7 +169,10 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
 
   return (
     <div className="stack">
-      <div className="row small"><Link to="/" className="muted">← Dashboard</Link></div>
+      <div className="row small" style={{ justifyContent: "space-between" }}>
+        <Link to="/" className="muted">← Dashboard</Link>
+        <Link to={`/dcf/${encodeURIComponent(symbol)}`}>DCF calculator →</Link>
+      </div>
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end" }}>
           <div>

@@ -21,7 +21,7 @@ from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between, trade_session
-from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
+from argus.models import (AuditLog, CompanyProfile, ValuationModel, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
                           Target)
 from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
@@ -34,6 +34,7 @@ from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
 from argus.services import screener as screener_mod
 from argus.services import risk as risk_mod
+from argus.services import valuation as valuation_mod
 from argus.providers.french import FrenchFactors
 from argus.providers.macro import MacroProvider
 from argus.services import market_context as context_mod
@@ -130,6 +131,7 @@ class Argus:
         self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)
         self._jobs_lock = threading.Lock()
         self._research: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, bundle)
+        self._valuation: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, DCF inputs)
         self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
 
     def run_background(self, name: str, fn: Callable[[], object]) -> bool:
@@ -1452,6 +1454,82 @@ class Argus:
             # Inputs missing for a reason that may pass (a rate limit, a provider hiccup): cached only briefly.
             "partial": not fund and (not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
         }
+
+    # -- DCF calculator ----------------------------------------------------------
+    def valuation(self, symbol: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """What the DCF calculator fills its inputs from (services/valuation.py), today's price, and the
+        model you saved for the symbol, if any. The company data is cached for an hour."""
+        sym = normalize_symbol(symbol)
+        q = (live_quotes or {}).get(sym) or self.market.get_quotes([sym])[0].get(sym)
+        price = q.price if q else None
+        hit = self._valuation.get(sym)
+        if hit and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+            data = hit[1]
+        else:
+            data = self._build_valuation(sym)
+            self._valuation[sym] = (time.monotonic(), data)
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, sym)
+            saved = {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()} if row else None
+        if price and data["market_cap"] and data["price"]:  # the cap moves with the live price
+            data = data | {"market_cap": data["market_cap"] * price / data["price"]}
+        return data | {"price": price or data["price"], "saved": saved}
+
+    def _build_valuation(self, sym: str) -> dict:
+        yahoo, fh = self.market.profile_provider, self.market.directory
+        metrics = self.symbol_fundamentals([sym], wait=True)["metrics"].get(sym, {})
+        q = self.market.get_quotes([sym])[0].get(sym)
+        jobs = {
+            "quarterly": lambda: self.market.get_financials(sym, "quarterly", 48),
+            "annual": lambda: self.market.get_financials(sym, "annual", 11),
+            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
+            "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
+            "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
+        }
+        def run(item):
+            name, fn = item
+            try:
+                return name, fn() if fn else None, None
+            except Exception as e:  # noqa: BLE001 - only the filings are required
+                return name, None, e
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
+            got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        if got["annual"][0] is None and got["quarterly"][0] is None:
+            err = got["annual"][1] or got["quarterly"][1]
+            if isinstance(err, ArgusError) and err.code == "NOT_CONFIGURED":
+                raise err
+            raise ArgusError("NOT_FOUND", f"No reported financials for {sym}, so there is nothing to project.",
+                             hint="The DCF calculator needs SEC filings; ETFs and funds have none.")
+        return valuation_mod.build(sym, q.price if q else None, metrics, got["quarterly"][0] or {}, got["annual"][0] or {},
+                                   got["series"][0] or {}, got["analyst"][0] or {}, got["statements"][0] or {},
+                                   got["info"][0] or {}, datetime.now(NY).date())
+
+    def save_valuation(self, symbol: str, inputs: dict | None, actor: str = "cli") -> dict | None:
+        """Save your DCF inputs for a symbol, or forget them (None)."""
+        sym = normalize_symbol(symbol)
+        clean = valuation_mod.clean_inputs(inputs) if inputs is not None else None
+        with session_scope(self.engine) as s:
+            before = s.get(ValuationModel, sym)
+            before_inputs = dict(before.inputs) if before else None
+            if clean is None:
+                if before is not None:
+                    s.delete(before)
+            else:
+                s.merge(ValuationModel(symbol=sym, inputs=clean, updated_at=datetime.now(UTC)))
+            s.add(AuditLog(actor=actor, action="save_valuation" if clean else "delete_valuation", entity="valuation",
+                           entity_id=sym, before=before_inputs, after=clean))
+        if clean is None:
+            return None
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, sym)
+            return {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()}
+
+    def valuation_models(self) -> list[dict]:
+        """Your saved DCF models, most recently saved first."""
+        with session_scope(self.engine) as s:
+            rows = s.scalars(select(ValuationModel).order_by(ValuationModel.updated_at.desc())).all()
+            return [{"symbol": r.symbol, "metric": r.inputs.get("metric"), "updated_at": r.updated_at.isoformat()} for r in rows]
 
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
 
