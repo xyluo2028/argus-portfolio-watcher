@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-02T02:46:14.401597+00:00",
+ "created_at": "2026-11-03T02:40:04.421916+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1245,6 +1245,22 @@
     "external_id": "r009-macro-ief-buy",
     "deleted": false,
     "created_at": "2026-10-30T02:18:58.219255+00:00"
+   },
+   {
+    "id": 48,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "KRYS",
+    "qty": 7.0,
+    "price": 295.0,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-03T02:18:03.411980+00:00",
+    "note": "r011 add after Q3 beat: Vyjuvek +30% y/y, op margin 56%, $400M buyback; stock -11%",
+    "source": "cli",
+    "external_id": "r011-growth-krys-add",
+    "deleted": false,
+    "created_at": "2026-11-03T02:18:03.733992+00:00"
    }
   ],
   "target": [
@@ -1585,7 +1601,16 @@
     "created_at": "2026-10-27T02:19:44.775758+00:00"
    }
   ],
-  "alert_event": [],
+  "alert_event": [
+   {
+    "id": 1,
+    "alert_id": 4,
+    "session_date": "2026-11-02",
+    "ts": "2026-11-03T02:12:32.817594+00:00",
+    "value": -4.048064085447267,
+    "message": "XOM: -4.05% on the day"
+   }
+  ],
   "note": [
    {
     "id": 1,
@@ -2011,10 +2036,10 @@
     "kind": "note",
     "text": "loop-income r003: yield 5.90% vs 10Y 5.13% (spread ~0.8 pp, thin). Payout 236% of GAAP EPS is not meaningful for a REIT; need AFFO. Hold at 4% target; revisit after Q3 report 11-02.",
     "review_on": "2026-11-03",
-    "archived": false,
+    "archived": true,
     "created_by": "cli",
     "created_at": "2026-10-22T02:17:51.021412+00:00",
-    "updated_at": "2026-10-22T02:17:51.021417+00:00"
+    "updated_at": "2026-11-03T02:18:42.481150+00:00"
    },
    {
     "id": 40,
@@ -2246,6 +2271,61 @@
     "created_by": "cli",
     "created_at": "2026-11-02T02:21:52.532762+00:00",
     "updated_at": "2026-11-02T02:21:52.532772+00:00"
+   },
+   {
+    "id": 61,
+    "symbol": "KRYS",
+    "kind": "thesis",
+    "text": "[loop-growth] r011 Q3-26 (reported 11-02 bmo; SEC 10-Q already in Argus): revenue 127.3M, +30.2% y/y vs 97.8M (Q2 +24.1%: accelerating), +6.8% q/q; operating margin 55.9% vs 42.3% a year ago; EPS 2.05 vs 1.81 Finnhub / 1.92 Yahoo consensus; revenue 127.3M vs 128.6M est (small miss). $400M buyback (~4.6% of 8.76B mcap), FY opex guide trimmed (headlines). Stock -10.95% to 295.90 vs XBI -2.5%; no reason in Argus beyond the revenue miss. Thesis (note 30) strengthened, not broken. Added 7 sh @ 295.00 (post-market): 40 sh @ 321.69, cost 12,867.55 = 12.9% of capital (cap 15%, no more adds). Valuation from SEC by hand (fundamentals/research down this round): TTM EPS 7.37 -> P/E 40, TTM revenue 470M -> P/S 18.6. Exit if quarterly growth < 15% y/y, op margin < 40%, or a pipeline failure.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-03T02:18:10.361981+00:00",
+    "updated_at": "2026-11-03T02:18:10.361990+00:00"
+   },
+   {
+    "id": 62,
+    "symbol": "XLE",
+    "kind": "note",
+    "text": "loop-macro r011 (11-02 21:15 ET): no trade. Mon: WTI 104.12->96.46 (-7.4%), XLE -3.96%, DBC -3.42%; ISM mfg 55.5 vs 54.5, prices 75.2 vs 77.2; GDPNow 3.7%. Growth up / oil-inflation impulse fading; breadth broadening (317/183, RSP-SPY 1M +7.2pp) while XLK -12.8% 1M. Plan after NFP 11-06: if WTI stays <98 and ISM services prices ease, SELL 30 XLE (10%->8%) and BUY ~$2,000 RSP (sim 11-02: net cash +17.50, XLE 8.05%, RSP 2.03%). Not trading now: risk/correlation/performance tools down (history NaN bar) and NFP Friday.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-03T02:18:12.761450+00:00",
+    "updated_at": "2026-11-03T02:18:12.761458+00:00"
+   },
+   {
+    "id": 63,
+    "symbol": "GLD",
+    "kind": "note",
+    "text": "loop-macro r011 (11-02): note 56 trigger not testable tonight (no price history, so no 20d corr). GLD +1.65% on 11-02 while SPY -0.48%: opposite sign, ~2% above 52w low per brief. Keep 12 sh; re-test after NFP.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-03T02:18:14.178175+00:00",
+    "updated_at": "2026-11-03T02:18:14.178184+00:00"
+   },
+   {
+    "id": 64,
+    "symbol": "O",
+    "kind": "note",
+    "text": "loop-income r011: Q3 reported 11-02 amc. Revenue 1.62B vs 1.55B est (+4.6%); Finnhub 'EPS 1.12 vs 0.43' compares an AFFO-type figure to a GAAP estimate, so ignore the +162% 'beat'. Monthly dividend unchanged at 0.272 (yield 5.67% vs 10Y 4.89%, spread ~0.8 pp). Hold at 4% target; recheck AFFO guide and SEC 10-Q when filed.",
+    "review_on": "2026-11-17",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-03T02:18:41.080467+00:00",
+    "updated_at": "2026-11-03T02:18:41.080474+00:00"
+   },
+   {
+    "id": 65,
+    "symbol": "XOM",
+    "kind": "note",
+    "text": "loop-income r011: -4.05% on 11-02 (WTI ~96 from ~102 on Iran-deal hopes); day-loss alert #4 fired. Q3 beat (4.23 vs 4.12) and dividend raised 3.9% to 1.07 (ex 11-16) per news. Weight 3.88% vs 4% target, inside band: no trade. Revisit if WTI < 85 or weight < 3%.",
+    "review_on": "2026-11-16",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-03T02:18:42.162533+00:00",
+    "updated_at": "2026-11-03T02:18:42.162539+00:00"
    }
   ],
   "peer_list": [],
@@ -5183,6 +5263,159 @@
      "created_by": "cli",
      "created_at": "2026-11-02T02:21:52.532762+00:00",
      "updated_at": "2026-11-02T02:21:52.532772+00:00"
+    }
+   },
+   {
+    "id": 146,
+    "ts": "2026-11-03T02:18:03.736309+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "48",
+    "before": null,
+    "after": {
+     "id": 48,
+     "type": "BUY",
+     "symbol": "KRYS",
+     "qty": 7.0,
+     "price": 295.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-03T02:18:03.411980+00:00",
+     "note": "r011 add after Q3 beat: Vyjuvek +30% y/y, op margin 56%, $400M buyback; stock -11%",
+     "source": "cli",
+     "external_id": "r011-growth-krys-add",
+     "deleted": false
+    }
+   },
+   {
+    "id": 147,
+    "ts": "2026-11-03T02:18:10.363612+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "61",
+    "before": null,
+    "after": {
+     "id": 61,
+     "symbol": "KRYS",
+     "kind": "thesis",
+     "text": "[loop-growth] r011 Q3-26 (reported 11-02 bmo; SEC 10-Q already in Argus): revenue 127.3M, +30.2% y/y vs 97.8M (Q2 +24.1%: accelerating), +6.8% q/q; operating margin 55.9% vs 42.3% a year ago; EPS 2.05 vs 1.81 Finnhub / 1.92 Yahoo consensus; revenue 127.3M vs 128.6M est (small miss). $400M buyback (~4.6% of 8.76B mcap), FY opex guide trimmed (headlines). Stock -10.95% to 295.90 vs XBI -2.5%; no reason in Argus beyond the revenue miss. Thesis (note 30) strengthened, not broken. Added 7 sh @ 295.00 (post-market): 40 sh @ 321.69, cost 12,867.55 = 12.9% of capital (cap 15%, no more adds). Valuation from SEC by hand (fundamentals/research down this round): TTM EPS 7.37 -> P/E 40, TTM revenue 470M -> P/S 18.6. Exit if quarterly growth < 15% y/y, op margin < 40%, or a pipeline failure.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-03T02:18:10.361981+00:00",
+     "updated_at": "2026-11-03T02:18:10.361990+00:00"
+    }
+   },
+   {
+    "id": 148,
+    "ts": "2026-11-03T02:18:12.762941+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "62",
+    "before": null,
+    "after": {
+     "id": 62,
+     "symbol": "XLE",
+     "kind": "note",
+     "text": "loop-macro r011 (11-02 21:15 ET): no trade. Mon: WTI 104.12->96.46 (-7.4%), XLE -3.96%, DBC -3.42%; ISM mfg 55.5 vs 54.5, prices 75.2 vs 77.2; GDPNow 3.7%. Growth up / oil-inflation impulse fading; breadth broadening (317/183, RSP-SPY 1M +7.2pp) while XLK -12.8% 1M. Plan after NFP 11-06: if WTI stays <98 and ISM services prices ease, SELL 30 XLE (10%->8%) and BUY ~$2,000 RSP (sim 11-02: net cash +17.50, XLE 8.05%, RSP 2.03%). Not trading now: risk/correlation/performance tools down (history NaN bar) and NFP Friday.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-03T02:18:12.761450+00:00",
+     "updated_at": "2026-11-03T02:18:12.761458+00:00"
+    }
+   },
+   {
+    "id": 149,
+    "ts": "2026-11-03T02:18:14.179616+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "63",
+    "before": null,
+    "after": {
+     "id": 63,
+     "symbol": "GLD",
+     "kind": "note",
+     "text": "loop-macro r011 (11-02): note 56 trigger not testable tonight (no price history, so no 20d corr). GLD +1.65% on 11-02 while SPY -0.48%: opposite sign, ~2% above 52w low per brief. Keep 12 sh; re-test after NFP.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-03T02:18:14.178175+00:00",
+     "updated_at": "2026-11-03T02:18:14.178184+00:00"
+    }
+   },
+   {
+    "id": 150,
+    "ts": "2026-11-03T02:18:41.081993+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "64",
+    "before": null,
+    "after": {
+     "id": 64,
+     "symbol": "O",
+     "kind": "note",
+     "text": "loop-income r011: Q3 reported 11-02 amc. Revenue 1.62B vs 1.55B est (+4.6%); Finnhub 'EPS 1.12 vs 0.43' compares an AFFO-type figure to a GAAP estimate, so ignore the +162% 'beat'. Monthly dividend unchanged at 0.272 (yield 5.67% vs 10Y 4.89%, spread ~0.8 pp). Hold at 4% target; recheck AFFO guide and SEC 10-Q when filed.",
+     "review_on": "2026-11-17",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-03T02:18:41.080467+00:00",
+     "updated_at": "2026-11-03T02:18:41.080474+00:00"
+    }
+   },
+   {
+    "id": 151,
+    "ts": "2026-11-03T02:18:42.163788+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "65",
+    "before": null,
+    "after": {
+     "id": 65,
+     "symbol": "XOM",
+     "kind": "note",
+     "text": "loop-income r011: -4.05% on 11-02 (WTI ~96 from ~102 on Iran-deal hopes); day-loss alert #4 fired. Q3 beat (4.23 vs 4.12) and dividend raised 3.9% to 1.07 (ex 11-16) per news. Weight 3.88% vs 4% target, inside band: no trade. Revisit if WTI < 85 or weight < 3%.",
+     "review_on": "2026-11-16",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-03T02:18:42.162533+00:00",
+     "updated_at": "2026-11-03T02:18:42.162539+00:00"
+    }
+   },
+   {
+    "id": 152,
+    "ts": "2026-11-03T02:18:42.482535+00:00",
+    "actor": "ui",
+    "action": "update",
+    "entity": "note",
+    "entity_id": "39",
+    "before": {
+     "id": 39,
+     "symbol": "O",
+     "kind": "note",
+     "text": "loop-income r003: yield 5.90% vs 10Y 5.13% (spread ~0.8 pp, thin). Payout 236% of GAAP EPS is not meaningful for a REIT; need AFFO. Hold at 4% target; revisit after Q3 report 11-02.",
+     "review_on": "2026-11-03",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-10-22T02:17:51.021412+00:00",
+     "updated_at": "2026-10-22T02:17:51.021417+00:00"
+    },
+    "after": {
+     "id": 39,
+     "symbol": "O",
+     "kind": "note",
+     "text": "loop-income r003: yield 5.90% vs 10Y 5.13% (spread ~0.8 pp, thin). Payout 236% of GAAP EPS is not meaningful for a REIT; need AFFO. Hold at 4% target; revisit after Q3 report 11-02.",
+     "review_on": "2026-11-03",
+     "archived": true,
+     "created_by": "cli",
+     "created_at": "2026-10-22T02:17:51.021412+00:00",
+     "updated_at": "2026-11-03T02:18:42.481150+00:00"
     }
    }
   ]
