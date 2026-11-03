@@ -82,6 +82,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [historyErr, setHistoryErr] = useState<ApiError | null>(null);
   const [fund, setFund] = useState<Fundamentals | null>(null);
+  const [fundErr, setFundErr] = useState<ApiError | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
   const [polled, setPolled] = useState<Quote | null>(null);
 
@@ -102,7 +103,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
 
   useEffect(() => {
     setFund(null);
-    api.fundamentals(symbol).then(setFund, () => setFund(null));
+    setFundErr(null);
+    api.fundamentals(symbol).then(setFund, (e: ApiError) => setFundErr(e));
   }, [symbol]);
   useEffect(loadPosition, [loadPosition]);
 
@@ -250,7 +252,9 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               );
             })}
           </div>
-        ) : <p className="muted">Loading…</p>}
+        ) : fundErr ? <div className="error">{fundErr.message}{fundErr.hint ? ` ${fundErr.hint}` : ""}</div>
+          : <p className="muted">Loading…</p>}
+        {fund?.errors?.price_history && <p className="muted small">{fund.errors.price_history}</p>}
         {fund?.sec?.stale && fund.sec.latest_period && Object.values(fund.sources).includes("sec") &&
           <SecStale latest={fund.sec.latest_period} days={fund.sec.latest_period_age_days} />}
       </section>

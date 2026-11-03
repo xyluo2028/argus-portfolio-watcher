@@ -120,6 +120,8 @@ export interface Fundamentals {
   sources: Record<string, string>;
   /** Coverage of the SEC-based figures; null when SEC has nothing for the symbol. */
   sec?: SecCoverage | null;
+  /** Parts that failed while the rest still loaded, e.g. price_history (returns, CAGR left null). */
+  errors?: Record<string, string>;
 }
 
 /** How current SEC's XBRL data is: `stale` once its latest period is older than a newer report should be. */
@@ -214,7 +216,10 @@ async function get<T>(path: string, init?: RequestInit): Promise<T> {
   if (r.status === 401 && !path.startsWith("/api/auth/")) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!r.ok) {
     const e = body?.error ?? {};
-    throw new ApiError(e.code ?? `HTTP_${r.status}`, e.message ?? r.statusText, e.hint);
+    // A crash outside Argus's own errors has no JSON body: say so in words, not "Internal Server Error".
+    throw new ApiError(e.code ?? `HTTP_${r.status}`, e.message ?? (r.status >= 500
+      ? `Argus hit an unexpected error loading this (HTTP ${r.status}).` : `Request failed (HTTP ${r.status}).`),
+      e.hint ?? (r.status >= 500 ? "Try again in a moment; details are in the server log." : undefined));
   }
   return body as T;
 }

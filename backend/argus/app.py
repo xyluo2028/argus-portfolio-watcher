@@ -735,6 +735,23 @@ class Argus:
         return out
 
     @staticmethod
+    def _history_part(what: str, fn, default):
+        """Run a call that only feeds figures derived from price history (returns, CAGR, earnings
+        reactions). If the history download or write fails (a provider outage, a bad bar), return
+        `default` and a short reason, so the rest of the response still stands."""
+        try:
+            return fn(), None
+        except Exception as e:  # noqa: BLE001 - only history-derived calls come through here
+            if isinstance(e, ArgusError):
+                msg = "not configured" if e.code == "NOT_CONFIGURED" else e.message
+            else:
+                msg = f"{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+            log.warning("%s: %s", what, msg)
+            return default, f"Price history unavailable ({msg[:200]}); returns and other history figures are left empty."
+
+    PRICE_STATS = (*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct")
+
+    @staticmethod
     def _derived(m: dict) -> dict:
         """Figures computed from other metrics, so every page shows the same value. FCF margin is
         stored with its source (market.with_fcf_margin: never one source's FCF over another's revenue)."""
@@ -744,7 +761,7 @@ class Argus:
         """One symbol's fundamentals with the same computed figures the portfolio views add (momentum
         returns, 3Y/5Y price CAGR, FCF margin, P/E from the current price)."""
         sym = normalize_symbol(symbol)
-        computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct"}
+        computed = set(self.PRICE_STATS)
         stored = [f for f in fields if f not in computed] if fields else None
         try:
             self.market.get_quotes([sym])  # P/E is the current price ÷ EPS (market.with_pe)
@@ -753,17 +770,15 @@ class Argus:
         out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
         if fields and not stored:
             out["metrics"] = {}
-        try:
-            stats = self.price_stats([sym]).get(sym, {})
-        except ArgusError as e:
-            log.warning("price stats %s: %s", sym, e.message)
-            stats = {}
+        stats, err = self._history_part(f"price stats {sym}", lambda: self.price_stats([sym]).get(sym, {}),
+                                        dict.fromkeys(self.PRICE_STATS))
         full = self.market.cached_fundamentals([sym]).get(sym, {}).get("metrics", {}) or out["metrics"]
         extra = stats | self._derived(full)
         if fields:
             extra = {k: v for k, v in extra.items() if k in fields}
         sources = out.get("sources", {}) | {k: "argus" for k in extra if k in MOMENTUM_RANGES}
-        return out | {"metrics": out["metrics"] | extra, "sources": sources}
+        return out | {"metrics": out["metrics"] | extra, "sources": sources,
+                      "errors": {"price_history": err} if err else {}}
 
     def symbol_fundamentals(self, syms: list[str], wait: bool = False) -> dict:
         """Cached fundamentals for many symbols in one call, plus price stats and derived figures. Missing or stale
@@ -783,16 +798,13 @@ class Argus:
             if todo:
                 self._fund_attempted |= {s: now for s in todo}
                 self.run_background("fundamentals", lambda: self.market.refresh_fundamentals(todo))
-        try:
-            stats = self.price_stats(syms)
-        except ArgusError as e:  # history provider down: the rest still stands
-            log.warning("price stats: %s", e.message)
-            stats = {}
+        stats, err = self._history_part("price stats", lambda: self.price_stats(syms), {})  # absent = null
         metrics = {s: dict(c["metrics"]) | self._derived(c["metrics"]) for s, c in cached.items()}
         for s, v in stats.items():
             metrics.setdefault(s, {}).update(v)
         return {"symbols": syms, "pending": todo, "metrics": metrics,
-                "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()}}
+                "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()},
+                "errors": {"price_history": err} if err else {}}
 
     def held_positions(self) -> dict[str, tuple[float, float]]:
         """symbol -> (total shares, weighted average cost) across all portfolios."""
@@ -1107,12 +1119,13 @@ class Argus:
         calendar = self.events.between([sym], date(2000, 1, 1), today + timedelta(days=120), ["earnings"])
         results = self.events.results_history(sym)
         start = (date.fromisoformat(min(periods)) if periods else today) - timedelta(days=10)
-        bars = {b.ts.astimezone(NY).date(): (b.o, b.c) for b in self.market.get_history(sym, "5y")
-                if b.ts.astimezone(NY).date() >= start}
+        history, err = self._history_part(f"earnings reactions {sym}", lambda: self.market.get_history(sym, "5y"), [])
+        bars = {b.ts.astimezone(NY).date(): (b.o, b.c) for b in history if b.ts.astimezone(NY).date() >= start}
         quotes, _ = self.market.get_quotes([sym])
         status = market_status()
         built = earnings_mod.build(periods, yahoo, calendar, results, bars, today, quotes.get(sym), status["session"])
-        return {"symbol": sym, "as_of": today.isoformat(), **built, "reports": built["reports"][:limit]}
+        return {"symbol": sym, "as_of": today.isoformat(), **built, "reports": built["reports"][:limit],
+                "errors": {"price_history": err} if err else {}}
 
     def earnings_overview(self, ref: str) -> dict:
         """Per holding: the last reported quarter (EPS/revenue vs estimate) and the next report date."""
@@ -1270,14 +1283,14 @@ class Argus:
             if fetched[1] or not fetched[0]:  # a provider failed: what it supplies may be missing
                 got["fundamentals"] = (None, "; ".join(f"{k}: {v}" for k, v in fetched[1].items()) or "no data")
         errors = {k: e for k, (_, e) in got.items() if e}
+        stats, err = self._history_part(f"price stats {sym}", lambda: self.price_stats([sym]).get(sym, {}), {})
+        if err:
+            errors["price_history"] = err
         info = got["info"][0] or {}
         fund = info.get("quoteType") in ("ETF", "MUTUALFUND")
         m = cached["metrics"] if cached else {}
         have_fundamentals = bool(m)
-        try:
-            m = m | self.price_stats([sym]).get(sym, {})
-        except ArgusError:
-            pass
+        m = m | stats
 
         analyst = got["analyst"][0] or {}
         trend = analyst.get("recommendations") or []
@@ -1319,7 +1332,8 @@ class Argus:
             "growth": None if fund else research_mod.growth_profile(got["quarterly"][0] or [], got["annual"][0] or [], m, analyst),
             "errors": errors,
             # Inputs missing for a reason that may pass (a rate limit, a provider hiccup): cached only briefly.
-            "partial": not fund and (not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
+            "partial": _transient(errors.get("price_history")) or not fund and (
+                not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
         }
 
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
