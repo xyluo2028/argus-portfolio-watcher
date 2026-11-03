@@ -165,18 +165,21 @@ export function HoldingsTabs({ source, rows: allRows, first, views = [] }: {
     setFilter(f);
     try { localStorage.setItem(filterKey, JSON.stringify(f)); } catch { /* ignore */ }
   };
+  const hasBoth = allRows.some(isFund) && allRows.some((r) => !isFund(r));
+  // Stocks/ETFs only applies where both are held: in an all-ETF portfolio a remembered "Stocks"
+  // would hide everything, with no switch shown to undo it. The choice stays saved for the others.
+  const kind: Kind = hasBoth ? filter.kind : "all";
   const sectors = useMemo(() => {
     const n = new Map<string, number>();
-    for (const r of allRows) if (r.sector && ofKind(r, filter.kind)) n.set(r.sector, (n.get(r.sector) ?? 0) + 1);
+    for (const r of allRows) if (r.sector && ofKind(r, kind)) n.set(r.sector, (n.get(r.sector) ?? 0) + 1);
     return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [allRows, filter.kind]);
+  }, [allRows, kind]);
   const hasSectors = allRows.some((r) => r.sector);
-  const hasBoth = allRows.some(isFund) && allRows.some((r) => !isFund(r));
   // A remembered sector that's no longer held (or outside the chosen kind) counts as "all".
   const sector = sectors.some(([k]) => k === filter.sector) ? filter.sector : "";
-  const kindCount = allRows.filter((r) => ofKind(r, filter.kind)).length;
-  const rows = useMemo(() => allRows.filter((r) => ofKind(r, filter.kind) && (!sector || r.sector === sector)),
-                       [allRows, filter.kind, sector]);
+  const kindCount = allRows.filter((r) => ofKind(r, kind)).length;
+  const rows = useMemo(() => allRows.filter((r) => ofKind(r, kind) && (!sector || r.sector === sector)),
+                       [allRows, kind, sector]);
   const filtered = rows.length !== allRows.length;
   const totalValue = allRows.reduce((s, r) => s + (r.market_value ?? 0), 0);
   const shownValue = rows.reduce((s, r) => s + (r.market_value ?? 0), 0);
