@@ -382,3 +382,38 @@ def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch):
     a.portfolios.add_transactions("inc", [TxnInput("DIVIDEND", "PG", at(2026, 10, 24), amount=33.76)])
     tot = a.portfolio("inc")["totals"]
     assert tot["dividends_accrued"] == 0 and tot["dividends"] == pytest.approx(33.76)
+
+
+def test_passed_estimated_ex_date_counts_before_the_history_shows_it(make_argus):
+    """B-129: a monthly fund went ex days ago (the quote's previous close already dropped by the
+    dividend) but the dividend history still ends a month back: count the estimate as income."""
+    from datetime import date
+
+    from argus.market_calendar import NY, session_on_or_after
+    from argus.services.dividends import add_months
+    from tests.conftest import FakeQuotes
+
+    today = datetime.now(NY).date()
+    last = add_months(today - timedelta(days=5), -1)
+    hist = [(add_months(last, -k).isoformat(), 0.22) for k in range(6)]
+    est = session_on_or_after(add_months(last, 1))
+
+    class Divs:
+        rows = hist
+
+        def get_dividends(self, symbol):
+            return self.rows if symbol == "BND" else []
+
+        def get_info(self, symbol):
+            return {}
+
+    a = make_argus([FakeQuotes("fake", {"BND": (71.3, 71.52)})])
+    a.market.profile_provider = Divs()
+    a.portfolios.create_portfolio("inc")
+    a.portfolios.add_transactions("inc", [TxnInput("BUY", "BND", at(*add_months(last, -2).timetuple()[:3]), 100, 72)])
+    tot = a.portfolio("inc")["totals"]
+    assert tot["dividends_accrued"] == pytest.approx(3 * 22.0)  # two months of history + the estimate
+    received = [x for h in a.dividends("inc")["holdings"] for x in h["events"] if x["ex_date"] == est.isoformat()]
+    if est.year == today.year:  # the Dividends page counts this calendar year's
+        assert len(received) == 1 and received[0]["estimated"] and received[0]["amount"] == pytest.approx(22.0)
+    assert date.fromisoformat(a.dividends("inc")["holdings"][0]["next_ex_date_est"]) > today
