@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from argus.api.server import create_app
 from argus.live import LiveHub
+from argus.providers.base import ProviderError
+from argus.services.portfolio import TxnInput
 from tests.conftest import FakeQuotes
 
 
@@ -126,3 +128,46 @@ def test_import_investing_upload(make_argus):
         assert again["skipped_existing"] == 5
         bad = c.post("/api/import/investing", json=body | {"opening_through": "Jan 2"})
         assert bad.status_code == 400
+
+
+class _BrokenHistory:
+    name = "broken"
+
+    def __init__(self, error: Exception):
+        self.error = error
+
+    def get_history(self, symbol, start, end, interval):
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [ProviderError("yahoo: 429"), RuntimeError("NOT NULL constraint failed: price_bar.c")])
+def test_history_failure_leaves_the_rest_of_the_response(make_argus, error):
+    # B-130: a broken price-history write (B-128) made these 500 though only some figures need bars.
+    class Fund:
+        name = "finnhub"
+
+        def get_metrics(self, symbol):
+            return {"pe_ttm": 20.0, "market_cap": 1e9}
+
+    a = make_argus([FakeQuotes("fake", {"AAA": (110, 100)})], _BrokenHistory(error), [Fund()])
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "AAA", datetime(2026, 9, 1, 20, tzinfo=UTC), 10, 90)])
+    a.watchlists.add(["AAA"])
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        r = c.get("/api/fundamentals/AAA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["metrics"]["market_cap"] == 1e9 and body["metrics"]["return_1m_pct"] is None
+        assert "Price history unavailable" in body["errors"]["price_history"]
+
+        for path in ("/api/portfolios/growth/fundamentals", "/api/watchlists/Watchlist/fundamentals"):
+            r = c.get(path)
+            assert r.status_code == 200, path
+            assert "return_1y_pct" not in r.json()["metrics"].get("AAA", {}) and r.json()["errors"]["price_history"]
+
+        r = c.get("/api/research/AAA")
+        assert r.status_code == 200
+        assert r.json()["errors"]["price_history"] and r.json()["partial"] and r.json()["price"] == 110
+
+        r = c.get("/api/earnings/AAA")
+        assert r.status_code == 200 and r.json()["errors"]["price_history"] and "reports" in r.json()
