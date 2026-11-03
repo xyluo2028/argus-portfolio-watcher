@@ -6,6 +6,7 @@ the order of adapters per data type and falls back when one fails.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -76,6 +77,12 @@ class Bar:
     l: float  # noqa: E741
     c: float
     v: float
+
+    @property
+    def complete(self) -> bool:
+        """Yahoo sometimes serves the latest session with a NaN close (SPY 2026-11-02); such a bar
+        must not be stored, or it fails the whole batch insert."""
+        return all(isinstance(x, (int, float)) and math.isfinite(x) for x in (self.o, self.h, self.l, self.c))
 
 
 @dataclass

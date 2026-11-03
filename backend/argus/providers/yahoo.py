@@ -191,8 +191,9 @@ class YahooProvider:
             return []
         bars = []
         for ts, row in df.iterrows():
-            # Yahoo sometimes returns a session with no close (NaN), e.g. AEHR for 2026-10-23: skip it
-            # (a later fetch picks it up) and fill a missing open/high/low from the close.
+            # Yahoo sometimes returns a session with no close (NaN), e.g. AEHR for 2026-10-23 or the latest
+            # session before its close is in: skip it (a later fetch picks it up, B-128) and fill a missing
+            # open/high/low from the close.
             c = _num(row.get("Close"))
             if c is None:
                 continue
