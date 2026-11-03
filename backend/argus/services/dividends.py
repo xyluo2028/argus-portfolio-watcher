@@ -43,26 +43,65 @@ def lumpy(amounts: list[float]) -> bool:
     return not one_way and pstdev(amounts) / m > LUMPY_CV
 
 
+def _year(pays: list[tuple[date, float]], today: date) -> list[float]:
+    return [a for d, a in pays if d > today - timedelta(days=365)]
+
+
+def _rhythm(pays: list[tuple[date, float]], today: date):
+    """(freq, period, last ex-date, last amount, trailing 12m, stale, per payment) from sorted `pays`,
+    or None for a payer with nothing in the lookback window."""
+    recent = [(d, a) for d, a in pays if d > today - timedelta(days=LOOKBACK_DAYS)]
+    if not recent:
+        return None
+    freq = frequency([d for d, _ in recent])
+    period = timedelta(days=round(365 / freq))
+    last_d, last_amt = recent[-1]
+    year = _year(pays, today)
+    trailing = sum(year)
+    stale = today - last_d > period * 2 + timedelta(days=30)  # missed two payments: don't extrapolate
+    per_payment = trailing / freq if lumpy(year) else last_amt  # projected at the year's average if lumpy
+    return freq, period, last_d, last_amt, trailing, stale, per_payment
+
+
+def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: date,
+            announced: Iterable[date]) -> list[tuple[date, float, bool]]:
+    """Ex-dates that have passed but the provider's history doesn't show yet (Yahoo lags days behind
+    the ex-date, while quotes' previous close already drops by the dividend): (ex-date, projected cash
+    per share, whether the date is estimated). A declared one counts as is; failing that, the next
+    estimated ex-date after the last paid one counts within half a period of grace (about two weeks
+    for a monthly payer, six for a quarterly one). Later than that, the history hasn't merely lagged:
+    the payer more likely skipped or stopped, so nothing is counted. When the history catches up, its
+    row (within half a period) becomes the last ex-date and replaces this one, with the real amount."""
+    half = timedelta(days=round(365 / freq)) / 2
+    out = [(a, per_payment, False) for a in sorted(set(announced)) if last_d + half <= a <= today]
+    if not stale and not out:
+        est = session_on_or_after(add_months(last_d, 12 // freq))
+        if est <= today <= est + half:
+            out.append((est, per_payment, True))
+    return out
+
+
+def pending(history: list[tuple[str, float]], today: date, announced: Iterable[date] = ()) -> list[tuple[str, float]]:
+    """Passed ex-dates missing from `history` (see _passed), as (ex-date ISO, cash per share) rows."""
+    pays = sorted((date.fromisoformat(d), a) for d, a in history)
+    if (r := _rhythm(pays, today)) is None:
+        return []
+    freq, _, last_d, _, _, stale, per_payment = r
+    return [(d.isoformat(), a) for d, a, _ in _passed(freq, last_d, per_payment, stale, today, announced)]
+
+
 def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callable[[date], float],
                     today: date, announced: Iterable[date] = (), until: date | None = None) -> dict:
     """`history`: (ex-date ISO, cash per share), any order. `qty_at(d)`: shares held going into day d.
     `announced`: ex-dates the company has declared (calendar), which replace the estimated ones.
     Projects to Dec 31, or to `until` when that's later (a window that crosses the year end)."""
     pays = sorted((date.fromisoformat(d), a) for d, a in history)
-    recent = [(d, a) for d, a in pays if d > today - timedelta(days=LOOKBACK_DAYS)]
-    if not recent:
+    r = _rhythm(pays, today)
+    if r is None:
         return {"pays": False, "frequency": None, "rate": 0.0, "trailing_12m": 0.0,
                 "received": [], "projected": [], "last_ex_date": pays[-1][0].isoformat() if pays else None}
-
-    freq = frequency([d for d, _ in recent])
-    period = timedelta(days=round(365 / freq))
-    last_d, last_amt = recent[-1]
-    year = [a for d, a in recent if d > today - timedelta(days=365)]
-    trailing = sum(year)
-    stale = today - last_d > period * 2 + timedelta(days=30)  # missed two payments: don't extrapolate
-    uneven = lumpy(year)
-    rate = trailing if stale or uneven else last_amt * freq
-    per_payment = trailing / freq if uneven else last_amt  # projected at the year's average if lumpy
+    freq, period, last_d, last_amt, trailing, stale, per_payment = r
+    rate = trailing if stale or lumpy(_year(pays, today)) else last_amt * freq
 
     year_start, year_end = date(today.year, 1, 1), date(today.year, 12, 31)
     horizon = max(until or year_end, year_end)
@@ -81,18 +120,19 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
             k += 1
     # A declared ex-date is the payment the estimate guessed at: it replaces any estimate within half
     # a period of it (KO's 12-01 replaces a 12-15 guess), at the projected amount per share. One the
-    # history already has is skipped; one that's passed before the history shows it counts as received.
+    # history already has is skipped; one that's passed before the history shows it is received (below).
     half = period / 2
     for a in sorted(set(announced)):
         if a < last_d + half or a > horizon:
             continue
         projected = [x for x in projected if abs(date.fromisoformat(x["ex_date"]) - a) >= half]
-        q = qty_at(a) if a <= today else qty
-        x = {"ex_date": a.isoformat(), "per_share": per_payment, "shares": q, "amount": q * per_payment}
         if a > today:
-            projected.append(x | {"estimated_date": False})
-        elif a >= year_start and q > 0:
-            received.append(x)
+            projected.append({"ex_date": a.isoformat(), "per_share": per_payment, "shares": qty,
+                              "amount": qty * per_payment, "estimated_date": False})
+    for d, per_share, est in _passed(freq, last_d, per_payment, stale, today, announced):
+        if d >= year_start and (q := qty_at(d)) > 0:
+            received.append({"ex_date": d.isoformat(), "per_share": per_share, "shares": q,
+                             "amount": q * per_share, "estimated": True, "estimated_date": est})
     projected.sort(key=lambda x: x["ex_date"])
     return {"pays": True, "frequency": FREQ_NAMES[freq], "rate": rate, "trailing_12m": trailing,
             "last_ex_date": last_d.isoformat(), "last_amount": last_amt, "irregular": stale,
@@ -156,10 +196,13 @@ def analyze(rows: list[dict], histories: dict[str, list[tuple[str, float]]],
     }
 
 
-def accrue(txns: Iterable, histories: dict[str, list[tuple[str, float]]], today: date) -> list[dict]:
+def accrue(txns: Iterable, histories: dict[str, list[tuple[str, float]]], today: date,
+           announced: dict[str, Iterable[date]] | None = None) -> list[dict]:
     """Dividends earned by holding through an ex-date, from the payment history: shares held going
     into the ex-date × cash per share. Estimates until a DIVIDEND transaction records the payment,
     so an ex-date matched by one (the latest ex-date on or before it, within MATCH_DAYS) is skipped.
+    A passed ex-date the history doesn't show yet (see `pending`; `announced` as in analyze) accrues
+    at the projected amount, marked `estimated`, until the history's own row replaces it.
 
     `txns` are one portfolio's (FIFO-free: only share counts matter). Histories are split-adjusted
     per share, so shares held before a later recorded SPLIT are scaled by its ratio.
@@ -171,7 +214,10 @@ def accrue(txns: Iterable, histories: dict[str, list[tuple[str, float]]], today:
     for sym, ts in by_sym.items():
         ts.sort(key=lambda t: (t.ts, t.id or 0))
         first = ts[0].ts.astimezone(NY).date()
-        pays = sorted((d, a) for iso, a in histories.get(sym, [])
+        hist = histories.get(sym, [])
+        extra = pending(hist, today, (announced or {}).get(sym, ()))
+        guessed = {date.fromisoformat(iso) for iso, _ in extra}
+        pays = sorted((d, a) for iso, a in [*hist, *extra]
                       if first < (d := date.fromisoformat(iso)) <= today and a > 0)
         if not pays:
             continue
@@ -201,6 +247,6 @@ def accrue(txns: Iterable, histories: dict[str, list[tuple[str, float]]], today:
             qty *= later_splits
             if qty > 1e-9:
                 out.append({"symbol": sym, "ex_date": ex.isoformat(), "per_share": per_share, "shares": qty,
-                            "amount": qty * per_share})
+                            "amount": qty * per_share} | ({"estimated": True} if ex in guessed else {}))
     out.sort(key=lambda x: (x["ex_date"], x["symbol"]))
     return out

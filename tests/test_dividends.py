@@ -152,3 +152,48 @@ def test_accrual_uses_split_adjusted_shares():
     hist = {"X": [("2026-09-01", 0.5)]}  # per share after the later 2:1 split
     txns = [_t("BUY", date(2026, 8, 1), 10, 100, sym="X"), _t("SPLIT", date(2026, 9, 15), 2, sym="X")]
     assert accrue(txns, hist, date(2026, 10, 1))[0]["amount"] == pytest.approx(10.0)
+
+
+# -- a passed estimated ex-date the history doesn't show yet (B-129) ------------
+BND = {"BND": [(f"2026-{m:02d}-01", 0.22) for m in range(1, 11)]}  # Yahoo's list ends at 10-01
+
+
+def test_passed_estimated_ex_date_counts_as_received_until_the_history_catches_up():
+    nov3 = date(2026, 11, 3)  # 11-01 is a Sunday: the estimate is 11-02
+    h = analyze_holding(BND["BND"], 100, lambda d: 100, nov3)
+    nov = [x for x in h["received"] if x["ex_date"] >= "2026-11"]
+    assert nov == [{"ex_date": "2026-11-02", "per_share": 0.22, "shares": 100, "amount": pytest.approx(22.0),
+                    "estimated": True, "estimated_date": True}]
+    assert h["projected"][0]["ex_date"] == "2026-12-01" and h["last_ex_date"] == "2026-10-01"
+    # The history catches up (a real row near the estimate): counted once, at the real amount.
+    caught = analyze_holding([*BND["BND"], ("2026-11-02", 0.231)], 100, lambda d: 100, nov3)
+    nov = [x for x in caught["received"] if x["ex_date"] >= "2026-11"]
+    assert len(nov) == 1 and nov[0]["amount"] == pytest.approx(23.1) and "estimated" not in nov[0]
+    assert caught["projected"][0]["ex_date"] == "2026-12-02"  # anchored on the real 11-02 now
+    # Bought on/after the estimated ex-date: not owed.
+    assert not [x for x in analyze_holding(BND["BND"], 100, lambda d: 0 if d <= nov3 else 100, nov3)["received"]
+                if x["ex_date"] >= "2026-11"]
+    # Past half a period of grace the history hasn't lagged, the fund more likely skipped: nothing counted.
+    assert not [x for x in analyze_holding(BND["BND"], 100, lambda d: 100, date(2026, 11, 20))["received"]
+                if x["ex_date"] >= "2026-11"]
+    # A declared ex-date replaces the estimate (counted once, on the declared date).
+    ann = analyze_holding(BND["BND"], 100, lambda d: 100, nov3, announced=[date(2026, 10, 30)])
+    assert [x["ex_date"] for x in ann["received"] if x["ex_date"] >= "2026-10-15"] == ["2026-10-30"]
+
+
+def test_passed_estimated_ex_date_accrues_once():
+    nov3 = date(2026, 11, 3)
+    txns = [_t("BUY", date(2026, 9, 15), 100, 72, sym="BND")]
+    out = [x for x in accrue(txns, BND, nov3) if x["ex_date"] >= "2026-11"]
+    assert out == [{"symbol": "BND", "ex_date": "2026-11-02", "per_share": 0.22, "shares": 100,
+                    "amount": pytest.approx(22.0), "estimated": True}]
+    caught = {"BND": [*BND["BND"], ("2026-11-02", 0.231)]}
+    out = [x for x in accrue(txns, caught, nov3) if x["ex_date"] >= "2026-11"]
+    assert len(out) == 1 and out[0]["amount"] == pytest.approx(23.1) and "estimated" not in out[0]
+    # A recorded DIVIDEND for it (paid 11-06) replaces the estimate; the October one still accrues.
+    paid = [*txns, _t("DIVIDEND", date(2026, 11, 6), amount=22.0, sym="BND")]
+    assert [x["ex_date"] for x in accrue(paid, BND, date(2026, 11, 9))] == ["2026-10-01"]
+    # Bought on the estimated ex-date: not owed.
+    assert accrue([_t("BUY", date(2026, 11, 2), 100, 71.3, sym="BND")], BND, nov3) == []
+    # Too long past the estimate to be a lag.
+    assert [x["ex_date"] for x in accrue(txns, BND, date(2026, 11, 20))] == ["2026-10-01"]

@@ -242,9 +242,14 @@ class Argus:
         by_pf: dict = {}
         for t in txns:
             by_pf.setdefault(getattr(t, "portfolio_id", None), []).append(t)
-        histories = self.dividend_histories(sorted({t.symbol for t in txns}))
+        syms = sorted({t.symbol for t in txns})
+        histories = self.dividend_histories(syms)
         today = datetime.now(NY).date()
-        out = [x for group in by_pf.values() for x in dividends_mod.accrue(group, histories, today)]
+        # Declared ex-dates as last stored (no refresh here: the summary and performance call this).
+        announced: dict[str, list[date]] = {}
+        for e in self.events.between(syms, today - timedelta(days=dividends_mod.MATCH_DAYS), today, ["ex_dividend"]):
+            announced.setdefault(e["symbol"], []).append(date.fromisoformat(e["date"]))
+        out = [x for group in by_pf.values() for x in dividends_mod.accrue(group, histories, today, announced)]
         return sorted(out, key=lambda x: (x["ex_date"], x["symbol"]))
 
     def history(self, symbol: str, period: str = "1y", interval: str = "1d",
