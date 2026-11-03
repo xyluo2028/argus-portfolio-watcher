@@ -314,7 +314,9 @@ def portfolio_performance(ref: str, range_: Annotated[str, typer.Option("--range
                       f"{_cell(s['excess_pct'], _pct(s['excess_pct']))}")
         vol = "-" if s["volatility_pct"] is None else f"{s['volatility_pct']:.1f}%"
         sharpe = "-" if s["sharpe"] is None else f"{s['sharpe']:.2f}"
-        console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   Sharpe (rf=0) {sharpe}")
+        window = f"({s['risk_note']})" if s.get("risk_note") else f"over {s['risk_sessions']} sessions"
+        console.print(f"Max drawdown {_pct(s['max_drawdown_pct'])}   Volatility (ann.) {vol}   "
+                      f"Sharpe (rf=0) {sharpe}  {window}")
     _run(as_json, lambda: _argus().performance(ref, range_), render)
 
 
@@ -343,7 +345,8 @@ def events(days: int = 14, as_json: JsonOpt = False):
     def render(d):
         t = Table("Date", "Symbol", "Event", "When", "EPS est.", "Held")
         for e in d["upcoming"]:
-            t.add_row(e["date"], e["symbol"], e["kind"].replace("_", " "), e.get("hour") or "",
+            kind = e["kind"].replace("_", " ") + (" (est.)" if e.get("estimated") else "")
+            t.add_row(e["date"], e["symbol"], kind, e.get("hour") or "",
                       "-" if e.get("epsEstimate") is None else f"{e['epsEstimate']:.2f}", "yes" if e["held"] else "")
         console.print(t)
     _run(as_json, lambda: _argus().upcoming_events(days_ahead=days), render)

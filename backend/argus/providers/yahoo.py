@@ -191,8 +191,14 @@ class YahooProvider:
             return []
         bars = []
         for ts, row in df.iterrows():
-            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), float(row["Open"]), float(row["High"]),
-                            float(row["Low"]), float(row["Close"]), float(row.get("Volume") or 0)))
+            # Yahoo sometimes returns a session with no close (NaN), e.g. AEHR for 2026-10-23: skip it
+            # (a later fetch picks it up) and fill a missing open/high/low from the close.
+            c = _num(row.get("Close"))
+            if c is None:
+                continue
+            o, h, low = (_num(row.get(k)) for k in ("Open", "High", "Low"))
+            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), o if o is not None else c, h if h is not None else c,
+                            low if low is not None else c, c, _num(row.get("Volume")) or 0.0))
         return bars
 
     def get_dividends(self, symbol: str, years: int = 3) -> list[tuple[str, float]]:
@@ -336,7 +342,7 @@ class YahooProvider:
         return metrics_from_info(self.get_info(symbol))
 
 
-def metrics_from_info(i: dict) -> dict[str, float | None]:
+def metrics_from_info(i: dict) -> dict[str, float | str | None]:
     """Map Yahoo `info` to normalized fields. Yahoo gives margins/growth as fractions."""
     d2e = _num(i.get("debtToEquity"))
     return {
@@ -373,4 +379,13 @@ def metrics_from_info(i: dict) -> dict[str, float | None]:
         "ytd_return_pct": _num(i.get("ytdReturn")),
         "return_3y_pct": _pct(i.get("threeYearAverageReturn")),
         "return_5y_pct": _pct(i.get("fiveYearAverageReturn")),
+        # The fiscal quarter Yahoo's trailing figures run through, to tell whether SEC's are as recent.
+        "_period_end": _quarter_end(i.get("mostRecentQuarter")),
     }
+
+
+def _quarter_end(epoch) -> str | None:
+    try:
+        return datetime.fromtimestamp(int(epoch), UTC).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None

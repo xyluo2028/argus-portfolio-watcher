@@ -156,9 +156,20 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Valuation & profitability: pe_ttm, pe_forward, peg, pb, ps_ttm, ev_ebitda, eps_ttm,
         market_cap, revenue_ttm, revenue_growth_yoy_pct, gross/operating/net_margin_pct, roe_pct,
         fcf_ttm, debt_to_equity, dividend_yield_pct, beta, high_52w, low_52w, expense_ratio_pct, roic_pct,
-        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns, return_1m_pct,
-        cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct.
-        Cached 24h; `sources` says which provider supplied each value."""
+        revenue/EPS growth (yoy, quarterly yoy, 3y and 5y CAGR), price returns return_1w/1m/3m/6m/ytd_price/1y_pct
+        (to the latest close, from the same base closes as the stock chart's 5D/1M/3M/6M/YTD/1Y ranges),
+        cagr_3y_pct / cagr_5y_pct (price CAGR) and fcf_margin_pct. fcf_ttm is operating cash flow
+        minus capex over the last four SEC quarters (source "sec"), else the provider's figure;
+        fcf_margin_pct is FCF ÷ revenue from one source (SEC's same quarters, else one provider's FCF and
+        revenue), blank rather than mixing sources. When SEC lacks capex, ocf_margin_pct (operating cash
+        flow ÷ revenue, SEC) stands in: capex not reported. revenue_ttm, eps_ttm (diluted, summed),
+        revenue_growth_q_yoy_pct and gross/operating/net_margin_pct also come from those SEC quarters when
+        they're at least as recent as the providers' (so they match get_financials), else from the providers.
+        pe_ttm is the current price ÷ that eps_ttm, with its source (null when EPS ≤ 0); the provider's
+        P/E only when there's no EPS. Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
+        `latest_period` (newest quarter in SEC's XBRL data), its age, `stale` (older than ~135 days:
+        SEC's data lacks a newer 10-Q, so SEC figures lag the providers'), `fcf_ttm_quarters` and
+        `ttm_quarters` (behind the SEC revenue/EPS/growth/margin figures)."""
         return argus.fundamentals(symbol, fields)
 
     @mcp.tool(annotations=READ)
@@ -166,11 +177,14 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_financials(symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         """Reported financials from SEC EDGAR (revenue, gross/operating/net income and margins,
         diluted EPS, operating cash flow, capex, free cash flow). period: quarterly | annual.
-        Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals.
-        ETFs have none. Quarterly results also carry `earnings`: per quarter the report date and
-        timing (bmo/amc), EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted"
-        from Finnhub or "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-
-        close across the report; `provisional` until that session closes); plus the next report."""
+        Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals;
+        such a quarter's diluted EPS carries `eps_diluted_derived` (the method used).
+        `latest_period` is the newest period end, `stale` true when it's older than a newer report
+        should be (~135 days for a quarter): SEC's XBRL data can lag a filing by months. ETFs have none.
+        Quarterly results also carry `earnings`: per quarter the report date and timing (bmo/amc),
+        EPS and revenue estimate vs actual with beat/miss (`eps_basis` "adjusted" from Finnhub or
+        "reported" from Yahoo, which may be GAAP), and the price reaction (close-to-close across the
+        report; `provisional` until that session closes); plus the next report."""
         out = argus.market.get_financials(normalize_symbol(symbol), period, limit)
         if period == "quarterly":
             out["earnings"] = argus.earnings_history(symbol, limit)
@@ -186,7 +200,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @_tool
     def get_performance(portfolio: str, range: str = "all", include_series: bool = False) -> dict:  # noqa: A002
         """Time-weighted return vs the portfolio's benchmark over 1mo | 3mo | ytd | 1y | all, with
-        dollar gain, max drawdown, volatility and Sharpe (rf=0). Buys count as money in, so
+        dollar gain, max drawdown, volatility and Sharpe (rf=0). Volatility and Sharpe use this
+        range's daily returns (`risk_sessions` of them) and are null with `risk_note` under 20;
+        get_risk's 1-year holdings volatility is a different figure. Buys count as money in, so
         adding money isn't performance. include_series adds the daily points."""
         out = argus.performance(portfolio, range, quotes_now())
         if not include_series:
@@ -263,8 +279,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @mcp.tool(annotations=READ)
     @_tool
     def get_research(symbol: str) -> dict:
-        """Research on one company: analyst consensus, price targets and monthly rating counts; EPS
-        estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
+        """Research on one company: analyst consensus (rating, mean and analyst count derived from the
+        current month's rating counts), price targets and monthly rating counts; EPS estimate trend and revisions; insider trades (SEC Form 4, open-market buys/sales summarized);
         institutional and insider ownership, top 13F holders; short interest; 5-year valuation bands
         (P/E, P/S, P/B, EV/EBITDA with today's percentile); Piotroski F-score and Altman Z; growth (quarterly
         revenue and net income YoY from SEC filings, revenue/EPS/price CAGR 3Y and 5Y, analysts' forward

@@ -24,11 +24,14 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Iterable
 
-from argus.market_calendar import NY
+from argus.market_calendar import NY, trade_session
 from argus.models import TxnType
 from argus.services.lots import TxnLike
 
 TRADING_DAYS = 252
+# Annualized volatility and Sharpe from fewer daily returns than this are noise (a 4-session
+# Sharpe of 3+ says nothing), so they're withheld with a reason instead.
+MIN_RISK_SESSIONS = 20
 
 
 @dataclass
@@ -43,8 +46,9 @@ class DayPoint:
 
 
 def txn_session(ts: datetime, sessions: list[date]) -> date | None:
-    """The trading session a transaction settles into: its NY date, or the next session."""
-    d = ts.astimezone(NY).date()
+    """The trading session a transaction settles into: its NY date, or the next session if it was made
+    after that day's close (after-hours money is invested from the next session on)."""
+    d = trade_session(ts)
     for s in sessions:
         if s >= d:
             return s
@@ -131,21 +135,31 @@ def compute_series(txns: Iterable[TxnLike], sessions: list[date], closes: dict[s
     return points
 
 
-def summarize(points: list[DayPoint], risk_free_annual: float = 0.0) -> dict:
-    """Stats over a (possibly rebased) slice of the series."""
+def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: bool = False) -> dict:
+    """Stats over a (possibly rebased) slice of the series.
+
+    A slice normally starts at its first day's close. With `inception` (the slice begins on
+    the first flow) it starts before that day's flows instead: value 0, index 1.0, so day
+    one's purchases count as invested and its close-vs-cost move counts as gain.
+    """
     if not points:
         return {}
     start, end = points[0], points[-1]
-    # Returns within the slice exclude the first day's own return (the slice starts at its close).
-    rets = [p.ret for p in points[1:] if p.ret is not None]
-    twr = end.index / start.index - 1
-    peak, mdd = start.index, 0.0
+    within = points if inception else points[1:]
+    start_value = 0.0 if inception else start.value
+    start_index = 1.0 if inception else start.index
+    rets = [p.ret for p in within if p.ret is not None]
+    twr = end.index / start_index - 1
+    peak, mdd = start_index, 0.0
     for p in points:
         peak = max(peak, p.index)
         mdd = min(mdd, p.index / peak - 1)
     vol = None
     sharpe = None
-    if len(rets) >= 2:
+    risk_note = None
+    if len(rets) < MIN_RISK_SESSIONS:
+        risk_note = f"needs {MIN_RISK_SESSIONS} sessions, has {len(rets)}"
+    else:
         mean = sum(rets) / len(rets)
         sd = math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1))
         vol = sd * math.sqrt(TRADING_DAYS)
@@ -166,9 +180,13 @@ def summarize(points: list[DayPoint], risk_free_annual: float = 0.0) -> dict:
         "max_drawdown_pct": mdd * 100,
         "volatility_pct": vol * 100 if vol is not None else None,
         "sharpe": sharpe,
-        "net_invested": (net := sum(p.flow_in - p.flow_out for p in points[1:])),
+        # What volatility and Sharpe are measured on: this slice's daily TWR returns, not the
+        # 1-year holdings history behind Analysis → Risk.
+        "risk_sessions": len(rets),
+        "risk_note": risk_note,
+        "net_invested": (net := sum(p.flow_in - p.flow_out for p in within)),
         # Dollar profit over the slice: what the positions gained beyond money added.
-        "gain": end.value - start.value - net,
-        "start_value": start.value,
+        "gain": end.value - start_value - net,
+        "start_value": start_value,
         "end_value": end.value,
     }

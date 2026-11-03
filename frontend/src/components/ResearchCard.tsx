@@ -77,9 +77,10 @@ function Analysts({ r }: { r: Research }) {
     <div className="stack" style={{ gap: 16 }}>
       <div className="tiles">
         <div className="tile"><div className="label">Consensus</div><div className="value" style={{ textTransform: "capitalize" }}>{(a.rating ?? "–").replace("_", " ")}</div>
-          <div className="delta muted">{a.count} analysts · mean {a.rating_mean?.toFixed(2) ?? "–"} (1 = strong buy, 5 = sell)</div></div>
+          <div className="delta muted">{a.count} analysts · mean {a.rating_mean?.toFixed(2) ?? "–"} (1 = strong buy, 5 = sell){a.rating_source === "yahoo" && " · Yahoo"}</div></div>
         <div className="tile"><div className="label">Mean price target</div><div className="value">{price(a.target_mean)}</div>
-          <div className={`delta ${tone(a.upside_pct)}`}>{pct(a.upside_pct, 1)} from {price(r.price)}</div></div>
+          <div className={`delta ${tone(a.upside_pct)}`}>{pct(a.upside_pct, 1)} from {price(r.price)}
+            {a.target_count != null && a.target_count !== a.count && <span className="muted"> · {a.target_count} targets</span>}</div></div>
         <div className="tile"><div className="label">Target range</div><div className="value">{price(a.target_low)} – {price(a.target_high)}</div>
           <div className="delta muted">median {price(a.target_median)}</div></div>
       </div>

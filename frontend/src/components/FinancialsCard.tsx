@@ -33,6 +33,16 @@ function Reaction({ r }: { r: EarningsReport["reaction"] }) {
   );
 }
 
+/** SEC's XBRL data can lag a filing by months; say so wherever SEC figures sit beside fresher ones. */
+export function SecStale({ latest, days, quarterly = true }: { latest: string; days: number | null; quarterly?: boolean }) {
+  return (
+    <p className="warn-box small" style={{ marginTop: 0 }}>
+      SEC's data ends at {quarterly ? "the quarter" : "the year"} ended {latest}{days != null ? ` (${days} days ago)` : ""}:
+      a newer {quarterly ? "10-Q" : "10-K"} is due but isn't in SEC's XBRL data yet, so SEC figures may lag other sources.
+    </p>
+  );
+}
+
 /** SEC-reported quarters/years; quarters also show the earnings report: estimates vs actuals, beat or
  * miss, and how the stock reacted. */
 export function FinancialsCard({ symbol }: { symbol: string }) {
@@ -76,6 +86,7 @@ export function FinancialsCard({ symbol }: { symbol: string }) {
       )}
       {err ? <p className="muted">{err.message}</p> : fin ? (
         <>
+          {fin.stale && fin.latest_period && <SecStale latest={fin.latest_period} days={fin.latest_period_age_days} quarterly={quarterly} />}
           <RevenueColumns periods={fin.periods} />
           <div className="table-wrap">
             <table>
@@ -105,7 +116,9 @@ export function FinancialsCard({ symbol }: { symbol: string }) {
                       <td>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
                       <td>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
                       <td className={tone(p.net_income)}>{big(p.net_income)}</td>
-                      <td>{p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}</td>
+                      <td title={p.eps_diluted_derived ? "Not filed for the quarter: derived from the full-year EPS" : undefined}>
+                        {p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}
+                      </td>
                       {show && <>
                         <td>{eps(e?.eps_estimate)}</td>
                         <td>{eps(e?.eps_actual)}{e?.eps_basis === "reported" ? "†" : ""}</td>

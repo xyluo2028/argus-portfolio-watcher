@@ -17,6 +17,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 
 import httpx
@@ -32,18 +33,28 @@ FUND_TICKERS_URL = "https://www.sec.gov/files/company_tickers_mf.json"
 FILINGS_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
 NPORT_LATEST_MAX_AGE_S = 24 * 3600
 NPORT_KEEP = 500  # holdings kept per fund (by weight); the rest only count toward totals
+# A 10-Q is due 40-45 days after the quarter and a 10-K 60-90 days after the year, so a latest period
+# older than this means SEC's XBRL data lacks a newer report. That happens: companyfacts can lag a
+# filing by months (KO's and NEE's Q2 2026 10-Qs were filed in July and still missing in October).
+STALE_QUARTER_DAYS = 135
+STALE_YEAR_DAYS = 365 + 100
 
 
 @dataclass(frozen=True)
 class Concept:
     field: str
     tags: tuple[str, ...]  # tried in order across us-gaap then ifrs-full
-    additive: bool = True  # EPS is not: quarterly EPS can't be derived by subtraction
+    additive: bool = True  # EPS is not: YTD differencing doesn't apply (see _derive_q4_eps)
+    fallback: tuple[str, ...] = ()  # only fill periods the chosen tag leaves empty
 
+
+# Revenue tags, shared with the screener. Revenue including assessed tax (sales taxes, VAT) is gross of
+# tax, so it only counts when a company tags nothing else for the period, as Rambus and BioCryst do.
+REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet")
+REVENUE_FALLBACK_TAGS = ("RevenueFromContractWithCustomerIncludingAssessedTax",)
 
 CONCEPTS: tuple[Concept, ...] = (
-    Concept("revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
-                        "Revenue")),
+    Concept("revenue", (*REVENUE_TAGS, "Revenue"), fallback=REVENUE_FALLBACK_TAGS),  # "Revenue": ifrs-full
     Concept("gross_profit", ("GrossProfit",)),
     Concept("operating_income", ("OperatingIncomeLoss", "ProfitLossFromOperatingActivities")),
     Concept("net_income", ("NetIncomeLoss", "ProfitLossAttributableToOwnersOfParent", "ProfitLoss")),
@@ -53,6 +64,9 @@ CONCEPTS: tuple[Concept, ...] = (
     Concept("capex", ("PaymentsToAcquirePropertyPlantAndEquipment",
                       "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")),
 )
+
+# Weighted diluted share count, for a fiscal Q4 the filer tags as a 3-month period.
+DILUTED_SHARES_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding", "AdjustedWeightedAverageShares")
 
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
 # Financial reports. The same fact also turns up in proxy statements (DEF 14A), 8-Ks and registration
@@ -236,18 +250,35 @@ def series_for(rows: list[dict], period: str, additive: bool) -> dict[date, floa
     return quarters
 
 
-def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> dict:
+def freshness(latest_period: str | None, period: str = "quarterly", today: date | None = None) -> dict:
+    """How old SEC's latest period is, and `stale` once a newer report should have been filed."""
+    if latest_period is None:
+        return {"latest_period": None, "latest_period_age_days": None, "stale": False}
+    age = ((today or date.today()) - date.fromisoformat(latest_period)).days
+    limit = STALE_QUARTER_DAYS if period == "quarterly" else STALE_YEAR_DAYS
+    return {"latest_period": latest_period, "latest_period_age_days": age, "stale": age > limit}
+
+
+def build_financials(facts: dict, period: str = "quarterly", limit: int = 8, today: date | None = None) -> dict:
     if period not in ("quarterly", "annual"):
         raise ValueError("period must be 'quarterly' or 'annual'")
     by_end: dict[date, dict] = {}
     units: dict[str, str] = {}
     for concept in CONCEPTS:
         rows, unit = _pick_series(facts, concept)
-        if not rows:
+        values = series_for(rows, period, concept.additive)
+        if concept.fallback:
+            spare, spare_unit = _pick_series(facts, Concept(concept.field, concept.fallback, concept.additive))
+            if unit is None or spare_unit == unit:
+                unit = unit or spare_unit
+                values = series_for(spare, period, concept.additive) | values
+        if not values:
             continue
         units[concept.field] = unit or ""
-        for end, v in series_for(rows, period, concept.additive).items():
+        for end, v in values.items():
             by_end.setdefault(end, {"period_end": end.isoformat()})[concept.field] = v
+    if period == "quarterly":
+        _derive_q4_eps(facts, by_end, units)
     periods = [by_end[e] for e in sorted(by_end, reverse=True)[:limit]]
     for p in periods:
         if p.get("operating_cash_flow") is not None and p.get("capex") is not None:
@@ -257,7 +288,99 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8) -> 
                            ("net_income", "net_margin_pct")):
                 if p.get(f) is not None:
                     p[out] = p[f] / p["revenue"] * 100
-    return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods}
+    return {"company": facts.get("entityName"), "period": period, "units": units, "periods": periods,
+            **freshness(periods[0]["period_end"] if periods else None, period, today)}
+
+
+def _derive_q4_eps(facts: dict, by_end: dict[date, dict], units: dict[str, str]) -> None:
+    """Fill diluted EPS for fiscal-Q4 quarters the 10-K reports only as a full year. Q4 net income over
+    a tagged 3-month diluted share count is closest to what the company would report; otherwise the
+    full year less the 9-month year-to-date figure (same filing basis, so a share split or IPO earlier
+    in the year doesn't skew it), else less the three reported quarters. Either is off by a cent or so
+    when the share count moves. `eps_diluted_derived` names the method; reported values stay as filed."""
+    eps_rows, eps_unit = _pick_series(facts, next(c for c in CONCEPTS if c.field == "eps_diluted"))
+    if not eps_rows:
+        return
+    durations = _duration_rows(eps_rows)
+    quarters = sorted((s, e, v) for (s, e), (v, _) in durations.items() if _is_quarter((e - s).days))
+    share_rows, _ = _pick_series(facts, Concept("diluted_shares", DILUTED_SHARES_TAGS, additive=False))
+    q4_shares = {e: v for (s, e), (v, _) in _duration_rows(share_rows).items() if _is_quarter((e - s).days)}
+    per_share_ok = units.get("net_income") is not None and eps_unit == f"{units['net_income']}/shares"
+    for (start, end), (year_eps, form) in durations.items():
+        p = by_end.get(end)
+        if not _is_year((end - start).days) or (form and form not in ANNUAL_FORMS) or p is None \
+                or p.get("eps_diluted") is not None:
+            continue
+        if per_share_ok and p.get("net_income") is not None and q4_shares.get(end):
+            eps, method = p["net_income"] / q4_shares[end], "net_income_per_share"
+        elif ytd := next((v for (s, e), (v, _) in durations.items()
+                          if s == start and e < end and _is_quarter((end - e).days)), None):
+            eps, method = year_eps - ytd, "annual_less_ytd"
+        else:
+            # Q1-Q3 back to back from the fiscal year's start, leaving one quarter before its end.
+            chain, edge = [], start
+            for s, e, v in quarters:
+                if 0 <= (s - edge).days <= 7 and e < end and len(chain) < 3:
+                    chain.append(v)
+                    edge = e
+            if len(chain) < 3 or not _is_quarter((end - edge).days):
+                continue
+            eps, method = year_eps - sum(chain), "annual_less_quarters"
+        p["eps_diluted"], p["eps_diluted_derived"] = round(eps, 2), method
+        units.setdefault("eps_diluted", eps_unit or "")
+
+
+def ttm_free_cash_flow(financials: dict) -> tuple[float, str] | None:
+    """Operating cash flow - capex over the last four reported quarters, with the latest quarter's end,
+    from build_financials' quarterly output. None unless the four newest quarters all have it, are
+    back to back and in USD (the figure sits beside prices and market cap)."""
+    units = financials.get("units", {})
+    if units.get("operating_cash_flow") != "USD" or units.get("capex") != "USD":
+        return None
+    last4 = _last_four_quarters(financials)
+    if last4 is None or any(p.get("free_cash_flow") is None for p in last4):
+        return None
+    return sum(p["free_cash_flow"] for p in last4), last4[0]["period_end"]
+
+
+def _last_four_quarters(financials: dict) -> list[dict] | None:
+    """The four newest quarters of build_financials' quarterly output, if back to back."""
+    last4 = financials.get("periods", [])[:4]
+    if len(last4) < 4:
+        return None
+    ends = [date.fromisoformat(p["period_end"]) for p in last4]
+    return last4 if all(_is_quarter((a - b).days) for a, b in pairwise(ends)) else None
+
+
+def ttm_figures(financials: dict) -> dict[str, float]:
+    """Trailing figures over the same four newest quarters as ttm_free_cash_flow, so they agree with
+    each other and with the quarterly statements: revenue_ttm, eps_ttm (the quarters' diluted EPS
+    summed), gross/operating/net margin and fcf_margin_pct (the quarters' sums ÷ their revenue) and
+    revenue_growth_q_yoy_pct (the newest quarter vs the one ending a year earlier). Without capex in
+    every quarter there's no FCF margin; ocf_margin_pct (operating cash flow ÷ revenue) stands in, so
+    nothing divides another source's FCF by SEC revenue. A figure is left out when a quarter lacks it
+    or it isn't in US dollars (it sits beside prices)."""
+    units, out = financials.get("units", {}), {}
+    last4 = _last_four_quarters(financials)
+    usd_rev = units.get("revenue") == "USD"
+    if last4 and usd_rev and all(p.get("revenue") for p in last4):
+        rev = out["revenue_ttm"] = sum(p["revenue"] for p in last4)
+        for f, key in (("gross_profit", "gross_margin_pct"), ("operating_income", "operating_margin_pct"),
+                       ("net_income", "net_margin_pct"), ("operating_cash_flow", "ocf_margin_pct")):
+            if units.get(f) == "USD" and all(p.get(f) is not None for p in last4):
+                out[key] = sum(p[f] for p in last4) / rev * 100
+        if fcf := ttm_free_cash_flow(financials):
+            out["fcf_margin_pct"] = fcf[0] / rev * 100
+            out.pop("ocf_margin_pct", None)
+    if last4 and units.get("eps_diluted") == "USD/shares" and all(p.get("eps_diluted") is not None for p in last4):
+        out["eps_ttm"] = round(sum(p["eps_diluted"] for p in last4), 4)
+    periods = financials.get("periods", [])
+    if periods and usd_rev and periods[0].get("revenue") is not None:
+        newest = date.fromisoformat(periods[0]["period_end"])
+        prior = next((p for p in periods[1:] if _is_year((newest - date.fromisoformat(p["period_end"])).days)), None)
+        if prior and prior.get("revenue", 0) > 0:
+            out["revenue_growth_q_yoy_pct"] = (periods[0]["revenue"] / prior["revenue"] - 1) * 100
+    return out
 
 
 def _num_or_none(v: str | None) -> float | None:

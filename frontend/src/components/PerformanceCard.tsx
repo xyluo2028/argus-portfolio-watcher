@@ -71,7 +71,7 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Performance vs {perf?.benchmark ?? "benchmark"}
           <span className="muted small"> · time-weighted{perf?.provisional_today ? " · today is provisional" : ""}</span></h2>
-        <div className="seg" role="group" aria-label="Range">
+        <div className="seg chart-ranges" role="group" aria-label="Performance range">
           {RANGES.map((r) => (
             <button key={r.key} aria-pressed={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>
           ))}
@@ -85,7 +85,12 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
             <div className="stat"><div className="k">Excess return</div><div className={`v ${tone(s.excess_pct)}`}>{pct(s.excess_pct)}</div></div>
             <div className="stat"><div className="k">Gain</div><div className={`v ${tone(s.gain)}`}>{money(s.gain, { signed: true, whole: true })}</div></div>
             <div className="stat"><div className="k">Max drawdown</div><div className="v">{pct(s.max_drawdown_pct)}</div></div>
-            <div className="stat"><div className="k">Volatility (ann.)</div><div className="v">{s.volatility_pct == null ? "–" : `${s.volatility_pct.toFixed(1)}%`}</div></div>
+            <div className="stat" title="Annualized from this range's daily time-weighted returns; Analysis → Risk uses today's holdings over the last year">
+              <div className="k">Volatility (ann., {s.risk_sessions ?? 0} sessions)</div>
+              {s.volatility_pct == null
+                ? <div className="v muted small">{s.risk_note ?? "–"}</div>
+                : <div className="v">{s.volatility_pct.toFixed(1)}%</div>}
+            </div>
           </div>
           {/* Legend (two series), with values for the hovered or latest day. */}
           <div className="row small" style={{ gap: 16, marginBottom: 4 }} aria-live="polite">
@@ -98,6 +103,8 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
           <div ref={el} style={{ height: 260 }} />
           <p className="small muted" style={{ marginBottom: 0 }}>
             Since {s.start}. Buys and holdings you already owned count as money in, so adding money isn't performance.
+            {" "}Dividends count as income on their ex-date{s.dividends_accrued ? <>, including {money(s.dividends_accrued)} accrued (est.) from
+              ex-dates you held through that no dividend transaction records yet</> : ""}.
           </p>
         </>
       )}

@@ -10,6 +10,7 @@ Freshness rules:
 from __future__ import annotations
 
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -18,11 +19,12 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from argus.config import Settings
-from argus.db import session_scope
+from argus.db import session_scope, upsert
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
+from argus.providers.sec_edgar import freshness, ttm_figures, ttm_free_cash_flow
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -32,7 +34,8 @@ METRIC_FIELDS = (
     "revenue_growth_q_yoy_pct", "revenue_growth_3y_pct", "revenue_growth_5y_pct", "eps_growth_yoy_pct",
     "eps_growth_q_yoy_pct", "eps_growth_3y_pct", "eps_growth_5y_pct", "roa_pct", "roi_pct",
     "payout_ratio_pct", "dividend_growth_5y_pct", "return_1w_pct", "return_3m_pct", "return_6m_pct",
-    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200", "roic_pct",
+    "return_ytd_price_pct", "return_1y_pct", "rel_sp500_1y_pct", "sma50", "sma200", "roic_pct", "fcf_margin_pct",
+    "ocf_margin_pct",
 )
 
 # Fields denominated in the share's price currency. Finnhub reports foreign issuers' home listing
@@ -44,12 +47,74 @@ PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_fo
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
-FUNDAMENTALS_VERSION = 6  # bump to invalidate cached rows when merge rules change
+# Trailing figures SEC's quarters supply when they're at least as recent as the providers', so the
+# valuation card agrees with the quarterly statements (Yahoo's revenue and Finnhub's quarterly growth can
+# lag a 10-Q by weeks; Finnhub's margins too). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
+SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
+                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct")
+SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly different dates
+FUNDAMENTALS_VERSION = 10 # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
+
+
+def sec_coverage(meta: dict | None) -> dict | None:
+    """The quarters SEC-based fundamentals cover: the latest SEC quarter with its age and `stale` flag
+    (computed now, not when cached), the four quarter ends in the SEC FCF TTM (newest first), and those
+    behind SEC's revenue, EPS, growth and margin figures (`ttm_quarters`; null when the providers' were newer)."""
+    if not meta:
+        return None
+    quarters = meta.get("fcf_ttm_quarters")
+    return freshness(meta.get("latest_period")) | {
+        "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None,
+        "ttm_quarters": meta.get("ttm_quarters")}
+
+
+def with_fcf_margin(metrics: dict, sources: dict) -> tuple[dict, dict]:
+    """FCF margin from a single source: SEC's own (FCF ÷ revenue over its quarters) when it has one,
+    else the provider's FCF over that same provider's revenue. Never one source's FCF over another's
+    revenue (Yahoo FCF ÷ SEC revenue when SEC lacks capex): that stays blank."""
+    if sources.get("fcf_margin_pct") == "sec" and metrics.get("fcf_margin_pct") is not None:
+        return metrics, sources
+    metrics, sources = dict(metrics), dict(sources)
+    metrics.pop("fcf_margin_pct", None)
+    sources.pop("fcf_margin_pct", None)
+    fcf, rev, src = metrics.get("fcf_ttm"), metrics.get("revenue_ttm"), sources.get("fcf_ttm")
+    if fcf is not None and rev and src and src == sources.get("revenue_ttm"):
+        metrics["fcf_margin_pct"], sources["fcf_margin_pct"] = fcf / rev * 100, src
+    return metrics, sources
+
+
+def with_pe(metrics: dict, sources: dict, price: float | None) -> tuple[dict, dict]:
+    """P/E (TTM) as the latest price ÷ the EPS (TTM) shown beside it, carrying that EPS's source, so the
+    two always agree (Finnhub's own P/E divides its own EPS by its own, older price: BLLN 142.7 beside
+    SEC's $0.70 EPS at $114, which is 162.9). Blank when EPS ≤ 0 (no meaningful P/E) or there's no price.
+    Without an EPS the provider's P/E stands. Worked out on read, as the price moves."""
+    eps = metrics.get("eps_ttm")
+    if eps is None:
+        return metrics, sources
+    metrics, sources = dict(metrics), dict(sources)
+    metrics["pe_ttm"] = price / eps if price and eps > 0 else None
+    if src := sources.get("eps_ttm"):
+        sources["pe_ttm"] = src
+    else:
+        sources.pop("pe_ttm", None)
+    return metrics, sources
+
+
+def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
+    """Whether a provider's trailing figures run through a newer quarter than SEC's: an earnings release
+    is out but its 10-Q isn't in SEC's XBRL yet. Without a provider period, SEC counts as behind only
+    once it's stale (a newer report overdue)."""
+    if sec_latest is None:
+        return True
+    if not provider_periods:
+        return freshness(sec_latest)["stale"]
+    slack = timedelta(days=SEC_PERIOD_SLACK_DAYS)
+    return max(date.fromisoformat(p) for p in provider_periods) > date.fromisoformat(sec_latest) + slack
 
 
 def _aware(dt: datetime) -> datetime:
@@ -254,7 +319,7 @@ class MarketService:
             self._store_bars(sym, "1d", bars)
             if bars and todo[sym] == start and bars[0].ts > start + timedelta(days=5):
                 with session_scope(self.engine) as s:
-                    s.merge(RefreshLog(key=f"bars-first:{sym}", at=bars[0].ts))
+                    upsert(s, RefreshLog, key=f"bars-first:{sym}", at=bars[0].ts)
 
     def _fetch_history(self, symbol, start, end, interval) -> list[Bar]:
         if self.history_provider is None:
@@ -265,9 +330,14 @@ class MarketService:
             raise ArgusError("PROVIDER_ERROR", str(e), hint="Yahoo may be rate limiting; retry shortly.") from e
 
     def _store_bars(self, symbol: str, interval: str, bars: list[Bar]) -> None:
+        # A bar without a real close can't be stored (the column is NOT NULL, and SQLite turns NaN into
+        # NULL) and would fail the whole batch, so it's dropped; the next fetch can bring it back.
+        ok = lambda v: v is not None and math.isfinite(v)  # noqa: E731
+        bars = [b for b in bars if ok(b.c)]
         if not bars:
             return
-        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v) for b in bars]
+        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o if ok(b.o) else b.c, h=b.h if ok(b.h) else b.c,
+                     l=b.l if ok(b.l) else b.c, c=b.c, v=b.v if ok(b.v) else 0.0) for b in bars]
         with session_scope(self.engine) as s:
             for i in range(0, len(rows), 500):
                 stmt = insert(PriceBar).values(rows[i:i + 500])
@@ -279,7 +349,7 @@ class MarketService:
         unknown = [f for f in fields or [] if f not in METRIC_FIELDS]
         if unknown:
             raise ArgusError("INVALID_ARG", f"Unknown fields: {', '.join(unknown)}", hint=f"Valid: {', '.join(METRIC_FIELDS)}")
-        cached = self.cached_fundamentals([symbol]).get(symbol)
+        cached = self._cached_rows([symbol]).get(symbol)
         if cached and cached["fresh"] and not refresh:
             metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]
         else:
@@ -290,16 +360,46 @@ class MarketService:
                 metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]  # stale beats nothing
             else:
                 raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
+        metrics, sources = with_pe(metrics, sources, self.last_prices([symbol]).get(symbol))
         wanted = fields or list(METRIC_FIELDS)
         return {
             "symbol": symbol,
             "as_of": as_of.isoformat(),
             "metrics": {f: metrics.get(f) for f in wanted},
             "sources": {f: sources[f] for f in wanted if f in sources},
+            "sec": sec_coverage(sources.get("_sec")),
         }
 
     def cached_fundamentals(self, symbols: list[str]) -> dict[str, dict]:
-        """Whatever the cache holds for these symbols, in one query; `fresh` says if it's current."""
+        """Whatever the cache holds for these symbols, in one query; `fresh` says if it's current. P/E is
+        worked out from the latest price (with_pe)."""
+        out = self._cached_rows(symbols)
+        prices = self.last_prices(list(out))
+        for sym, c in out.items():
+            c["metrics"], c["sources"] = with_pe(c["metrics"], c["sources"], prices.get(sym))
+        return out
+
+    def last_prices(self, symbols: list[str]) -> dict[str, float]:
+        """The latest price Argus holds for each symbol, without calling a provider: the cached quote or
+        the last daily close, whichever is newer."""
+        latest: dict[str, tuple[datetime, float]] = {}
+        with session_scope(self.engine) as s:
+            for sym, as_of, price in s.execute(select(QuoteCache.symbol, QuoteCache.as_of, QuoteCache.price)
+                                               .where(QuoteCache.symbol.in_(symbols))):
+                if price:
+                    latest[sym] = (_aware(as_of), price)
+            last_bar = (select(PriceBar.symbol, func.max(PriceBar.ts).label("ts"))
+                        .where(PriceBar.symbol.in_(symbols), PriceBar.interval == "1d").group_by(PriceBar.symbol)
+                        .subquery())
+            for sym, ts, close in s.execute(select(PriceBar.symbol, PriceBar.ts, PriceBar.c).join(
+                    last_bar, (PriceBar.symbol == last_bar.c.symbol) & (PriceBar.ts == last_bar.c.ts))
+                    .where(PriceBar.interval == "1d")):
+                if close and (sym not in latest or _aware(ts) > latest[sym][0]):
+                    latest[sym] = (_aware(ts), close)
+        return {sym: price for sym, (_, price) in latest.items()}
+
+    def _cached_rows(self, symbols: list[str]) -> dict[str, dict]:
+        """The stored rows as merged (the provider's P/E, before with_pe)."""
         now = datetime.now(UTC)
         out: dict[str, dict] = {}
         with session_scope(self.engine) as s:
@@ -316,7 +416,7 @@ class MarketService:
             return {}
         with ThreadPoolExecutor(max_workers=min(workers, len(symbols))) as pool:
             results = dict(zip(symbols, pool.map(self._fetch_fundamentals, symbols)))
-        cached = self.cached_fundamentals(symbols)
+        cached = self._cached_rows(symbols)
         failed = {}
         for sym, (fetched, errors) in results.items():
             if fetched:
@@ -325,45 +425,93 @@ class MarketService:
                 failed[sym] = "; ".join(errors.values()) or "no data"
         return failed
 
+    def fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
+        """The network half of a refresh, safe on a worker thread; hand the result to
+        save_fundamentals on the calling thread."""
+        return self._fetch_fundamentals(symbol)
+
+    def save_fundamentals(self, symbol: str, result: tuple[tuple[dict, dict] | None, dict[str, str]]) -> dict | None:
+        """Store what fetch_fundamentals got; returns the cached entry (stale if the fetch got nothing)."""
+        fetched, errors = result
+        if fetched:
+            self._store_fundamentals(symbol, *fetched, errors, self._cached_rows([symbol]).get(symbol))
+        return self.cached_fundamentals([symbol]).get(symbol)
+
+    def _sec_metrics(self, symbol: str) -> dict:
+        """Figures Argus computes from SEC filings, which beat the providers' versions: Yahoo's
+        freeCashflow is levered FCF (after interest), a fraction of MSFT's reported OCF - capex."""
+        if self.sec is None or not self.settings.sec_user_agent:
+            return {}
+        try:
+            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 5 for the quarter's growth
+        except ProviderError as e:
+            if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
+                return {}  # ETFs, funds and foreign filers: the providers' figures stand
+            raise
+        fcf = ttm_free_cash_flow(fin)
+        ttm = ttm_figures(fin)
+        # Which quarters the SEC figures cover, kept beside the sources (see sec_coverage).
+        last4 = [p["period_end"] for p in fin["periods"][:4]]
+        meta = {"latest_period": fin["periods"][0]["period_end"] if fin.get("periods") else None,
+                "fcf_ttm_quarters": last4 if fcf else None,
+                "ttm_quarters": last4 if any(f in ttm for f in SEC_WINDOW_FIELDS) else None}
+        return {"_sec": meta} | ({"fcf_ttm": fcf[0]} if fcf else {}) | ttm
+
     def _fetch_fundamentals(self, symbol: str) -> tuple[tuple[dict, dict] | None, dict[str, str]]:
-        """Ask every fundamentals provider at once (network only) and merge: first non-null wins,
-        except price-currency fields, where Yahoo goes first. None if nobody had anything."""
-        def ask(provider):
+        """Ask every fundamentals provider and SEC at once (network only) and merge: SEC-derived
+        figures first, then first non-null wins, except price-currency fields, where Yahoo goes
+        first. None if nobody had anything."""
+        def ask(source):
+            name, get = source
             try:
-                return provider.name, provider.get_metrics(symbol), None
+                return name, get(symbol), None
             except ProviderError as e:
-                return provider.name, None, str(e)
-        if len(self.fundamentals_providers) > 1:
-            with ThreadPoolExecutor(max_workers=len(self.fundamentals_providers)) as pool:
-                answers = list(pool.map(ask, self.fundamentals_providers))
-        else:
-            answers = [ask(p) for p in self.fundamentals_providers]
+                return name, None, str(e)
+        askers = [("sec", self._sec_metrics), *((p.name, p.get_metrics) for p in self.fundamentals_providers)]
+        with ThreadPoolExecutor(max_workers=len(askers)) as pool:
+            answers = list(pool.map(ask, askers))
         by_provider = {name: m for name, m, _ in answers if m is not None}
         errors = {name: e for name, _, e in answers if e}  # provider -> error
+        sec = by_provider.get("sec")
+        if sec and sec.get("_sec"):
+            periods = [m["_period_end"] for n, m in by_provider.items() if n != "sec" and m.get("_period_end")]
+            if provider_ahead_of_sec(sec["_sec"]["latest_period"], periods):
+                # One window per figure family: the providers' newer quarter, not SEC's older one.
+                by_provider["sec"] = {k: v for k, v in sec.items() if k not in SEC_WINDOW_FIELDS} | {
+                    "_sec": sec["_sec"] | {"ttm_quarters": None}}
         names = [p.name for p in self.fundamentals_providers if p.name in by_provider]
         metrics, sources = {}, {}
         for field in METRIC_FIELDS:
             order = sorted(names, key=lambda n: n != "yahoo") if field in PRICE_CURRENCY_FIELDS else names
+            order = ["sec", *order] if "sec" in by_provider else order
             for n in order:
                 v = by_provider[n].get(field)
                 if v is not None:
                     metrics[field], sources[field] = v, n
                     break
+        if metrics and by_provider.get("sec", {}).get("_sec"):
+            sources["_sec"] = by_provider["sec"]["_sec"]
         return ((metrics, sources) if metrics else None), errors
 
     def _store_fundamentals(self, symbol: str, metrics: dict, sources: dict, errors: dict[str, str] | None = None,
                             previous: dict | None = None) -> tuple[dict, dict, datetime]:
         """Store a fresh merge. Fields from a provider that failed this time keep their last values
-        (a Finnhub rate-limit hiccup shouldn't blank growth and momentum for a day)."""
+        (a Finnhub rate-limit hiccup shouldn't blank growth and momentum for a day). SEC's figures also
+        beat the fallback a provider supplied this time."""
         if errors and previous:
             metrics, sources = dict(metrics), dict(sources)
             for field, src in previous["sources"].items():
-                if src in errors and field not in metrics and previous["metrics"].get(field) is not None:
+                if field == "_sec":  # SEC's coverage goes with its kept figures
+                    if "sec" in errors:
+                        sources.setdefault(field, src)
+                    continue
+                if src in errors and (field not in metrics or src == "sec") and previous["metrics"].get(field) is not None:
                     metrics[field], sources[field] = previous["metrics"][field], src
+        metrics, sources = with_fcf_margin(metrics, sources)
         as_of = datetime.now(UTC)
         sources = sources | {"_version": FUNDAMENTALS_VERSION}
         with session_scope(self.engine) as s:
-            s.merge(Fundamental(symbol=symbol, as_of=as_of, metrics=metrics, sources=sources))
+            upsert(s, Fundamental, symbol=symbol, as_of=as_of, metrics=metrics, sources=sources)
         return metrics, sources, as_of
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
@@ -417,17 +565,22 @@ class MarketService:
             except ProviderError:
                 directory = {}
         with session_scope(self.engine) as s:
-            for sym in symbols:
-                inst = s.get(Instrument, sym) or Instrument(symbol=sym)
-                info = directory.get(sym)
-                if info:
-                    inst.type = inst.type or info.type
-                    inst.name = inst.name or info.name
-                if self.profile_provider is not None and not inst.sector:
-                    try:
-                        prof = self.profile_provider.get_info(sym)
-                    except ProviderError:
-                        prof = {}
-                    inst.sector = prof.get("sector") or ("ETF" if prof.get("quoteType") == "ETF" else None)
-                    inst.industry = prof.get("industry") or prof.get("category")
-                s.merge(inst)
+            known = {i.symbol: i for i in s.scalars(select(Instrument).where(Instrument.symbol.in_(symbols)))}
+        rows = []
+        for sym in symbols:
+            inst = known.get(sym) or Instrument(symbol=sym)
+            row = dict(symbol=sym, type=inst.type, name=inst.name, sector=inst.sector, industry=inst.industry)
+            if info := directory.get(sym):
+                row["type"], row["name"] = inst.type or info.type, inst.name or info.name
+            if self.profile_provider is not None and not inst.sector:
+                try:
+                    prof = self.profile_provider.get_info(sym)
+                except ProviderError:
+                    prof = {}
+                row["sector"] = prof.get("sector") or ("ETF" if prof.get("quoteType") == "ETF" else None)
+                row["industry"] = prof.get("industry") or prof.get("category")
+            rows.append(row)
+        # Upserted in a fresh transaction (portfolio loads call this concurrently), after the fetches.
+        with session_scope(self.engine) as s:
+            for row in rows:
+                upsert(s, Instrument, **row, updated_at=datetime.now(UTC))

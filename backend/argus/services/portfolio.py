@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Engine, delete, func, select
 
 from argus.db import session_scope
 from argus.errors import ArgusError
-from argus.market_calendar import NY, market_status, session_date
+from argus.market_calendar import NY, market_status, session_date, trade_session
 from argus.models import AuditLog, Instrument, NavDaily, Portfolio, Target, Transaction, TxnType
 from argus.providers.base import Quote
-from argus.services.lots import EPS, PositionState, build_positions
+from argus.services.lots import EPS, Lot, PositionState, build_positions
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
 # Read-only view that combines every portfolio (positions, summary, performance, exposure).
@@ -59,6 +59,18 @@ def position_to_dict(p: PositionState | None, symbol: str) -> dict:
 
 
 log = logging.getLogger("argus.portfolio")
+
+
+def _sold_after(pos: PositionState, quote_day: date) -> list[Lot]:
+    """Shares a SELL made after `quote_day`'s session (after its close, or later) took from lots held
+    through it, as lots: a sale after the close is next-session money (B-046), like a buy."""
+    out = []
+    for r in pos.realized:
+        if r.lot_opened is None or r.qty <= EPS or r.ts.astimezone(NY).date() < quote_day:
+            continue
+        if trade_session(r.ts) > quote_day and trade_session(r.lot_opened) <= quote_day:
+            out.append(Lot(r.lot_txn_id, r.symbol, r.lot_opened, r.lot_kind or TxnType.BUY.value, r.qty, r.cost / r.qty))
+    return out
 
 
 class PortfolioService:
@@ -304,6 +316,29 @@ class PortfolioService:
                     m.fees += pos.fees
             return merged
 
+    @staticmethod
+    def _session_day(pos: PositionState, q: Quote, quote_day: date) -> tuple[float, float, bool, list[Lot]]:
+        """Day P&L of the quote's session for the shares held through it, its base, whether any were
+        bought in it, and the lots bought after it closed (next-session money, left out). Shares sold
+        after the close (also next-session money, B-046) still count: they were held through it."""
+        day, day_base, bought_today, after = 0.0, 0.0, False, []
+        for lot, held_now in [*((l, True) for l in pos.lots), *((l, False) for l in _sold_after(pos, quote_day))]:
+            lot_session = trade_session(lot.opened)
+            if lot_session > quote_day:
+                # Bought after the quote's session closed: not part of this session's Day P&L or its
+                # base; its move from the fill shows as after-hours P&L (if it's still held).
+                if held_now:
+                    after.append(lot)
+                continue
+            # Shares bought in the quote's session gain from their cost, not from the prior close.
+            # OPENING lots are transfers, so their (old) cost is never a day reference.
+            bought_that_day = lot.kind == TxnType.BUY and lot_session == quote_day
+            bought_today |= bought_that_day
+            ref = lot.cost_per_share if bought_that_day else (q.prev_close or q.price)
+            day += lot.qty * (q.price - ref)
+            day_base += lot.qty * ref
+        return day, day_base, bought_today, after
+
     def summary(self, portfolio: str | int, quotes: dict[str, Quote] | None = None,
                 now: datetime | None = None, include_lots: bool = False) -> dict:
         """Positions with market value and P&L. Without quotes, only cost-side fields are filled."""
@@ -317,14 +352,20 @@ class PortfolioService:
 
         rows = []
         tot = {"market_value": 0.0, "cost_basis": 0.0, "day_pnl": 0.0, "realized_pnl": 0.0, "dividends": 0.0}
-        ext_pnl, ext_mv, ext_sessions = 0.0, 0.0, set()
+        ext_pnl, ext_mv, ext_sessions, after_mv, sold_mv = 0.0, 0.0, set(), 0.0, 0.0
         priced_all = True
         for sym, pos in sorted(state.items()):
             tot["realized_pnl"] += pos.realized_pnl
             tot["dividends"] += pos.dividends
-            if not pos.is_open:
-                continue
             q = quotes.get(sym)
+            if not pos.is_open:
+                # Sold out after the close: those shares were still held through the quote's session.
+                # No row (nothing is held), but the totals keep its session P&L.
+                if q:
+                    quote_day = session_date(q.as_of)
+                    tot["day_pnl"] += self._session_day(pos, q, quote_day)[0]
+                    sold_mv += sum(l.qty for l in _sold_after(pos, quote_day)) * q.price
+                continue
             inst = instruments.get(sym)
             row = {
                 "symbol": sym,
@@ -341,28 +382,35 @@ class PortfolioService:
             tot["cost_basis"] += pos.cost_basis
             if q:
                 mv = pos.qty * q.price
-                day = 0.0
                 quote_day = session_date(q.as_of)
-                for lot in pos.lots:
-                    # Shares bought in the quote's session gain from their cost, not from the prior close.
-                    # OPENING lots are transfers, so their (old) cost is never a day reference.
-                    bought_that_day = lot.kind == TxnType.BUY and lot.opened.astimezone(NY).date() == quote_day
-                    ref = lot.cost_per_share if bought_that_day else (q.prev_close or q.price)
-                    day += lot.qty * (q.price - ref)
+                day, day_base, bought_today, after = self._session_day(pos, q, quote_day)
+                sold_mv += sum(l.qty for l in _sold_after(pos, quote_day)) * q.price
+                # Day % on the same base as Day P&L, so a position bought today shows its move since the fill.
+                change_pct = (day / day_base * 100 if day_base > EPS else None) if bought_today else q.change_pct
                 row |= {
-                    "price": q.price, "prev_close": q.prev_close, "change_pct": q.change_pct,
+                    "price": q.price, "prev_close": q.prev_close, "change_pct": change_pct,
                     "market_value": mv, "unrealized_pnl": mv - pos.cost_basis,
                     "unrealized_pct": (mv / pos.cost_basis - 1) * 100 if pos.cost_basis > EPS else None,
                     "day_pnl": day, "quote_as_of": q.as_of.isoformat(), "quote_source": q.source,
                 }
                 tot["market_value"] += mv
                 tot["day_pnl"] += day
+                after_mv += sum(l.qty for l in after) * q.price
+                # After-hours P&L runs from the last close, or from the fill for shares bought since.
+                last = q.ext_price if q.ext_price is not None else q.price
+                lot_ext = sum(l.qty * (last - (l.cost_per_share if l.kind == TxnType.BUY else q.price)) for l in after)
                 if q.ext_price is not None:
                     row |= {"ext_price": q.ext_price, "ext_change_pct": q.ext_change_pct, "ext_session": q.ext_session,
-                            "ext_as_of": q.ext_as_of.isoformat(), "ext_pnl": pos.qty * q.ext_change}
+                            "ext_as_of": q.ext_as_of.isoformat(),
+                            "ext_pnl": (pos.qty - sum(l.qty for l in after)) * q.ext_change + lot_ext}
                     ext_pnl += row["ext_pnl"]
                     ext_mv += mv
                     ext_sessions.add(q.ext_session)
+                elif after:
+                    # No after-hours trade yet: the fill-to-close difference is still after-hours money.
+                    row["ext_pnl"] = lot_ext
+                    ext_pnl += lot_ext
+                    ext_sessions.add("post")
             else:
                 priced_all = False
             if include_lots:
@@ -373,7 +421,9 @@ class PortfolioService:
         mv = tot["market_value"]
         for r in rows:
             r["weight_pct"] = (r["market_value"] / mv * 100) if mv and "market_value" in r else None
-        prev_mv = mv - tot["day_pnl"]
+        # The last session's starting value: leaving out shares bought after it closed, and counting
+        # shares sold since (they were held through it).
+        prev_mv = mv - after_mv + sold_mv - tot["day_pnl"]
         totals = tot | {
             "position_count": len(rows),
             "unrealized_pnl": mv - tot["cost_basis"] if priced_all else None,

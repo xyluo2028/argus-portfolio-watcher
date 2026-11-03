@@ -34,6 +34,21 @@ def test_build_rows_derives_ratios_one_row_per_company():
     assert c["revenue_unreliable"] and c["net_margin_pct"] is None and c["ps"] is None  # profit 90x revenue
 
 
+def test_build_rows_rejects_net_income_in_thousands():
+    # Proxy pay-versus-performance tables tag net income in thousands as dollars, and SEC frames
+    # serve the latest filing: LOAR-like 72,146 on $496M revenue, ESTC-like prior year = this year / 1000.
+    tickers = [{"cik": 1, "ticker": "LOAR", "name": "Loar"}, {"cik": 2, "ticker": "ESTC", "name": "Elastic"}]
+    annual = {"revenue": {1: 496_283_000.0, 2: 1_739_331_000.0}, "net_income": {1: 72_146.0, 2: 367_766_000.0}}
+    prior = {"revenue": {1: 402_819_000.0, 2: 1_483_296_000.0}, "net_income": {1: 22_231.0, 2: 367_766.0}}
+    rows = {r["symbol"]: r for r in sc.add_prices(sc.build_rows(tickers, annual, prior, {}), {
+        "LOAR": {"market_cap": 5.9e9, "quote_type": "EQUITY"}, "ESTC": {"market_cap": 1e10, "quote_type": "EQUITY"}})}
+    loar, estc = rows["LOAR"], rows["ESTC"]
+    assert loar["net_income"] is None and loar["pe"] is None and loar["net_margin_pct"] is None
+    assert loar["revenue"] == 496_283_000.0 and loar["ps"] == pytest.approx(5.9e9 / 496_283_000)
+    assert estc["net_income"] == 367_766_000.0 and estc["pe"] == pytest.approx(1e10 / 367_766_000)
+    assert estc["net_income_prev"] is None and estc["earnings_growth_pct"] is None
+
+
 def test_screen_filters_sorts_and_skips_otc():
     rows = _rows()
     r = sc.screen(rows, {"market_cap": [500, None]}, sort="market_cap")

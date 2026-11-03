@@ -90,7 +90,8 @@ export interface Summary {
     unrealized_pnl: number | null;
     unrealized_pct: number | null;
     realized_pnl: number;
-    dividends: number;
+    dividends: number;  // recorded DIVIDEND transactions + dividends_accrued
+    dividends_accrued: number;  // estimated, from ex-dates held through that no DIVIDEND records yet
     position_count: number;
     fully_priced: boolean;
     ext_pnl: number | null;
@@ -112,11 +113,34 @@ export interface HistoryResponse {
   indicators?: Record<string, (number | null)[] | Record<string, (number | null)[]>>;
 }
 
+/** Daily valuation ratios (by New York date) and quarterly revenue, for the price chart's panes. */
+export interface FundamentalSeries {
+  symbol: string; period: string;
+  ratios: Record<string, [string, number | null][]>; medians: Record<string, number>; labels: Record<string, string>;
+  revenue: { period_end: string; revenue: number; yoy_pct: number | null }[]; errors: Record<string, string>;
+}
+
 export interface Fundamentals {
   symbol: string;
   as_of: string;
   metrics: Record<string, number | null>;
   sources: Record<string, string>;
+  /** Coverage of the SEC-based figures; null when SEC has nothing for the symbol. */
+  sec?: SecCoverage | null;
+}
+
+/** How current SEC's XBRL data is: `stale` once its latest period is older than a newer report should be. */
+export interface SecFreshness {
+  latest_period: string | null;
+  latest_period_age_days: number | null;
+  stale: boolean;
+}
+
+export interface SecCoverage extends SecFreshness {
+  fcf_ttm_quarters: string[] | null;  // newest first
+  fcf_ttm_through: string | null;
+  /** Quarters behind SEC's revenue_ttm, eps_ttm and revenue_growth_q_yoy_pct (newest first); null when the providers' were newer. */
+  ttm_quarters?: string[] | null;
 }
 
 export interface FinancialPeriod {
@@ -127,6 +151,8 @@ export interface FinancialPeriod {
   net_margin_pct?: number;
   net_income?: number;
   eps_diluted?: number;
+  /** Set when fiscal-Q4 EPS isn't filed for the quarter and was worked out from the full year. */
+  eps_diluted_derived?: "net_income_per_share" | "annual_less_ytd" | "annual_less_quarters";
   free_cash_flow?: number;
 }
 
@@ -147,7 +173,7 @@ export interface EarningsHistory {
   next: { date: string; timing: "bmo" | "amc" | "dmh" | null; eps_estimate: number | null; revenue_estimate: number | null } | null;
 }
 
-export interface Financials {
+export interface Financials extends SecFreshness {
   symbol: string;
   company: string | null;
   period: "quarterly" | "annual";
@@ -163,8 +189,11 @@ export interface Performance {
   summary: {
     start?: string; end?: string; sessions?: number; twr_pct?: number; benchmark_pct?: number | null;
     excess_pct?: number | null; max_drawdown_pct?: number; volatility_pct?: number | null; sharpe?: number | null;
+    risk_sessions?: number; risk_note?: string | null;
     gain?: number; net_invested?: number; start_value?: number; end_value?: number;
+    dividends_accrued?: number;  // estimated dividends from ex-dates held through, included in gain/TWR
   };
+  dividends_accrued: { symbol: string; ex_date: string; per_share: number; shares: number; amount: number }[];
   series: { d: string; value: number; twr_pct: number; bench_pct: number | null }[];
 }
 
@@ -200,6 +229,28 @@ async function get<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 const send = <T>(method: string, path: string, body?: unknown) =>
   get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+
+export type DcfMetricKey = "free_cash_flow" | "operating_cash_flow" | "net_income" | "revenue";
+export interface DcfMetric {
+  label: string; currency: string;
+  base: number | null; base_end: string | null; base_basis: string | null;
+  annual: { period_end: string; value: number }[];
+  growth: { hist_3y: number | null; hist_5y: number | null; analyst: number | null; analyst_basis: string | null };
+  multiple: { current: number | null; median_5y: number | null; p25_5y: number | null; p75_5y: number | null; points: number;
+              history: { date: string; v: number }[] };
+}
+/** Saved calculator inputs; percentages are in percent (10 = 10%). */
+export interface DcfInputs {
+  metric: DcfMetricKey; base: number; years: number; growth: number; decay: number; multiple: number;
+  target_return: number; dps: number; dividend_growth: number; share_change: number;
+}
+export interface DcfSaved { inputs: DcfInputs; updated_at: string }
+export interface DcfData {
+  symbol: string; company: string | null; price: number | null; market_cap: number | null; shares: number | null;
+  dps: number; dividend_growth_5y: number | null; share_change: number | null; share_change_years: number | null;
+  analyst_target: number | null; analyst_count: number | null;
+  metrics: Record<DcfMetricKey, DcfMetric>; saved: DcfSaved | null;
+}
 
 export interface PortfolioDeletion {
   portfolio: PortfolioRef; dry_run: boolean; backup?: string;
@@ -249,6 +300,9 @@ export interface WatchItem {
 export interface CalEvent {
   symbol: string; kind: "earnings" | "ex_dividend" | "dividend_pay"; date: string; hour: string | null; held: boolean;
   epsEstimate?: number; epsActual?: number; epsSurprisePct?: number; revenueEstimate?: number; revenueActual?: number;
+  ex_date?: string;  // dividend_pay: the ex-date it belongs to; `held` means shares were held going into it
+  estimated?: boolean;  // ex_dividend projected from the payment rhythm
+  per_share?: number; amount?: number;  // dividends: expected cash per share, and for the shares held into the ex-date
 }
 
 export interface AlertRule {
@@ -284,6 +338,13 @@ export interface SimResult {
 }
 
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
+export interface CompareRow {
+  symbol: string; name: string | null; type: string | null; price: number | null; change_pct: number | null;
+  ext_price: number | null; ext_change_pct: number | null; ext_session: ExtSession | null;
+  [metric: string]: number | string | null;
+}
+export interface CompareFull { fields: string[]; rows: CompareRow[]; errors: Record<string, string>; pending: string[] }
+export interface CompareHistory { period: string; start: string; series: Record<string, [string, number][]> }
 
 export interface CompanyProfile {
   symbol: string; as_of: string; name?: string; summary?: string; quote_type?: string;
@@ -310,7 +371,7 @@ export interface FundHoldings {
 export interface DividendHolding {
   symbol: string; name: string | null; qty: number; pays: boolean; frequency: string | null; rate: number;
   trailing_12m: number; last_ex_date: string | null; last_amount: number | null; irregular: boolean;
-  next_ex_date_est: string | null; annual_income: number; yield_pct: number | null; yield_on_cost_pct: number | null;
+  next_ex_date_est: string | null; next_ex_date_announced: boolean; annual_income: number; yield_pct: number | null; yield_on_cost_pct: number | null;
   received_ytd: number; projected_rest_of_year: number;
 }
 export interface Dividends {
@@ -362,7 +423,8 @@ export interface GrowthProfile {
 
 export interface Research {
   symbol: string; as_of: string; fund: boolean; price: number | null; errors: Record<string, string>;
-  analysts: { count: number | null; rating: string | null; rating_mean: number | null; target_mean: number | null;
+  analysts: { count: number | null; rating: string | null; rating_mean: number | null;
+              rating_source: "counts" | "yahoo" | null; target_count: number | null; target_mean: number | null;
               target_median: number | null; target_high: number | null; target_low: number | null; upside_pct?: number;
               trend: { period: string; strongBuy: number; buy: number; hold: number; sell: number; strongSell: number }[] } | null;
   estimates: { trend: Record<string, Record<string, number | null>> | null; revisions: Record<string, Record<string, number | null>> | null } | null;
@@ -416,6 +478,8 @@ export interface ScreenResult { status: ScreenerStatus; matches: number; rows: S
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
+  fundamentalSeries: (symbol: string, period: string) =>
+    get<FundamentalSeries>(`/api/fundamental-series/${enc(symbol)}?period=${period}`),
   history: (symbol: string, period: string, interval: string, indicators: string[]) =>
     get<HistoryResponse>(
       `/api/history/${enc(symbol)}?period=${period}&interval=${interval}` +
@@ -463,8 +527,16 @@ export const api = {
   research: (symbol: string) => get<Research>(`/api/research/${enc(symbol)}`),
   returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  valuation: (symbol: string) => get<DcfData>(`/api/valuation/${enc(symbol)}`),
+  valuationModels: () => get<{ symbol: string; metric: DcfMetricKey; updated_at: string }[]>("/api/valuation"),
+  saveValuation: (symbol: string, inputs: DcfInputs | null) =>
+    send<{ saved: DcfSaved | null }>("PUT", `/api/valuation/${enc(symbol)}`, { inputs }),
+  peerList: (symbol: string) => get<{ symbol: string; peers: string[]; custom: boolean }>(`/api/peers/${enc(symbol)}?metrics=false`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
+  compareFull: (symbols: string[]) => get<CompareFull>(`/api/compare?full=true&symbols=${symbols.map(enc).join(",")}`),
+  compareHistory: (symbols: string[], period: string) =>
+    get<CompareHistory>(`/api/compare/history?period=${period}&symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7, scope: { portfolio?: string; symbol?: string } = {}) => {
     const qs = new URLSearchParams({ days_ahead: String(daysAhead), days_back: String(daysBack) });

@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from argus.market_calendar import market_status, session_date
+from argus.market_calendar import market_status, session_date, trade_session
 from argus.symbols import is_plausible_symbol, normalize_symbol, to_yahoo
 
 NY = ZoneInfo("America/New_York")
@@ -56,3 +56,13 @@ def test_session_date_maps_off_hours_to_last_session():
     assert session_date(ny(2026, 9, 27, 12, 0)) == date(2026, 9, 25)   # Sunday -> Friday
     assert session_date(ny(2026, 9, 28, 2, 0)) == date(2026, 9, 25)    # Monday 2am -> Friday
     assert session_date(ny(2026, 9, 28, 11, 0)) == date(2026, 9, 28)   # Monday session
+
+
+def test_trade_session_moves_after_close_trades_to_the_next_session():
+    assert trade_session(ny(2026, 10, 26, 15, 59)) == date(2026, 10, 26)
+    assert trade_session(ny(2026, 10, 26, 16, 0)) == date(2026, 10, 26)    # date-only entries land at 16:00
+    assert trade_session(ny(2026, 10, 26, 22, 15)) == date(2026, 10, 27)   # after hours -> next session
+    assert trade_session(ny(2026, 10, 23, 18, 0)) == date(2026, 10, 26)    # Friday evening -> Monday
+    assert trade_session(ny(2026, 10, 25, 12, 0)) == date(2026, 10, 26)    # Sunday -> Monday
+    assert trade_session(ny(2026, 11, 27, 16, 0)) == date(2026, 11, 27)    # half day, date-only entry
+    assert trade_session(ny(2000, 1, 3, 20, 0)) == date(2000, 1, 3)        # before the calendar: NY date

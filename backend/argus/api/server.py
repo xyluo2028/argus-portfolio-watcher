@@ -40,6 +40,10 @@ class PeersBody(BaseModel):
     peers: list[str] | None  # None resets to the suggested peers
 
 
+class ValuationBody(BaseModel):
+    inputs: dict | None  # None forgets the saved model
+
+
 class ScreenBody(BaseModel):
     filters: dict[str, list[float | None]] = {}
     sort: str = "market_cap"
@@ -195,6 +199,22 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
         return await run(argus.history, symbol, period, interval, specs)
 
+    @app.get("/api/fundamental-series/{symbol}")
+    async def fundamental_series(symbol: str, period: str = "1y"):
+        return await run(argus.fundamental_series, symbol, period)
+
+    @app.get("/api/valuation")
+    async def valuation_models():
+        return await run(argus.valuation_models)
+
+    @app.get("/api/valuation/{symbol}")
+    async def valuation(symbol: str):
+        return await run(argus.valuation, symbol, dict(hub.quotes))
+
+    @app.put("/api/valuation/{symbol}")
+    async def save_valuation(symbol: str, body: ValuationBody):
+        return {"saved": await run(argus.save_valuation, symbol, body.inputs, "ui")}
+
     @app.get("/api/profile/{symbol}")
     async def company_profile(symbol: str, refresh: bool = False):
         return await run(argus.company_profile, symbol, refresh)
@@ -204,8 +224,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.fund_holdings, symbol)
 
     @app.get("/api/peers/{symbol}")
-    async def peers(symbol: str):
-        return await run(argus.peers, symbol)
+    async def peers(symbol: str, metrics: bool = True):
+        return await run(argus.peers, symbol, metrics)
 
     @app.put("/api/peers/{symbol}")
     async def set_peers(symbol: str, body: PeersBody):
@@ -288,9 +308,13 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.watchlists.remove, [symbol], name, "ui")
 
     @app.get("/api/compare")
-    async def compare(symbols: str, fields: str | None = None):
+    async def compare(symbols: str, fields: str | None = None, full: bool = False):
         f = [x.strip() for x in fields.split(",")] if fields else None
-        return await run(argus.compare, symbols.split(","), f)
+        return await run(argus.compare, symbols.split(","), f, full)
+
+    @app.get("/api/compare/history")
+    async def compare_history(symbols: str, period: str = "1y"):
+        return await run(argus.compare_history, symbols.split(","), period)
 
     # -- routines: brief, events, alerts, notes ------------------------------------
     @app.get("/api/brief/{ref}")

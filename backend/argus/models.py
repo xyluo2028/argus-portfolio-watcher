@@ -311,6 +311,16 @@ class PeerList(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
+class ValuationModel(Base):
+    """Your saved DCF calculator inputs for a symbol (see services/valuation.py)."""
+
+    __tablename__ = "valuation_model"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
 class NavDaily(Base):
     """Filled in P1 by the performance engine."""
 
@@ -346,6 +356,7 @@ __all__ = [
     "QuoteCache",
     "Transaction",
     "TxnType",
+    "ValuationModel",
     "Watchlist",
     "WatchlistItem",
     "utcnow",

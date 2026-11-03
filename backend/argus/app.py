@@ -16,12 +16,12 @@ from typing import Callable
 from sqlalchemy import Engine, select
 
 from argus.config import Settings, load_settings
-from argus.db import make_engine, session_scope
+from argus.db import make_engine, session_scope, upsert
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
-from argus.market_calendar import NY, market_status, session_date, sessions_between
-from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
+from argus.market_calendar import NY, market_status, session_date, sessions_between, trade_session
+from argus.models import (AuditLog, CompanyProfile, ValuationModel, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
                           Target)
 from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
@@ -34,6 +34,7 @@ from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
 from argus.services import screener as screener_mod
 from argus.services import risk as risk_mod
+from argus.services import valuation as valuation_mod
 from argus.providers.french import FrenchFactors
 from argus.providers.macro import MacroProvider
 from argus.services import market_context as context_mod
@@ -41,7 +42,7 @@ from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
-from argus.services.market import MarketService
+from argus.services.market import MarketService, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import SnapshotService
@@ -51,6 +52,64 @@ from argus.symbols import is_plausible_symbol, normalize_symbol
 
 log = logging.getLogger("argus.app")
 FUND_RETRY_S = 15 * 60
+
+RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
+# Momentum metric -> the chart range it is measured over, so the stock page's card and chart agree.
+MOMENTUM_RANGES = {"return_1w_pct": "5D", "return_1m_pct": "1M", "return_3m_pct": "3M", "return_6m_pct": "6M",
+                   "return_ytd_price_pct": "YTD", "return_1y_pct": "1Y"}
+
+
+def _return_anchor(status: dict) -> date:
+    """"Now" for a return: today during the regular session (the live price), else the last completed session."""
+    return datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+
+
+def range_bases(closes: list[tuple[date, float]], anchor: date, months: dict[str, int] = RETURN_MONTHS) -> dict:
+    """Base close per range for returns ending at `anchor` (closes sorted by date): 1D the previous
+    close, 5D five sessions back, month ranges the close on or before that calendar date, YTD last
+    year's final close, Max the first close. A range reaching back before the history is None."""
+    from argus.services.dividends import add_months
+
+    before = [c for c in closes if c[0] < anchor]
+
+    def on_or_before(d: date) -> dict | None:
+        if not before or d < before[0][0]:
+            return None
+        day, close = next(c for c in reversed(before) if c[0] <= d)
+        return {"date": day.isoformat(), "close": close}
+
+    bases: dict[str, dict | None] = {
+        "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
+        "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
+    }
+    for label, n in months.items():
+        bases[label] = on_or_before(add_months(anchor, -n))
+    bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
+    bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
+    return bases
+# Errors a retry won't fix: a provider not set up, a company SEC has no XBRL for.
+_LASTING_ERRORS = ("not configured", "SEC_USER_AGENT", "not found in EDGAR", "no XBRL")
+
+
+def _transient(err: str | None) -> bool:
+    return bool(err) and not any(t in err for t in _LASTING_ERRORS)
+
+
+ANNOUNCED_REACH_DAYS = 183  # a declared ex-date this far past a window can still replace an estimate in it
+
+
+def _event_happened(e: dict, now: datetime) -> bool:
+    """Whether a calendar event is behind us: a past date, reported actuals, or today's
+    before-open / after-close earnings once that time has passed (`now` in New York)."""
+    today = now.date().isoformat()
+    if e["date"] != today:
+        return e["date"] < today
+    if e["kind"] != "earnings":
+        return False
+    if e.get("epsActual") is not None or e.get("revenueActual") is not None:
+        return True
+    hm = (now.hour, now.minute)
+    return (e.get("hour") == "bmo" and hm >= (9, 30)) or (e.get("hour") == "amc" and hm >= (16, 0))
 
 
 class Argus:
@@ -66,12 +125,13 @@ class Argus:
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
         self.factors = FrenchFactors(self.settings.cache_dir)
-        self.macro = MacroProvider()
+        self.macro = MacroProvider(cache_dir=self.settings.cache_dir)
         self.screener = screener_mod.ScreenerService(self.settings.cache_dir, self.market.sec, self.market.profile_provider)
         self.screener_progress: str | None = None
         self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)
         self._jobs_lock = threading.Lock()
         self._research: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, bundle)
+        self._valuation: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, DCF inputs)
         self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
 
     def run_background(self, name: str, fn: Callable[[], object]) -> bool:
@@ -139,15 +199,44 @@ class Argus:
             self.describe_instruments(open_syms)
         except Exception as e:  # never block the summary on metadata
             log.warning("instrument metadata: %s", e)
-        quotes = {s: live_quotes[s] for s in open_syms if live_quotes and s in live_quotes}
-        missing = [s for s in open_syms if s not in quotes]
+        # A position sold out after the last close was still held through that session (B-117): price it too.
+        last = session_date(datetime.now(UTC))
+        sold_out = [s for s, p in state.items() if not p.is_open and any(
+            r.ts.astimezone(NY).date() >= last and trade_session(r.ts) > last for r in p.realized)]
+        priced = open_syms + sold_out
+        quotes = {s: live_quotes[s] for s in priced if live_quotes and s in live_quotes}
+        missing = [s for s in priced if s not in quotes]
         errors: dict[str, str] = {}
         if with_quotes and missing:
             got, errors = self.market.get_quotes(missing)
             quotes |= got
         out = self.portfolios.summary(ref, quotes if with_quotes else {}, include_lots=include_lots)
         out["quote_errors"] = errors
+        try:
+            accrued = sum(x["amount"] for x in self.accrued_dividends(ref))
+        except Exception as e:  # never block the summary on dividend history
+            log.warning("accrued dividends: %s", e)
+            accrued = 0.0
+        # `dividends` is total dividend income: recorded DIVIDEND transactions plus the estimated
+        # accruals for ex-dates held through that none records yet (`dividends_accrued`).
+        out["totals"]["dividends_accrued"] = accrued
+        out["totals"]["dividends"] += accrued
         return out
+
+    def accrued_dividends(self, ref: str, txns: list | None = None) -> list[dict]:
+        """Estimated dividends from ex-dates held through, per portfolio, that no DIVIDEND transaction
+        records (see dividends.accrue). Price-only closes drop by the dividend on its ex-date, so
+        performance and totals count these as income to reconcile with Day P&L."""
+        p = self.portfolios.view(ref)
+        if txns is None:
+            txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
+        by_pf: dict = {}
+        for t in txns:
+            by_pf.setdefault(getattr(t, "portfolio_id", None), []).append(t)
+        histories = self.dividend_histories(sorted({t.symbol for t in txns}))
+        today = datetime.now(NY).date()
+        out = [x for group in by_pf.values() for x in dividends_mod.accrue(group, histories, today)]
+        return sorted(out, key=lambda x: (x["ex_date"], x["symbol"]))
 
     def history(self, symbol: str, period: str = "1y", interval: str = "1d",
                 indicators: list[str] | None = None) -> dict:
@@ -170,39 +259,95 @@ class Argus:
             }
         return out
 
-    RETURN_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60}
+    # Chart panes from Finnhub's quarterly ratio history: field -> (Finnhub key, label)
+    FUND_SERIES = {"pe_ttm": ("peTTM", "P/E"), "ps_ttm": ("psTTM", "P/S"), "pb": ("pb", "P/B"),
+                   "ev_ebitda": ("evEbitdaTTM", "EV/EBITDA")}
+    FUND_SERIES_STALE_DAYS = 200  # a quarter's figures stop carrying forward after this (missed filings)
+
+    def fundamental_series(self, symbol: str, period: str = "1y") -> dict:
+        """Daily valuation ratios and quarterly revenue for the price chart's panes.
+
+        Finnhub reports each ratio once a quarter. Its denominator (TTM EPS, sales per share, book value
+        per share, EBITDA) is recovered from the close on that quarter's end, then every daily close is
+        divided by the latest one, so a ratio moves with the price day by day and equals Finnhub's at
+        each quarter end. A quarter's figures apply from its end date (they're published a few weeks
+        later). Ratios are null where they mean nothing (a P/E on losses). `medians`: 5-year median of
+        the quarterly values. `revenue`: SEC quarterly revenue with its year-over-year change."""
+        from bisect import bisect_right
+
+        sym = normalize_symbol(symbol)
+        if period in ("1d", "5d"):
+            raise ArgusError("INVALID_ARG", "Fundamental series are daily; use a range of a month or more.")
+        bars = self.market.get_history(sym, period, "1d")
+        full = self.market.get_history(sym, "max", "1d") if bars else []
+        days = [b.ts.astimezone(NY).date() for b in full]
+        close_at = dict(zip(days, (b.c for b in full)))
+        chart_days = [b.ts.astimezone(NY).date() for b in bars]
+        out: dict = {"symbol": sym, "period": period, "ratios": {}, "medians": {}, "labels": {}, "revenue": [],
+                     "errors": {}}
+
+        def on_or_before(d: date) -> float | None:
+            i = bisect_right(days, d)
+            return close_at[days[i - 1]] if i else None
+
+        series = {}
+        if self.market.directory is not None and bars:
+            try:
+                series = self.market.directory.ratio_series(sym)
+            except ProviderError as e:
+                out["errors"]["ratios"] = str(e)
+        five_years_ago = datetime.now(NY).date() - timedelta(days=5 * 365)
+        for key, (fk, label) in self.FUND_SERIES.items():
+            out["labels"][key] = label
+            pts = sorted((date.fromisoformat(x["period"]), float(x["v"])) for x in series.get(fk) or []
+                         if isinstance(x.get("v"), (int, float)) and x.get("period"))
+            if not pts:
+                continue
+            ends = [d for d, _ in pts]
+            denoms = []
+            for d, ratio in pts:
+                c = on_or_before(d)
+                denoms.append(c / ratio if c and ratio > 0 else None)
+            values = []
+            for d, c in zip(chart_days, (b.c for b in bars)):
+                i = bisect_right(ends, d) - 1
+                ok = i >= 0 and denoms[i] and (d - ends[i]).days <= self.FUND_SERIES_STALE_DAYS
+                values.append([d.isoformat(), round(c / denoms[i], 2) if ok else None])
+            if any(v is not None for _, v in values):
+                out["ratios"][key] = values
+            recent = sorted(v for d, v in pts if d >= five_years_ago and v > 0)
+            if recent:
+                out["medians"][key] = round(recent[len(recent) // 2] if len(recent) % 2 else
+                                            (recent[len(recent) // 2 - 1] + recent[len(recent) // 2]) / 2, 2)
+        if bars:
+            limit = 60 if period == "max" else 24 if period in ("2y", "5y") else 12
+            try:
+                quarters = sorted(self.market.get_financials(sym, "quarterly", limit)["periods"],
+                                  key=lambda p: p["period_end"])
+                rev = {p["period_end"]: p.get("revenue") for p in quarters if p.get("revenue") is not None}
+                ends = sorted(rev)
+                for e in ends:
+                    prior = date.fromisoformat(e) - timedelta(days=365)
+                    year_ago = next((rev[x] for x in ends if abs((date.fromisoformat(x) - prior).days) <= 20), None)
+                    out["revenue"].append({"period_end": e, "revenue": rev[e],
+                                           "yoy_pct": (rev[e] / year_ago - 1) * 100 if year_ago and year_ago > 0 else None})
+            except ArgusError as e:
+                out["errors"]["revenue"] = e.message
+        return out
 
     def return_bases(self, symbol: str) -> dict:
         """The price each chart range is measured from, so a client can show live returns:
         1D the previous close, 5D the close five sessions back, 1M-5Y the close on or before that
         calendar date, YTD last year's final close, Max the first close. Split-adjusted closes,
         dividends not included (price return). A range longer than the history is null."""
-        from argus.services.dividends import add_months
-
         sym = normalize_symbol(symbol)
         bars = self.market.get_history(sym, "max", "1d")
         status = market_status()
-        # "Now" is today's live price during the session; otherwise the last completed close.
-        anchor = datetime.now(NY).date() if status["session"] == "regular" else date.fromisoformat(status["last_session"])
+        anchor = _return_anchor(status)
         closes = [(b.ts.astimezone(NY).date(), b.c) for b in bars]
-        before = [c for c in closes if c[0] < anchor]
-
-        def on_or_before(d: date) -> dict | None:
-            if not before or d < before[0][0]:
-                return None  # the range reaches back before the first bar
-            day, close = next(c for c in reversed(before) if c[0] <= d)
-            return {"date": day.isoformat(), "close": close}
-
-        bases: dict[str, dict | None] = {
-            "1D": {"date": before[-1][0].isoformat(), "close": before[-1][1]} if before else None,
-            "5D": {"date": before[-5][0].isoformat(), "close": before[-5][1]} if len(before) >= 5 else None,
-        }
-        for label, months in self.RETURN_MONTHS.items():
-            bases[label] = on_or_before(add_months(anchor, -months))
-        bases["YTD"] = on_or_before(date(anchor.year - 1, 12, 31))
-        bases["Max"] = {"date": closes[0][0].isoformat(), "close": closes[0][1]} if closes else None
         last = closes[-1] if closes else None
-        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"], "bases": bases,
+        return {"symbol": sym, "anchor": anchor.isoformat(), "session": status["session"],
+                "bases": range_bases(closes, anchor),
                 "last_close": {"date": last[0].isoformat(), "close": last[1]} if last else None}
 
     COMPARE_FIELDS = ("pe_ttm", "pe_forward", "peg", "pb", "ps_ttm", "ev_ebitda", "market_cap",
@@ -231,11 +376,52 @@ class Argus:
                     errors.setdefault(i["symbol"], e.message)
         return {"watchlist": name, "items": items, "errors": errors}
 
-    def compare(self, symbols: list[str], fields: list[str] | None = None) -> dict:
-        """Side-by-side quote + metrics for 2-10 symbols."""
+    COMPARE_MAX = 10
+    COMPARE_PERIODS = {"1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "3y": 3 * 366, "5y": 5 * 366}
+
+    def _compare_symbols(self, symbols: list[str]) -> list[str]:
         syms = list(dict.fromkeys(normalize_symbol(s) for s in symbols if s.strip()))
-        if not 1 <= len(syms) <= 10:
-            raise ArgusError("INVALID_ARG", "Compare 1 to 10 symbols.")
+        if not 1 <= len(syms) <= self.COMPARE_MAX:
+            raise ArgusError("INVALID_ARG", f"Compare 1 to {self.COMPARE_MAX} symbols.")
+        return syms
+
+    def _names(self, syms: list[str]) -> dict[str, dict]:
+        """Name and type per symbol: from instruments we know, else the Finnhub directory."""
+        with session_scope(self.engine) as s:
+            out = {i.symbol: {"name": i.name, "type": i.type} for i in
+                   s.scalars(select(Instrument).where(Instrument.symbol.in_(syms))) if i.name}
+        missing = [x for x in syms if x not in out]
+        if missing and self.market.directory is not None:
+            try:
+                d = self.market.directory.symbol_directory()
+                out |= {x: {"name": d[x].name, "type": d[x].type} for x in missing if x in d}
+            except ProviderError:
+                pass
+        return out
+
+    def compare(self, symbols: list[str], fields: list[str] | None = None, full: bool = False) -> dict:
+        """Side-by-side quote + metrics for 1-10 symbols. `full` returns every indicator the dashboard
+        shows (valuation, growth, profitability, momentum incl. 1M return and price CAGR, dividends,
+        fund figures) plus names; missing fundamentals are fetched first."""
+        syms = self._compare_symbols(symbols)
+        if full:
+            data = self.symbol_fundamentals(syms, wait=True)
+            quotes, errors = self.market.get_quotes(syms)
+            names = self._names(syms)
+            rows = []
+            for sym in syms:
+                q = quotes.get(sym)
+                row = {"symbol": sym, **names.get(sym, {"name": None, "type": None}),
+                       "price": q.price if q else None, "change_pct": q.change_pct if q else None,
+                       "ext_price": q.ext_price if q else None, "ext_change_pct": q.ext_change_pct if q else None,
+                       "ext_session": q.ext_session if q else None}
+                row |= data["metrics"].get(sym, {})
+                if sym not in data["metrics"]:
+                    errors.setdefault(sym, "no fundamentals")
+                rows.append(row)
+            fields_out = sorted({k for r in rows for k in r} - {"symbol", "name", "type", "price", "change_pct",
+                                                                   "ext_price", "ext_change_pct", "ext_session"})
+            return {"fields": fields_out, "rows": rows, "errors": errors, "pending": data["pending"]}
         wanted = fields or list(self.COMPARE_FIELDS)
         quotes, errors = self.market.get_quotes(syms)
         rows = []
@@ -249,6 +435,27 @@ class Argus:
                 errors.setdefault(sym, e.message)
             rows.append(row)
         return {"fields": wanted, "rows": rows, "errors": errors}
+
+    def compare_history(self, symbols: list[str], period: str = "1y") -> dict:
+        """Daily closes for 1-10 symbols over `period` (1mo 3mo 6mo ytd 1y 3y 5y), for a relative-performance
+        chart: {"period", "start", "series": {symbol: [[date, close], ...]}}. Price only, split-adjusted."""
+        syms = self._compare_symbols(symbols)
+        today = datetime.now(NY).date()
+        if period == "ytd":
+            start = date(today.year - 1, 12, 31) - timedelta(days=6)  # last year's final close is the base
+        elif period in self.COMPARE_PERIODS:
+            start = today - timedelta(days=self.COMPARE_PERIODS[period])
+        else:
+            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.",
+                             hint=f"Use one of {', '.join([*self.COMPARE_PERIODS, 'ytd'])}.")
+        closes = self.market.daily_closes_many(syms, start)
+        if period == "ytd":  # start from the last close of the previous year
+            for sym, by_day in closes.items():
+                prior = [d for d in by_day if d.year < today.year]
+                keep = max(prior) if prior else None
+                closes[sym] = {d: c for d, c in by_day.items() if d.year == today.year or d == keep}
+        return {"period": period, "start": start.isoformat(),
+                "series": {s: [[d.isoformat(), round(c, 4)] for d, c in sorted(closes[s].items())] for s in syms}}
 
     # -- tracked symbols, events, alerts, brief ----------------------------------
     # -- company profile & peers ---------------------------------------------------
@@ -301,7 +508,7 @@ class Argus:
             data["suggested_peers"] = self._similar_funds(sym, data.get("category"))
         data = {k: v for k, v in data.items() if v not in (None, "", [])} | {"suggested_peers": data.get("suggested_peers", [])}
         with session_scope(self.engine) as s:
-            s.merge(CompanyProfile(symbol=sym, as_of=now, data=data | {"v": self.PROFILE_VERSION}))
+            upsert(s, CompanyProfile, symbol=sym, as_of=now, data=data | {"v": self.PROFILE_VERSION})
         return {"symbol": sym, "as_of": now.isoformat(), **data}
 
     @staticmethod
@@ -474,8 +681,8 @@ class Argus:
                         ys = yahoo_symbol(*listing) if listing else None
                         if ys and listing[1] == "US":
                             ys = normalize_symbol(ys)
-                        s.merge(SecurityMap(id=k, ticker=listing[0] if listing else None,
-                                            exchange=listing[1] if listing else None, symbol=ys, as_of=now))
+                        upsert(s, SecurityMap, id=k, ticker=listing[0] if listing else None,
+                               exchange=listing[1] if listing else None, symbol=ys, as_of=now)
                         known[k] = (ys, listing[1] if listing else None)
         for k, (rs, _) in keyed.items():
             ys, exch = known.get(k, (None, None))
@@ -639,44 +846,45 @@ class Argus:
         return {"watchlist": name, **self.symbol_fundamentals([i["symbol"] for i in self.watchlists.items(name)])}
 
     def price_stats(self, symbols: list[str]) -> dict[str, dict[str, float | None]]:
-        """From cached daily closes, to the latest close: the 1-month return and the 3- and 5-year
-        compound annual growth rate of the price (price only; null when the history is shorter)."""
-        from argus.services.dividends import add_months
-
+        """From cached daily closes, to the latest close: the momentum returns (1W, 1M, 3M, 6M, YTD,
+        1Y) measured from the same bases as the stock chart's ranges (return_bases), and the 3- and
+        5-year compound annual growth rate of the price (price only; null when the history is shorter).
+        Computed here rather than taken from Finnhub, whose figures lag a session and use other bases."""
         closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=5 * 366 + 10))
+        anchor = _return_anchor(market_status())
         out: dict[str, dict[str, float | None]] = {}
         for sym, by_day in closes.items():
-            days = sorted(by_day)
-            stats: dict[str, float | None] = {"return_1m_pct": None, "cagr_3y_pct": None, "cagr_5y_pct": None}
-            if days:
-                last_d, last = days[-1], by_day[days[-1]]
+            series = sorted(by_day.items())
+            bases = range_bases(series, anchor, {**RETURN_MONTHS, "3Y": 36})
+            last = series[-1][1] if series else None
 
-                def base(months: int) -> float | None:
-                    target = add_months(last_d, -months)
-                    if target < days[0]:
-                        return None  # history doesn't reach back that far
-                    return next((by_day[d] for d in reversed(days) if d <= target), None)
+            def ret(label: str) -> float | None:
+                b = bases.get(label)
+                return (last / b["close"] - 1) * 100 if last is not None and b and b["close"] else None
 
-                b1 = base(1)
-                stats["return_1m_pct"] = (last / b1 - 1) * 100 if b1 else None
-                for years in (3, 5):
-                    b = base(12 * years)
-                    stats[f"cagr_{years}y_pct"] = ((last / b) ** (1 / years) - 1) * 100 if b else None
+            stats: dict[str, float | None] = {key: ret(label) for key, label in MOMENTUM_RANGES.items()}
+            for years in (3, 5):
+                r = ret(f"{years}Y")
+                stats[f"cagr_{years}y_pct"] = ((1 + r / 100) ** (1 / years) - 1) * 100 if r is not None else None
             out[sym] = stats
         return out
 
     @staticmethod
     def _derived(m: dict) -> dict:
-        """Figures computed from other metrics, so every page shows the same value."""
-        fcf, rev = m.get("fcf_ttm"), m.get("revenue_ttm")
-        return {"fcf_margin_pct": fcf / rev * 100 if fcf is not None and rev else None}
+        """Figures computed from other metrics, so every page shows the same value. FCF margin is
+        stored with its source (market.with_fcf_margin: never one source's FCF over another's revenue)."""
+        return {"fcf_margin_pct": m.get("fcf_margin_pct")}
 
     def fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
-        """One symbol's fundamentals with the same computed figures the portfolio views add (1M return,
-        3Y/5Y price CAGR, FCF margin)."""
+        """One symbol's fundamentals with the same computed figures the portfolio views add (momentum
+        returns, 3Y/5Y price CAGR, FCF margin, P/E from the current price)."""
         sym = normalize_symbol(symbol)
-        computed = {"return_1m_pct", "cagr_3y_pct", "cagr_5y_pct", "fcf_margin_pct"}
+        computed = {*MOMENTUM_RANGES, "cagr_3y_pct", "cagr_5y_pct"}
         stored = [f for f in fields if f not in computed] if fields else None
+        try:
+            self.market.get_quotes([sym])  # P/E is the current price ÷ EPS (market.with_pe)
+        except ArgusError as e:
+            log.warning("quote %s: %s", sym, e.message)
         out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
         if fields and not stored:
             out["metrics"] = {}
@@ -689,7 +897,8 @@ class Argus:
         extra = stats | self._derived(full)
         if fields:
             extra = {k: v for k, v in extra.items() if k in fields}
-        return out | {"metrics": out["metrics"] | extra}
+        sources = out.get("sources", {}) | {k: "argus" for k in extra if k in MOMENTUM_RANGES}
+        return out | {"metrics": out["metrics"] | extra, "sources": sources}
 
     def symbol_fundamentals(self, syms: list[str], wait: bool = False) -> dict:
         """Cached fundamentals for many symbols in one call, plus price stats and derived figures. Missing or stale
@@ -742,23 +951,79 @@ class Argus:
     def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
                         symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
         """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
+        scoped = not symbols and portfolio and str(portfolio).lower() != ALL
         if symbols:
             syms = [normalize_symbol(x) for x in symbols]
-        elif portfolio and str(portfolio).lower() != ALL:
+        elif scoped:
             syms = sorted(s for s, p in self.portfolios.positions(portfolio).items() if p.is_open)
         else:
             syms = self.tracked_symbols()
         refreshed = self.events.refresh(syms) if refresh else {"refreshed": [], "failed": {}}
-        today = datetime.now(NY).date()
-        held = set(self.held_positions())
-        rows = self.events.between(syms, today - timedelta(days=days_back), today + timedelta(days=days_ahead),
-                                   ["earnings", "ex_dividend", "dividend_pay"])
+        now = datetime.now(NY)
+        today = now.date()
+        start, end = today - timedelta(days=days_back), today + timedelta(days=days_ahead)
+        held = set(syms) if scoped else set(self.held_positions())  # `held` means held in that portfolio
+        rows = self.events.between(syms, start, end, ["earnings", "ex_dividend", "dividend_pay"])
+        announced_ex = self.events.between(syms, start - timedelta(days=dividends_mod.MATCH_DAYS),
+                                           end + timedelta(days=ANNOUNCED_REACH_DAYS), ["ex_dividend"])
+        histories = self.dividend_histories(syms)
+        by_pf: dict = {}
+        for t in self.portfolios.active_transactions(portfolio if scoped else ALL):
+            by_pf.setdefault(t.portfolio_id, []).append(t)
+
+        def shares_at(sym: str, d: date) -> float:
+            """Shares held going into day `d` (in this portfolio, else across all), as Dividends counts them."""
+            cutoff = datetime.combine(d, datetime.min.time(), NY)
+            return sum(pos.qty for txns in by_pf.values()
+                       if (pos := build_positions([t for t in txns if t.symbol == sym and t.ts < cutoff]).get(sym)))
+
+        announced = {s: set() for s in syms}
+        for e in announced_ex:
+            announced[e["symbol"]].add(date.fromisoformat(e["date"]))
+        paid = {s: {date.fromisoformat(d): a for d, a in histories.get(s, [])} for s in syms}
+        ex_dates = {s: set(paid[s]) | announced[s] for s in syms}
+        # The Dividends projection, with declared ex-dates in place of its estimates, through the window.
+        proj = {s: dividends_mod.analyze_holding(histories.get(s, []), shares_at(s, today + timedelta(days=1)),
+                                                 lambda d, s=s: shares_at(s, d), today, announced[s], end)
+                for s in syms}
+
+        def expected(r: dict, sym: str, ex: date) -> None:
+            """Cash per share (paid, else projected) and the amount for shares held into ex-date `ex`."""
+            per_share = paid[sym].get(ex, proj[sym].get("per_payment"))
+            if per_share is not None:
+                r["per_share"], r["amount"] = per_share, per_share * shares_at(sym, ex)
+
         for r in rows:
-            r["held"] = r["symbol"] in held
+            if r["kind"] == "earnings":
+                r["held"] = r["symbol"] in held
+                continue
+            # A dividend belongs to whoever held shares going into its ex-date (for a payment, the
+            # latest ex-date before it), not to shares bought since.
+            ex = date.fromisoformat(r["date"])
+            if r["kind"] == "dividend_pay":
+                prior = [d for d in ex_dates[r["symbol"]] if ex - timedelta(days=dividends_mod.MATCH_DAYS) <= d <= ex]
+                if not prior:  # ex-date unknown: all we can say is whether it's held now
+                    r["held"] = r["symbol"] in held
+                    continue
+                ex = max(prior)
+                r["ex_date"] = ex.isoformat()
+            r["held"] = shares_at(r["symbol"], ex) > 0
+            expected(r, r["symbol"], ex)
+        if scoped:  # a portfolio's calendar lists only the payments it's owed
+            rows = [r for r in rows if r["kind"] != "dividend_pay" or r["held"]]
+        # Ex-dates the Dividends page estimates in the window (declared ones are already rows).
+        for sym in syms:
+            for x in proj[sym]["projected"]:
+                if x["estimated_date"] and x["ex_date"] <= end.isoformat():
+                    rows.append({"symbol": sym, "kind": "ex_dividend", "date": x["ex_date"], "hour": None,
+                                 "estimated": True, "per_share": x["per_share"], "amount": x["amount"],
+                                 "source": "estimate", "held": x["shares"] > 0})
+        rows.sort(key=lambda r: (r["date"], r["symbol"]))
+        past = [_event_happened(r, now) for r in rows]
         return {
             "as_of": today.isoformat(),
-            "upcoming": [r for r in rows if r["date"] >= today.isoformat()],
-            "recent": [r for r in rows if r["date"] < today.isoformat()],
+            "upcoming": [r for r, done in zip(rows, past) if not done],
+            "recent": [r for r, done in zip(rows, past) if done],
             "refresh_failed": refreshed["failed"],
         }
 
@@ -812,7 +1077,8 @@ class Argus:
             elif price <= lo * 1.03:
                 near.append({"symbol": p["symbol"], "near": "52w_low", "gap_pct": (price / lo - 1) * 100})
 
-        events = self.upcoming_events(days_ahead=7, days_back=3)
+        events = self.upcoming_events(days_ahead=7, days_back=3, portfolio=ref)
+        mine = None if str(ref).lower() == ALL else set(self.open_symbols(ref))
         self.evaluate_alerts(live_quotes)
         last_session = date.fromisoformat(status["last_session"])
         today = datetime.now(NY).date()
@@ -823,15 +1089,17 @@ class Argus:
             "totals": {k: summ["totals"].get(k) for k in ("market_value", "day_pnl", "day_pnl_pct", "unrealized_pnl",
                                                          "unrealized_pct", "position_count")},
             "benchmark": {"symbol": bench_sym, "change_pct": bench.change_pct if bench else None},
-            "top_gainers": [pick(p) for p in reversed(by_pct[-5:])],
-            "top_losers": [pick(p) for p in by_pct[:5]],
+            "top_gainers": [pick(p) for p in reversed(by_pct) if p["change_pct"] > 0][:5],
+            "top_losers": [pick(p) for p in by_pct if p["change_pct"] < 0][:5],
             "largest_dollar_moves": [pick(p) for p in by_dollar[:5]],
             "near_52w_extremes": near,
             "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings"],
             "earnings_recent": [e for e in events["recent"] if e["kind"] == "earnings"],
             "dividends_upcoming": [e for e in events["upcoming"] if e["kind"] != "earnings"],
-            "alerts_fired": self.alerts.fired(since=min(last_session, today)),
-            "theses_due": self.notes.list(due_by=today + timedelta(days=7)),
+            "alerts_fired": [a for a in self.alerts.fired(since=min(last_session, today))
+                             if mine is None or a["symbol"] in mine],
+            "theses_due": [n for n in self.notes.list(due_by=today + timedelta(days=7))
+                           if mine is None or n["symbol"] in mine],
             "watchlist_movers": [
                 {"symbol": i["symbol"], "change_pct": i["quote"]["change_pct"], "price": i["quote"]["price"]}
                 for i in self.watchlist(live_quotes=live_quotes, with_fundamentals=False)["items"]
@@ -864,7 +1132,7 @@ class Argus:
                 fetched = dict(zip(todo, pool.map(yahoo.get_fund_profile, todo)))
             with session_scope(self.engine) as s:
                 for sym, data in fetched.items():
-                    s.merge(FundProfile(symbol=sym, as_of=now, data=data))
+                    upsert(s, FundProfile, symbol=sym, as_of=now, data=data)
             out |= fetched
         return {k: v for k, v in out.items() if v}
 
@@ -891,7 +1159,7 @@ class Argus:
             with session_scope(self.engine) as s:
                 for sym, rows in fetched.items():
                     if rows is not None:
-                        s.merge(DividendHistory(symbol=sym, as_of=now, data=[list(x) for x in rows]))
+                        upsert(s, DividendHistory, symbol=sym, as_of=now, data=[list(x) for x in rows])
                         fresh[sym] = rows
         return {sym: fresh.get(sym) or stale.get(sym, []) for sym in symbols}
 
@@ -910,9 +1178,20 @@ class Argus:
             pos = build_positions([t for t in by_sym.get(sym, []) if t.ts < cutoff]).get(sym)
             return pos.qty if pos else 0.0
 
-        histories = self.dividend_histories([r["symbol"] for r in rows])
+        syms = [r["symbol"] for r in rows]
+        histories = self.dividend_histories(syms)
+        today = datetime.now(NY).date()
         return {"portfolio": summ["portfolio"]["name"],
-                **dividends_mod.analyze(rows, histories, qty_at, datetime.now(NY).date())}
+                **dividends_mod.analyze(rows, histories, qty_at, today, self.announced_ex_dates(syms, today))}
+
+    def announced_ex_dates(self, symbols: list[str], today: date) -> dict[str, list[date]]:
+        """Declared ex-dates per symbol from the events calendar (refreshed daily), recent and upcoming."""
+        self.events.refresh(symbols)
+        out: dict[str, list[date]] = {}
+        for e in self.events.between(symbols, today - timedelta(days=dividends_mod.MATCH_DAYS),
+                                     today + timedelta(days=366), ["ex_dividend"]):
+            out.setdefault(e["symbol"], []).append(date.fromisoformat(e["date"]))
+        return out
 
     def watchlist_dividends(self, name: str = DEFAULT_WATCHLIST, live_quotes: dict[str, Quote] | None = None) -> dict:
         """Yield, rate, frequency and next ex-date for watched symbols (no shares, so no income)."""
@@ -923,7 +1202,9 @@ class Argus:
         rows = [{"symbol": s, "name": None, "qty": 0.0, "avg_cost": None, "cost_basis": 0.0,
                  "price": quotes[s].price if s in quotes else None, "market_value": 0.0} for s in syms]
         histories = self.dividend_histories(syms)
-        return {"watchlist": name, **dividends_mod.analyze(rows, histories, lambda s, d: 0.0, datetime.now(NY).date())}
+        today = datetime.now(NY).date()
+        return {"watchlist": name, **dividends_mod.analyze(rows, histories, lambda s, d: 0.0, today,
+                                                           self.announced_ex_dates(syms, today))}
 
     def watchlist_earnings(self, name: str = DEFAULT_WATCHLIST) -> dict:
         return {"watchlist": name, **self.earnings_for([i["symbol"] for i in self.watchlists.items(name)])}
@@ -1038,6 +1319,7 @@ class Argus:
                 raise RuntimeError("needs the screener's universe (Screener page → Build)")
             return context_mod.stock_breadth(self.macro.quote_rows(universe, context_mod.BREADTH_FIELDS))
         jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS, context_mod.HISTORY),
+                "quotes": lambda: self.macro.quote_rows(context_mod.ALL_SYMBOLS, context_mod.QUOTE_FIELDS, 60),
                 "curve": self.macro.treasury_curve, "fomc": self.macro.fomc_meetings,
                 "events": lambda: self.macro.economic_events(21), "breadth": stocks}
         def run(item):
@@ -1049,10 +1331,11 @@ class Argus:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             got = {n: (v, e) for n, v, e in pool.map(run, jobs.items())}
         out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], got["events"][0],
-                                datetime.now(NY).date(), got["breadth"][0])
+                                datetime.now(NY).date(), got["breadth"][0], got["quotes"][0])
         return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
 
     RESEARCH_TTL_S = 3600
+    RESEARCH_RETRY_S = 120  # a bundle missing fundamentals, ratio history or statements is rebuilt soon after
 
     def research(self, symbol: str, live_quotes: dict[str, Quote] | None = None, refresh: bool = False) -> dict:
         """Analyst consensus and targets, estimate trend and revisions, insider trades, ownership,
@@ -1060,7 +1343,7 @@ class Argus:
         Each source is optional: a missing one leaves its section empty. Cached for an hour."""
         sym = normalize_symbol(symbol)
         hit = self._research.get(sym)
-        if hit and not refresh and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+        if hit and not refresh and time.monotonic() - hit[0] < (self.RESEARCH_RETRY_S if hit[1].get("partial") else self.RESEARCH_TTL_S):
             bundle = hit[1]
         else:
             bundle = self._build_research(sym)
@@ -1070,17 +1353,35 @@ class Argus:
         a = bundle.get("analysts")
         if a and price and a.get("target_mean"):
             a = a | {"upside_pct": (a["target_mean"] / price - 1) * 100}
-        return bundle | {"price": price, "analysts": a}
+        valuation = bundle.get("valuation")
+        if valuation and price:  # the band's current P/E is the stock page's: this price ÷ the EPS shown
+            cached = self.market.cached_fundamentals([sym]).get(sym)
+            if cached:
+                pe = with_pe(cached["metrics"], cached["sources"], price)[0].get("pe_ttm")
+                valuation = [research_mod.with_current(b, pe) if b["key"] == "peTTM" else b for b in valuation]
+        return bundle | {"price": price, "analysts": a, "valuation": valuation}
 
     def _build_research(self, sym: str) -> dict:
         yahoo, fh = self.market.profile_provider, self.market.directory
         today = datetime.now(NY).date()
+        # The bands' current values and the reported growth rates come from fundamentals: on a first
+        # open they may not be cached yet, so fetch them here rather than read an empty cache. The same
+        # Finnhub call carries the ratio history, so the series waits for it instead of asking again.
+        cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
+        cold = not cached or not cached["fresh"]
+
+        def series():
+            fetched = self.market.fetch_fundamentals(sym) if cold else None
+            try:
+                return fetched, (fh.ratio_series(sym) if fh else None), None
+            except Exception as e:  # noqa: BLE001 - the fundamentals still count
+                return fetched, None, str(e)
         jobs = {
             "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
             "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
             "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
             "insiders": (lambda: fh.insider_transactions(sym, today - timedelta(days=400))) if fh else None,
-            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "series": series,
             "news": lambda: self.events.news(sym, days=7, limit=25),
             "quarterly": lambda: self.market.get_financials(sym, "quarterly", 12)["periods"],
             "annual": lambda: self.market.get_financials(sym, "annual", 6)["periods"],
@@ -1095,22 +1396,27 @@ class Argus:
                 return name, None, str(e)
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
             got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        fetched, ratio_series, series_err = got["series"][0] or (None, None, None)
+        got["series"] = (ratio_series, got["series"][1] or series_err or (None if fh else "not configured"))
+        if fetched is not None:
+            cached = self.market.save_fundamentals(sym, fetched)  # SQLite write on this thread
+            if fetched[1] or not fetched[0]:  # a provider failed: what it supplies may be missing
+                got["fundamentals"] = (None, "; ".join(f"{k}: {v}" for k, v in fetched[1].items()) or "no data")
         errors = {k: e for k, (_, e) in got.items() if e}
         info = got["info"][0] or {}
         fund = info.get("quoteType") in ("ETF", "MUTUALFUND")
-        cached = self.market.cached_fundamentals([sym]).get(sym)  # SQLite read on this thread
         m = cached["metrics"] if cached else {}
+        have_fundamentals = bool(m)
         try:
             m = m | self.price_stats([sym]).get(sym, {})
         except ArgusError:
             pass
 
         analyst = got["analyst"][0] or {}
-        analysts = None if fund else {
-            "count": info.get("numberOfAnalystOpinions"), "rating": info.get("recommendationKey"),
-            "rating_mean": info.get("recommendationMean"), "target_mean": info.get("targetMeanPrice"),
-            "target_median": info.get("targetMedianPrice"), "target_high": info.get("targetHighPrice"),
-            "target_low": info.get("targetLowPrice"), "trend": analyst.get("recommendations") or [],
+        trend = analyst.get("recommendations") or []
+        analysts = None if fund else research_mod.analyst_consensus(info, trend) | {
+            "target_mean": info.get("targetMeanPrice"), "target_median": info.get("targetMedianPrice"),
+            "target_high": info.get("targetHighPrice"), "target_low": info.get("targetLowPrice"), "trend": trend,
         }
         estimates = None if fund else {"trend": analyst.get("eps_trend"), "revisions": analyst.get("eps_revisions")}
         short_date = info.get("dateShortInterest")
@@ -1145,7 +1451,85 @@ class Argus:
             "news": [{k: v for k, v in n.items() if k != "summary"} for n in news], "news_tone": counts,
             "growth": None if fund else research_mod.growth_profile(got["quarterly"][0] or [], got["annual"][0] or [], m, analyst),
             "errors": errors,
+            # Inputs missing for a reason that may pass (a rate limit, a provider hiccup): cached only briefly.
+            "partial": not fund and (not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
         }
+
+    # -- DCF calculator ----------------------------------------------------------
+    def valuation(self, symbol: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """What the DCF calculator fills its inputs from (services/valuation.py), today's price, and the
+        model you saved for the symbol, if any. The company data is cached for an hour."""
+        sym = normalize_symbol(symbol)
+        q = (live_quotes or {}).get(sym) or self.market.get_quotes([sym])[0].get(sym)
+        price = q.price if q else None
+        hit = self._valuation.get(sym)
+        if hit and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+            data = hit[1]
+        else:
+            data = self._build_valuation(sym)
+            self._valuation[sym] = (time.monotonic(), data)
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, sym)
+            saved = {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()} if row else None
+        if price and data["market_cap"] and data["price"]:  # the cap moves with the live price
+            data = data | {"market_cap": data["market_cap"] * price / data["price"]}
+        return data | {"price": price or data["price"], "saved": saved}
+
+    def _build_valuation(self, sym: str) -> dict:
+        yahoo, fh = self.market.profile_provider, self.market.directory
+        metrics = self.symbol_fundamentals([sym], wait=True)["metrics"].get(sym, {})
+        q = self.market.get_quotes([sym])[0].get(sym)
+        jobs = {
+            "quarterly": lambda: self.market.get_financials(sym, "quarterly", 48),
+            "annual": lambda: self.market.get_financials(sym, "annual", 11),
+            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
+            "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
+            "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
+        }
+        def run(item):
+            name, fn = item
+            try:
+                return name, fn() if fn else None, None
+            except Exception as e:  # noqa: BLE001 - only the filings are required
+                return name, None, e
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
+            got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        if got["annual"][0] is None and got["quarterly"][0] is None:
+            err = got["annual"][1] or got["quarterly"][1]
+            if isinstance(err, ArgusError) and err.code == "NOT_CONFIGURED":
+                raise err
+            raise ArgusError("NOT_FOUND", f"No reported financials for {sym}, so there is nothing to project.",
+                             hint="The DCF calculator needs SEC filings; ETFs and funds have none.")
+        return valuation_mod.build(sym, q.price if q else None, metrics, got["quarterly"][0] or {}, got["annual"][0] or {},
+                                   got["series"][0] or {}, got["analyst"][0] or {}, got["statements"][0] or {},
+                                   got["info"][0] or {}, datetime.now(NY).date())
+
+    def save_valuation(self, symbol: str, inputs: dict | None, actor: str = "cli") -> dict | None:
+        """Save your DCF inputs for a symbol, or forget them (None)."""
+        sym = normalize_symbol(symbol)
+        clean = valuation_mod.clean_inputs(inputs) if inputs is not None else None
+        with session_scope(self.engine) as s:
+            before = s.get(ValuationModel, sym)
+            before_inputs = dict(before.inputs) if before else None
+            if clean is None:
+                if before is not None:
+                    s.delete(before)
+            else:
+                s.merge(ValuationModel(symbol=sym, inputs=clean, updated_at=datetime.now(UTC)))
+            s.add(AuditLog(actor=actor, action="save_valuation" if clean else "delete_valuation", entity="valuation",
+                           entity_id=sym, before=before_inputs, after=clean))
+        if clean is None:
+            return None
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, sym)
+            return {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()}
+
+    def valuation_models(self) -> list[dict]:
+        """Your saved DCF models, most recently saved first."""
+        with session_scope(self.engine) as s:
+            rows = s.scalars(select(ValuationModel).order_by(ValuationModel.updated_at.desc())).all()
+            return [{"symbol": r.symbol, "metric": r.inputs.get("metric"), "updated_at": r.updated_at.isoformat()} for r in rows]
 
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
 
@@ -1278,7 +1662,7 @@ class Argus:
         p = self.portfolios.view(ref)
         txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
         if not txns:
-            return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "series": []}
+            return {"portfolio": p.name, "range": range_, "benchmark": p.benchmark, "summary": {}, "dividends_accrued": [], "series": []}
         start = min(t.ts for t in txns).astimezone(NY).date()
         status = market_status()
         end = date.fromisoformat(status["last_session"])
@@ -1295,21 +1679,42 @@ class Argus:
                     closes[sym][today] = q.price
 
         bench = closes.pop(p.benchmark, {}) if p.benchmark not in {t.symbol for t in txns} else closes.get(p.benchmark, {})
-        points = performance_mod.compute_series(txns, sessions, closes, bench)
+        try:
+            accrued = self.accrued_dividends(ref, txns)
+        except Exception as e:
+            log.warning("accrued dividends: %s", e)
+            accrued = []
+        # Accrued dividends are income on their ex-date (the day the price-only close drops by them).
+        income = [TxnInput("DIVIDEND", x["symbol"], datetime.combine(date.fromisoformat(x["ex_date"]),
+                                                                    datetime.min.time(), NY), amount=x["amount"])
+                  for x in accrued]
+        points = performance_mod.compute_series([*txns, *income], sessions, closes, bench)
         cutoff = {"1mo": today - timedelta(days=31), "3mo": today - timedelta(days=92),
                   "ytd": date(today.year, 1, 1) - timedelta(days=1), "1y": today - timedelta(days=366)}.get(range_)
+        base = 0
         if cutoff:
             # Base the slice on the last close at or before the cutoff.
             base = max((i for i, pt in enumerate(points) if pt.d <= cutoff), default=0)
             points = points[base:]
-        base_idx = points[0].index if points else 1.0
+        # A slice from the first flow starts before that day's buys (value 0, index 1.0).
+        inception = base == 0
+        base_idx = 1.0 if inception else points[0].index if points else 1.0
         base_bench = points[0].bench_index if points else None
+        # Accruals inside the slice (a rebased slice counts flows after its first close).
+        first = points[0].d if points else None
+        last = points[-1].d.isoformat() if points else ""
+        in_slice = [x for x in accrued if first and x["ex_date"] <= last and (
+            x["ex_date"] >= first.isoformat() if inception else x["ex_date"] > first.isoformat())]
+        summary = performance_mod.summarize(points, inception=inception)
+        if summary:
+            summary["dividends_accrued"] = sum(x["amount"] for x in in_slice)
         return {
             "portfolio": p.name,
             "range": range_,
             "benchmark": p.benchmark,
             "provisional_today": bool(points) and points[-1].d == today and status["session"] != "closed",
-            "summary": performance_mod.summarize(points),
+            "summary": summary,
+            "dividends_accrued": in_slice,
             "series": [{
                 "d": pt.d.isoformat(), "value": pt.value, "flow_in": pt.flow_in, "flow_out": pt.flow_out,
                 "twr_pct": (pt.index / base_idx - 1) * 100,

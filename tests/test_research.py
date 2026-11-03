@@ -74,6 +74,14 @@ def test_valuation_bands_percentile_and_losses_left_out():
     assert pe["percentile"] == pytest.approx(2 / 6 * 100)  # 10 and 20 are at or below 25
 
 
+def test_band_rerated_at_a_new_current_value():
+    hist = [{"period": f"{y}-03-28", "v": v} for y, v in zip(range(2021, 2027), [40, 30, -5, 20, 50, 10])]
+    pe = r.valuation_bands({"peTTM": hist}, {"peTTM": 25.0}, today=date(2026, 10, 9))[0]
+    moved = r.with_current(pe, 45.0)
+    assert moved["current"] == 45.0 and moved["percentile"] == pytest.approx(3 / 4 * 100)  # 2021 is outside 5 years
+    assert r.with_current(pe, None)["percentile"] is None and moved["median"] == pe["median"]
+
+
 def test_tone():
     assert r.tone("Nvidia beats estimates, shares surge on record growth")["label"] == "positive"
     assert r.tone("Shares plunge after guidance cut and SEC probe")["label"] == "negative"
@@ -99,3 +107,92 @@ def test_growth_profile_history_and_forward():
     fy = next(f for f in g["forward"] if f["horizon"] == "0y")
     assert (fy["revenue_growth_pct"], fy["eps_growth_pct"], fy["index_eps_growth_pct"]) == pytest.approx((40, 50, 12))
     assert [f["horizon"] for f in g["forward"]] == ["0y"]  # LTG has only the index's figure: skipped
+
+
+class _ColdFinnhub:
+    """Fundamentals provider and ratio history in one, like Finnhub's /stock/metric."""
+    name = "finnhub"
+
+    def __init__(self):
+        self.metric_calls, self.fail = 0, False
+        self.series = {k: [{"period": f"{y}-{m:02d}-28", "v": v + y - 2021 + m / 10}
+                           for y in range(2021, 2026) for m in (3, 6, 9, 12)]
+                       for k, v in (("peTTM", 20.0), ("psTTM", 2.0), ("pb", 3.0), ("evEbitdaTTM", 12.0))}
+        self._fetched = False
+
+    def get_metrics(self, symbol):
+        from argus.providers.base import ProviderError
+        self.metric_calls += 1
+        if self.fail:
+            raise ProviderError("finnhub: 429 rate limited")
+        self._fetched = True
+        return {"pe_ttm": 22.0, "ps_ttm": 2.1204, "pb": 4.0, "ev_ebitda": 14.0,
+                "revenue_growth_q_yoy_pct": 18.31, "revenue_growth_yoy_pct": 25.0}
+
+    def ratio_series(self, symbol):
+        if not self._fetched:
+            self.get_metrics(symbol)
+        return self.series
+
+    def insider_transactions(self, symbol, since):
+        return []
+
+
+def test_research_cold_fundamentals_are_fetched_and_partial_results_not_kept(make_argus):
+    fh = _ColdFinnhub()
+    a = make_argus(fundamentals=[fh])
+    a.market.directory = fh
+    assert a.market.cached_fundamentals(["BCRX"]) == {}  # cold cache
+
+    fh.fail = True  # the first build hits a rate limit: nothing to fill the bands with
+    first = a.research("BCRX")
+    assert first["partial"] and all(b["current"] is None for b in first["valuation"] or [{"current": None}])
+    assert a.research("BCRX")["as_of"] == first["as_of"]  # kept briefly, not rebuilt on every call
+    a._research["BCRX"] = (a._research["BCRX"][0] - a.RESEARCH_RETRY_S - 1, first)  # ...but not as final
+
+    fh.fail = False
+    fh.metric_calls = 0
+    out = a.research("BCRX")
+    bands = {b["key"]: b for b in out["valuation"]}
+    assert bands["psTTM"]["current"] == 2.1204 and bands["psTTM"]["percentile"] is not None
+    assert bands["peTTM"]["current"] == 22.0 and bands["evEbitdaTTM"]["current"] == 14.0
+    assert out["growth"]["reported"]["revenue_q_yoy"] == 18.31
+    assert fh.metric_calls == 1  # the ratio history came with the fundamentals call
+    assert not out["partial"] and "fundamentals" not in out["errors"]
+    assert a.market.cached_fundamentals(["BCRX"])["BCRX"]["metrics"]["ps_ttm"] == 2.1204  # stored
+
+    # A complete result is cached for the hour; a warm build doesn't refetch fundamentals.
+    assert a.research("BCRX")["as_of"] == out["as_of"]
+    a.research("BCRX", refresh=True)
+    assert fh.metric_calls == 1
+
+
+def _month(period, sb=0, b=0, h=0, s=0, ss=0):
+    return {"period": period, "strongBuy": sb, "buy": b, "hold": h, "sell": s, "strongSell": ss}
+
+
+def test_analyst_consensus_all_buys_is_never_none():
+    # INOD: Yahoo sends recommendationKey "none" and no mean while 4 analysts rate it a buy.
+    info = {"recommendationKey": "none", "recommendationMean": None, "numberOfAnalystOpinions": 4}
+    c = r.analyst_consensus(info, [_month("0m", sb=1, b=3)])
+    assert c == {"count": 4, "rating": "buy", "rating_mean": 1.75, "rating_source": "counts", "target_count": 4}
+    assert r.analyst_consensus(info, [_month("0m", sb=3, b=1)])["rating"] == "strong_buy"
+
+
+def test_analyst_consensus_comes_from_the_counts_not_yahoo_headline():
+    # KRYS: Yahoo says "strong buy", mean 1.25, 9 analysts; the counts beside it are 1 strong buy, 10 buy, 1 hold.
+    info = {"recommendationKey": "strong_buy", "recommendationMean": 1.25, "numberOfAnalystOpinions": 9}
+    trend = [_month("-1m", sb=5, b=1), _month("0m", sb=1, b=10, h=1)]
+    c = r.analyst_consensus(info, trend)
+    assert (c["count"], c["rating"], c["rating_mean"], c["rating_source"]) == (12, "buy", 2.0, "counts")
+    assert c["target_count"] == 9  # Yahoo's count is the number of price targets
+    assert r.analyst_consensus({}, [_month("0m", h=2, s=3, ss=1)])["rating"] == "sell"
+
+
+def test_analyst_consensus_falls_back_to_yahoo_without_counts():
+    info = {"recommendationKey": "hold", "recommendationMean": 2.8, "numberOfAnalystOpinions": 5}
+    assert r.analyst_consensus(info, []) == {"count": 5, "rating": "hold", "rating_mean": 2.8,
+                                             "rating_source": "yahoo", "target_count": 5}
+    # "none" with a mean: label the mean rather than show "none"
+    assert r.analyst_consensus(info | {"recommendationKey": "none", "recommendationMean": 1.9}, [])["rating"] == "buy"
+    assert r.analyst_consensus({}, [_month("0m")])["rating"] is None  # no coverage at all

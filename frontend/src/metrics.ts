@@ -1,6 +1,6 @@
 // One definition per indicator, shared by the dashboard's tabs and the stock page, so both show the
 // same figures under the same names. Values come from /api/fundamentals (and the portfolio and
-// watchlist variants), which add the computed ones (1M return, price CAGR, FCF margin).
+// watchlist variants), which add the computed ones (momentum returns, price CAGR, FCF margin).
 import { big, money, pct, ratio } from "./format";
 
 export type Metrics = Record<string, number | null | undefined>;
@@ -14,18 +14,32 @@ export interface MetricDef {
   label: string;
   title?: string;
   kind: Kind;
-  /** Needs the live price (distance from the 52-week high, from moving averages). */
+  /** Needs the live price (P/E, distance from the 52-week high, from moving averages). */
   fromPrice?: (m: Metrics, price: number | null | undefined) => number | null;
+  /** Price return over this stock-chart range, from the same base close (the stock page follows the live price). */
+  range?: string;
 }
 
 const rel = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? (a / b - 1) * 100 : null);
+// P/E follows the live price over the EPS shown beside it (the API's pe_ttm is the same ratio at the last
+// cached price); only without an EPS does the provider's own P/E stand.
+const peTtm = (m: Metrics, p: number | null | undefined) =>
+  m.eps_ttm == null ? m.pe_ttm ?? null : m.eps_ttm > 0 ? (p ? p / m.eps_ttm : m.pe_ttm ?? null) : null;
+
+/** A figure with no meaningful value (P/E on zero or negative EPS): shown as "n/m", not left out. */
+export function notMeaningful(key: string, m: Metrics | undefined): boolean {
+  return key === "pe_ttm" && m?.eps_ttm != null && m.eps_ttm <= 0;
+}
 
 const DEFS: MetricDef[] = [
   // valuation & size
   { key: "market_cap", short: "Mkt cap", label: "Market cap", kind: "big" },
-  { key: "revenue_ttm", short: "Revenue", label: "Revenue (TTM)", kind: "big" },
-  { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money" },
-  { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", title: "Price ÷ trailing 12-month earnings" },
+  { key: "revenue_ttm", short: "Revenue", label: "Revenue (TTM)", kind: "big",
+    title: "Last four quarters filed with the SEC (source: sec) when they're as recent as the data provider's; otherwise the provider's figure" },
+  { key: "eps_ttm", short: "EPS", label: "EPS (TTM)", kind: "money",
+    title: "Diluted EPS summed over the same SEC quarters as revenue (source: sec); otherwise the data provider's figure" },
+  { key: "pe_ttm", short: "P/E", label: "P/E (TTM)", kind: "ratio1", fromPrice: (m, p) => peTtm(m, p),
+    title: "Current price ÷ the EPS (TTM) above, from the same source; n/m when EPS is zero or negative" },
   { key: "pe_forward", short: "Fwd P/E", label: "P/E (forward)", kind: "ratio1", title: "Price ÷ next 12 months' estimated earnings" },
   { key: "peg", short: "PEG", label: "PEG (expected)", kind: "ratio2",
     title: "P/E ÷ analysts' expected EPS growth (Yahoo, 5-year); below 1 can mean growth is cheap" },
@@ -35,10 +49,11 @@ const DEFS: MetricDef[] = [
   { key: "pb", short: "P/B", label: "P/B", kind: "ratio1" },
   { key: "ev_ebitda", short: "EV/EBITDA", label: "EV/EBITDA", kind: "ratio1" },
   { key: "debt_to_equity", short: "Debt/Eq", label: "Debt / equity", kind: "ratio2" },
-  { key: "fcf_ttm", short: "FCF", label: "Free cash flow (TTM)", kind: "big" },
+  { key: "fcf_ttm", short: "FCF", label: "Free cash flow (TTM)", kind: "big",
+    title: "Operating cash flow − capex over the last four quarters filed with the SEC (source: sec); otherwise the data provider's figure" },
   // growth (YoY = trailing 12 months or latest quarter vs a year earlier; CAGR = compound annual rate)
   { key: "revenue_growth_yoy_pct", short: "Rev YoY", label: "Revenue growth YoY", kind: "signed", title: "Trailing 12 months vs a year earlier" },
-  { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier" },
+  { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier (from SEC filings when they're as recent as the data provider's)" },
   { key: "revenue_growth_3y_pct", short: "Rev CAGR 3Y", label: "Revenue CAGR 3Y", kind: "signed", title: "Compound annual growth over 3 years" },
   { key: "revenue_growth_5y_pct", short: "Rev CAGR 5Y", label: "Revenue CAGR 5Y", kind: "signed", title: "Compound annual growth over 5 years" },
   { key: "eps_growth_yoy_pct", short: "EPS YoY", label: "EPS growth YoY", kind: "signed" },
@@ -49,17 +64,19 @@ const DEFS: MetricDef[] = [
   { key: "gross_margin_pct", short: "Gross", label: "Gross margin", kind: "pct" },
   { key: "operating_margin_pct", short: "Operating", label: "Operating margin", kind: "pct" },
   { key: "net_margin_pct", short: "Net", label: "Net margin", kind: "pct" },
-  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue (TTM)" },
+  { key: "fcf_margin_pct", short: "FCF margin", label: "FCF margin", kind: "pct", title: "Free cash flow ÷ revenue from one source: SEC's four quarters when it has capex, else one provider's FCF and revenue; blank rather than mixing sources" },
+  // Stock page only, in FCF margin's place when SEC's filings tag no capex (not a dashboard column).
+  { key: "ocf_margin_pct", short: "OCF margin", label: "Operating cash flow margin", kind: "pct", title: "Operating cash flow ÷ revenue over SEC's four quarters, shown because the filings don't report capex, so there's no FCF margin" },
   { key: "roe_pct", short: "ROE", label: "Return on equity", kind: "pct" },
   { key: "roa_pct", short: "ROA", label: "Return on assets", kind: "pct" },
   { key: "roic_pct", short: "ROIC", label: "Return on invested capital", kind: "pct", title: "Operating profit after tax ÷ debt + equity (TTM)" },
   // momentum (to the latest close; price-relative ones use the live price)
-  { key: "return_1w_pct", short: "1W", label: "1 week", kind: "signed" },
-  { key: "return_1m_pct", short: "1M", label: "1 month", kind: "signed" },
-  { key: "return_3m_pct", short: "3M", label: "3 months", kind: "signed" },
-  { key: "return_6m_pct", short: "6M", label: "6 months", kind: "signed" },
-  { key: "return_ytd_price_pct", short: "YTD", label: "Year to date", kind: "signed" },
-  { key: "return_1y_pct", short: "1Y", label: "1 year", kind: "signed" },
+  { key: "return_1w_pct", short: "1W", label: "1 week", kind: "signed", range: "5D" },
+  { key: "return_1m_pct", short: "1M", label: "1 month", kind: "signed", range: "1M" },
+  { key: "return_3m_pct", short: "3M", label: "3 months", kind: "signed", range: "3M" },
+  { key: "return_6m_pct", short: "6M", label: "6 months", kind: "signed", range: "6M" },
+  { key: "return_ytd_price_pct", short: "YTD", label: "Year to date", kind: "signed", range: "YTD" },
+  { key: "return_1y_pct", short: "1Y", label: "1 year", kind: "signed", range: "1Y" },
   { key: "cagr_3y_pct", short: "CAGR 3Y", label: "Price CAGR 3Y", kind: "signed", title: "Compound annual price return over 3 years (no dividends)" },
   { key: "cagr_5y_pct", short: "CAGR 5Y", label: "Price CAGR 5Y", kind: "signed", title: "Compound annual price return over 5 years (no dividends)" },
   { key: "rel_sp500_1y_pct", short: "vs S&P 1Y", label: "vs S&P 500, 1 year", kind: "signed" },

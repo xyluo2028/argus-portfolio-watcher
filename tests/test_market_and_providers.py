@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -127,9 +128,373 @@ def test_sec_quarters_derive_q4_and_ytd_cash_flow():
     q = {p["period_end"]: p for p in build_financials(facts, "quarterly")["periods"]}
     assert [q[e]["revenue"] for e in ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")] == [100, 110, 120, 130]
     assert [q[e]["operating_cash_flow"] for e in ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")] == [30, 40, 30, 50]
-    assert "eps_diluted" not in q["2025-12-31"]  # EPS isn't additive: no derived Q4
+    assert "eps_diluted" not in q["2025-12-31"]  # Q2 and Q3 EPS missing: nothing to derive Q4 from
     annual = build_financials(facts, "annual")["periods"][0]
     assert (annual["revenue"], annual["eps_diluted"]) == (460, 4.2)
+
+
+def test_sec_derives_fiscal_q4_eps():
+    """10-Ks report EPS for the full year only; quarterly statements fill fiscal Q4 from it."""
+    ni = lambda *rows: [_fact(s, e, v, form="10-K" if e == "2025-09-30" else "10-Q") for s, e, v in rows]  # noqa: E731
+    eps = [  # fiscal year Oct-Sep, with a reported quarter outside it that must be left alone
+        _fact("2024-10-01", "2024-12-31", 1.0), _fact("2025-01-01", "2025-03-31", 1.1),
+        _fact("2025-04-01", "2025-06-30", 1.2), _fact("2024-10-01", "2025-09-30", 4.6, form="10-K"),
+        _fact("2025-10-01", "2025-12-31", 1.4),
+    ]
+    facts = {"facts": {"us-gaap": {
+        "NetIncomeLoss": {"units": {"USD": ni(("2024-10-01", "2024-12-31", 100), ("2025-01-01", "2025-03-31", 110),
+                                               ("2025-04-01", "2025-06-30", 120), ("2024-10-01", "2025-06-30", 330),
+                                               ("2024-10-01", "2025-09-30", 460),
+                                               ("2025-10-01", "2025-12-31", 140))}},
+        "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
+    }}}
+    q = {p["period_end"]: p for p in build_financials(facts, "quarterly")["periods"]}
+    assert (q["2025-09-30"]["eps_diluted"], q["2025-09-30"]["eps_diluted_derived"]) == (1.3, "annual_less_quarters")
+    assert [q[e]["eps_diluted"] for e in ("2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31")] == [1.0, 1.1, 1.2, 1.4]
+    assert not any("eps_diluted_derived" in q[e] for e in ("2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31"))
+    assert build_financials(facts, "annual")["periods"][0]["eps_diluted"] == 4.6
+
+    # The 9-month year-to-date figure shares the 10-K's basis, so it wins over the quarters (here a
+    # pre-IPO Q1 on another share basis that would wreck the subtraction):
+    eps[0] = _fact("2024-10-01", "2024-12-31", 9000.0)
+    ytd = _fact("2024-10-01", "2025-06-30", 3.25)
+    facts["facts"]["us-gaap"]["EarningsPerShareDiluted"]["units"]["USD/shares"] = [*eps, ytd]
+    p = {p["period_end"]: p for p in build_financials(facts)["periods"]}["2025-09-30"]
+    assert (p["eps_diluted"], p["eps_diluted_derived"]) == (1.35, "annual_less_ytd")
+
+    # A tagged 3-month diluted share count beats both: Q4 net income (460 - 330) / 104 shares.
+    facts["facts"]["us-gaap"]["WeightedAverageNumberOfDilutedSharesOutstanding"] = {"units": {"shares": [
+        _fact("2025-07-01", "2025-09-30", 104, form="10-K"), _fact("2024-10-01", "2025-09-30", 100, form="10-K")]}}
+    p = {p["period_end"]: p for p in build_financials(facts)["periods"]}["2025-09-30"]
+    assert (p["eps_diluted"], p["eps_diluted_derived"]) == (1.25, "net_income_per_share")
+
+    # Without Q4 net income there's no quarter row to fill, and nothing is invented:
+    del facts["facts"]["us-gaap"]["NetIncomeLoss"]
+    assert "2025-09-30" not in {p["period_end"] for p in build_financials(facts)["periods"]}
+
+
+def _cash_flow_facts(ocf_ytd, capex_ytd):
+    """Calendar-2025 10-Q YTD cash flow plus the 10-K year; Q4 is derived by differencing."""
+    ends = ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31")
+    rows = lambda vals: [_fact("2025-01-01", e, v, form="10-K" if e.endswith("12-31") else "10-Q")  # noqa: E731
+                         for e, v in zip(ends, vals)]
+    return {"facts": {"us-gaap": {
+        "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": rows(ocf_ytd)}},
+        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": rows(capex_ytd)}},
+    }}}
+
+
+def test_sec_ttm_free_cash_flow_sums_four_quarters():
+    from argus.providers.sec_edgar import ttm_free_cash_flow
+
+    # Quarterly OCF 30/40/30/50, capex 10/10/5/15: FCF 20+30+25+35.
+    facts = _cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40))
+    assert ttm_free_cash_flow(build_financials(facts, "quarterly", 4)) == (110, "2025-12-31")
+    # Three quarters aren't a year:
+    assert ttm_free_cash_flow(build_financials(_cash_flow_facts((30, 70, 100), (10, 20, 25)))) is None
+    # A gap between quarters isn't a trailing year either:
+    gap = {"units": {"operating_cash_flow": "USD", "capex": "USD"}, "periods": [
+        {"period_end": e, "free_cash_flow": 1.0} for e in ("2025-12-31", "2025-09-30", "2025-06-30", "2024-12-31")]}
+    assert ttm_free_cash_flow(gap) is None
+    # Nor are foreign-currency filings next to US-dollar prices:
+    eur = facts | {"facts": {"us-gaap": {k: {"units": {"EUR": v["units"]["USD"]}}
+                                         for k, v in facts["facts"]["us-gaap"].items()}}}
+    assert ttm_free_cash_flow(build_financials(eur)) is None
+
+
+def test_sec_financials_flag_a_stale_latest_quarter():
+    """SEC's companyfacts can lag a 10-Q by months (KO's Q2 2026, filed in July, was still missing in
+    October): the statements say which period they end at and flag it once a newer one is overdue."""
+    from datetime import date
+
+    facts = _cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40))
+    fin = build_financials(facts, "quarterly", today=date(2026, 5, 14))  # 134 days after 2025-12-31
+    assert (fin["latest_period"], fin["latest_period_age_days"], fin["stale"]) == ("2025-12-31", 134, False)
+    fin = build_financials(facts, "quarterly", today=date(2026, 5, 16))
+    assert (fin["latest_period"], fin["latest_period_age_days"], fin["stale"]) == ("2025-12-31", 136, True)
+    # A year is overdue later: the next 10-K comes ~60-90 days after the next year end.
+    assert build_financials(facts, "annual", today=date(2026, 5, 16))["stale"] is False
+    assert build_financials(facts, "annual", today=date(2027, 4, 15))["stale"] is True
+    assert build_financials({"facts": {}})["latest_period"] is None
+    assert build_financials({"facts": {}})["stale"] is False
+
+
+class _FakeSec:
+    def __init__(self, facts=None, error=None):
+        self.facts, self.error = facts, error
+
+    def get_financials(self, symbol, period="quarterly", limit=8):
+        from argus.providers.base import ProviderError
+
+        if self.error:
+            raise ProviderError(self.error)
+        return build_financials(self.facts, period, limit)
+
+
+def test_fcf_ttm_comes_from_sec_quarters_else_provider(settings):
+    from argus.db import make_engine
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    engine = make_engine(st.db_path)
+    yahoo = _Fund("yahoo", {"fcf_ttm": 16.5, "revenue_ttm": 440.0})
+    sec = _FakeSec(_cash_flow_facts((30, 70, 100, 150), (10, 20, 25, 40)))
+    m = MarketService(engine, st, [], None, [yahoo], sec=sec)
+    out = m.get_fundamentals("MSFT", ["fcf_ttm", "revenue_ttm"])
+    assert out["metrics"] == {"fcf_ttm": 110, "revenue_ttm": 440.0}
+    assert out["sources"] == {"fcf_ttm": "sec", "revenue_ttm": "yahoo"}
+    # The SEC figure says which quarters it covers, and the 2025 quarters are long overdue for a newer one:
+    sec_cov = out["sec"]
+    assert sec_cov["fcf_ttm_quarters"] == ["2025-12-31", "2025-09-30", "2025-06-30", "2025-03-31"]
+    assert (sec_cov["fcf_ttm_through"], sec_cov["latest_period"]) == ("2025-12-31", "2025-12-31")
+    assert sec_cov["stale"] is True
+    assert sec_cov["latest_period_age_days"] > 135
+
+    # An SEC hiccup keeps yesterday's SEC figure rather than switching to the provider's:
+    sec.error = "sec https://data.sec.gov/...: HTTP 503"
+    out = m.get_fundamentals("MSFT", ["fcf_ttm"], refresh=True)
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (110, "sec")
+    assert out["sec"]["fcf_ttm_through"] == "2025-12-31"  # with its coverage
+
+    # Not in EDGAR (an ETF), or too few quarters: the provider's figure, labeled as such.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = m.get_fundamentals("SPY", ["fcf_ttm"])
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (16.5, "yahoo")
+    sec.error, sec.facts = None, _cash_flow_facts((30, 70), (10, 20))
+    out = m.get_fundamentals("NEWCO", ["fcf_ttm"])
+    assert (out["metrics"]["fcf_ttm"], out["sources"]["fcf_ttm"]) == (16.5, "yahoo")
+    assert (out["sec"]["latest_period"], out["sec"]["fcf_ttm_quarters"]) == ("2025-06-30", None)
+    # Without SEC_USER_AGENT there's no SEC path at all:
+    plain = MarketService(engine, settings, [], None, [yahoo], sec=_FakeSec(error="must not be called"))
+    assert plain.get_fundamentals("KO", ["fcf_ttm"])["sources"]["fcf_ttm"] == "yahoo"
+
+
+def _quarterly_facts():
+    """Five back-to-back quarters (Rambus-like, in $M), each tagged as its own 3-month period."""
+    q = [("2025-07-01", "2025-09-30", 178.513, 0.44, 82.483), ("2025-10-01", "2025-12-31", 190.244, 0.58, 93.3),
+         ("2026-01-01", "2026-03-31", 180.189, 0.55, 71.574), ("2026-04-01", "2026-06-30", 207.385, 0.61, 52.178),
+         ("2026-07-01", "2026-09-30", 218.289, 0.69, 95.879)]
+    col = lambda i: [_fact(x[0], x[1], x[2 + i]) for x in q]  # noqa: E731
+    return {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": col(0)}},
+        "EarningsPerShareDiluted": {"units": {"USD/shares": col(1)}},
+        "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": [
+            _fact(a, b, fcf + 10) for a, b, _, _, fcf in q]}},
+        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": [_fact(a, b, 10) for a, b, *_ in q]}},
+    }}}
+
+
+def test_sec_ttm_figures_share_one_window():
+    from argus.providers.sec_edgar import ttm_figures
+
+    fin = build_financials(_quarterly_facts(), "quarterly", 8)
+    t = ttm_figures(fin)
+    rev = 218.289 + 207.385 + 180.189 + 190.244
+    assert t["revenue_ttm"] == pytest.approx(rev)
+    assert t["eps_ttm"] == pytest.approx(2.43)
+    assert t["revenue_growth_q_yoy_pct"] == pytest.approx((218.289 / 178.513 - 1) * 100)  # +22.3%
+    assert t["fcf_margin_pct"] == pytest.approx(312.931 / rev * 100)  # 39.3%: same quarters on both sides
+    # Four quarters but no year-ago one: TTM figures, no quarterly growth.
+    assert "revenue_growth_q_yoy_pct" not in ttm_figures(build_financials(_quarterly_facts(), "quarterly", 4))
+    # Foreign-currency revenue doesn't sit beside dollar prices:
+    eur = {"units": {**fin["units"], "revenue": "EUR"}, "periods": fin["periods"]}
+    assert set(ttm_figures(eur)) == {"eps_ttm"}
+
+
+def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
+    """After a 10-Q, Yahoo's revenue and Finnhub's quarterly growth can run a quarter behind SEC's
+    statements on the same page (RMBS: $756M and +20.4% through Q2 vs $796M and +22.3% through Q3).
+    SEC's quarters then supply revenue, EPS, growth and FCF margin from one window."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    yahoo = _Fund("yahoo", {"revenue_ttm": 756.331, "eps_ttm": 2.42, "fcf_ttm": 202.3, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"revenue_growth_q_yoy_pct": 20.43, "pe_ttm": 39.6})
+    sec = _FakeSec(_quarterly_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [], None, [finnhub, yahoo], sec=sec))
+    fields = ["revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "fcf_ttm", "fcf_margin_pct", "pe_ttm"]
+    out = a.fundamentals("RMBS", fields)
+    m, src = out["metrics"], out["sources"]
+    assert m["revenue_ttm"] == pytest.approx(796.107)
+    assert m["eps_ttm"] == pytest.approx(2.43)
+    assert m["revenue_growth_q_yoy_pct"] == pytest.approx(22.28, abs=0.01)
+    assert m["fcf_margin_pct"] == pytest.approx(39.31, abs=0.01)
+    assert {k: src[k] for k in fields} == {"revenue_ttm": "sec", "eps_ttm": "sec", "revenue_growth_q_yoy_pct": "sec",
+                                           "fcf_ttm": "sec", "fcf_margin_pct": "sec", "pe_ttm": "sec"}
+    assert out["sec"]["ttm_quarters"] == ["2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"]
+    # The portfolio views show the same figure:
+    assert a.symbol_fundamentals(["RMBS"])["metrics"]["RMBS"]["fcf_margin_pct"] == pytest.approx(m["fcf_margin_pct"])
+
+    # Same quarter on both sides (BLLN: Finnhub's -12.8% vs SEC's +64.4%): SEC's still wins.
+    yahoo.data = yahoo.data | {"_period_end": "2026-09-30"}
+    out = a.fundamentals("RMBS", fields, refresh=True)
+    assert out["sources"]["revenue_growth_q_yoy_pct"] == "sec"
+
+    # A provider a quarter ahead (earnings out, SEC's XBRL not caught up, as KO's): the providers' figures,
+    # while FCF margin stays SEC's FCF over SEC's revenue for the same quarters.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("RMBS", fields, refresh=True)
+    assert {k: out["sources"][k] for k in ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct")} == {
+        "revenue_ttm": "yahoo", "eps_ttm": "yahoo", "revenue_growth_q_yoy_pct": "finnhub"}
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(39.31, abs=0.01)
+    assert out["sec"]["ttm_quarters"] is None
+
+    # Not in EDGAR (an ETF, a foreign filer): the providers' figures, FCF margin from them.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = a.fundamentals("SPY", fields)
+    assert out["sources"]["revenue_ttm"] == "yahoo" and out["metrics"]["eps_ttm"] == 2.42
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(202.3 / 756.331 * 100)
+
+
+def test_pe_is_the_current_price_over_the_eps_shown(settings):
+    """RMBS: Finnhub's P/E 35.7 sat beside SEC's $2.43 EPS at $91.03 (37.5); BLLN 142.7 vs 162.9. P/E is
+    now the price ÷ the EPS on the card, with that EPS's source, everywhere the card's figures go."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    quotes = FakeQuotes("finnhub", {"RMBS": (91.03, 88.91), "SPY": (600.0, 598.0), "LOSS": (5.0, 5.0)})
+    yahoo = _Fund("yahoo", {"eps_ttm": 2.42, "pe_ttm": 36.9, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"pe_ttm": 35.7258})
+    sec = _FakeSec(_quarterly_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [quotes], None, [finnhub, yahoo], sec=sec))
+
+    # SEC's EPS: P/E is the price over it, labeled sec, on the card, the portfolio tab, compare and watchlists.
+    out = a.fundamentals("RMBS", ["eps_ttm", "pe_ttm"])
+    assert (out["metrics"]["eps_ttm"], out["sources"]["eps_ttm"]) == (pytest.approx(2.43), "sec")
+    assert out["metrics"]["pe_ttm"] == pytest.approx(91.03 / 2.43)  # 37.5, not Finnhub's 35.7
+    assert out["sources"]["pe_ttm"] == "sec"
+    assert a.symbol_fundamentals(["RMBS"])["metrics"]["RMBS"]["pe_ttm"] == pytest.approx(91.03 / 2.43)
+    assert a.market.get_fundamentals("RMBS", ["pe_ttm"])["metrics"]["pe_ttm"] == pytest.approx(91.03 / 2.43)
+    # It follows the price, not the price when the fundamentals were cached:
+    quotes.prices["RMBS"] = (100.0, 91.03)
+    a.market.store_quotes(quotes.get_quotes(["RMBS"]).values())
+    assert a.fundamentals("RMBS", ["pe_ttm"])["metrics"]["pe_ttm"] == pytest.approx(100 / 2.43)
+
+    # A provider's EPS (not in EDGAR): the price over that EPS, labeled with that provider.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = a.fundamentals("SPY", ["eps_ttm", "pe_ttm"])
+    assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (pytest.approx(600 / 2.42), "yahoo")
+
+    # Losses: no meaningful P/E, rather than the provider's.
+    yahoo.data = {"eps_ttm": -0.4, "pe_ttm": 12.0}
+    out = a.fundamentals("LOSS", ["eps_ttm", "pe_ttm"])
+    assert out["metrics"]["pe_ttm"] is None and out["sources"]["pe_ttm"] == "yahoo"
+    # No EPS at all: the provider's own P/E stands.
+    yahoo.data = {}
+    out = a.fundamentals("LOSS", ["pe_ttm"], refresh=True)
+    assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (35.7258, "finnhub")
+
+
+def test_last_price_is_the_newer_of_quote_and_close(settings):
+    from argus.db import make_engine
+    from argus.providers.base import Quote
+    from argus.services.market import MarketService
+
+    m = MarketService(make_engine(settings.db_path), settings, [], None, [])
+    old, new = datetime(2026, 10, 27, 20, tzinfo=UTC), datetime(2026, 10, 28, 20, tzinfo=UTC)
+    m.store_quotes([Quote("A", 10.0, 9.0, None, None, None, old, "finnhub"),
+                    Quote("B", 20.0, 19.0, None, None, None, new, "finnhub")])
+    m._store_bars("A", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 10.5, 1), Bar(new - timedelta(hours=6), 1, 1, 1, 11.0, 1)])
+    m._store_bars("B", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 19.5, 1)])
+    m._store_bars("C", "1d", [Bar(old - timedelta(hours=6), 1, 1, 1, 30.0, 1)])
+    assert m.last_prices(["A", "B", "C", "D"]) == {"A": 11.0, "B": 20.0, "C": 30.0}
+
+
+def _margin_facts(capex: bool = True, gross: bool = True):
+    """_quarterly_facts plus gross profit, operating and net income; capex optional (HRMY, TOST: SEC's
+    filings tag none in recent quarters)."""
+    facts = _quarterly_facts()
+    g = facts["facts"]["us-gaap"]
+    q = [(f["start"], f["end"], f["val"]) for f in g["Revenues"]["units"]["USD"]]
+    cols = {"GrossProfit": 0.8, "OperatingIncomeLoss": 0.25, "NetIncomeLoss": 0.2} if gross else \
+        {"OperatingIncomeLoss": 0.25, "NetIncomeLoss": 0.2}
+    for tag, share in cols.items():
+        g[tag] = {"units": {"USD": [_fact(a, b, v * share) for a, b, v in q]}}
+    if not capex:
+        del g["PaymentsToAcquirePropertyPlantAndEquipment"]
+    return facts
+
+
+def test_sec_ttm_margins_and_ocf_margin_without_capex():
+    from argus.providers.sec_edgar import ttm_figures
+
+    t = ttm_figures(build_financials(_margin_facts(), "quarterly", 8))
+    assert (t["gross_margin_pct"], t["operating_margin_pct"], t["net_margin_pct"]) == pytest.approx((80, 25, 20))
+    assert "ocf_margin_pct" not in t  # FCF margin is there
+    # No capex: no FCF margin, and operating cash flow over the same quarters' revenue in its place.
+    t = ttm_figures(build_financials(_margin_facts(capex=False), "quarterly", 8))
+    rev = 218.289 + 207.385 + 180.189 + 190.244
+    assert "fcf_margin_pct" not in t
+    assert t["ocf_margin_pct"] == pytest.approx((312.931 + 40) / rev * 100)
+
+
+def test_valuation_card_margins_and_fcf_margin_from_one_source(settings):
+    """MSFT: Finnhub's margins ran a quarter behind the SEC revenue/EPS/FCF on the same card. HRMY/TOST:
+    SEC tags no capex, so the card showed Yahoo FCF ÷ SEC revenue (19.0% vs ~37% OCF margin on SEC)."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    yahoo = _Fund("yahoo", {"revenue_ttm": 756.331, "fcf_ttm": 182.8, "_period_end": "2026-06-30"})
+    finnhub = _Fund("finnhub", {"gross_margin_pct": 79.0, "operating_margin_pct": 24.0, "net_margin_pct": 19.0,
+                                "roe_pct": 30.0})
+    sec = _FakeSec(_margin_facts())
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [], None, [finnhub, yahoo], sec=sec))
+    fields = ["gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_ttm", "fcf_margin_pct",
+              "ocf_margin_pct", "roe_pct"]
+    out = a.fundamentals("MSFT", fields)
+    m, src = out["metrics"], out["sources"]
+    assert (m["gross_margin_pct"], m["operating_margin_pct"], m["net_margin_pct"]) == pytest.approx((80, 25, 20))
+    assert {k: src[k] for k in ("gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_margin_pct")} == \
+        dict.fromkeys(("gross_margin_pct", "operating_margin_pct", "net_margin_pct", "fcf_margin_pct"), "sec")
+    assert m.get("ocf_margin_pct") is None and src["roe_pct"] == "finnhub"
+    assert out["sec"]["ttm_quarters"] == ["2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"]
+
+    # A margin SEC lacks falls back to the provider's, labeled as such:
+    sec.facts = _margin_facts(gross=False)
+    out = a.fundamentals("MSFT", fields, refresh=True)
+    assert (out["metrics"]["gross_margin_pct"], out["sources"]["gross_margin_pct"]) == (79.0, "finnhub")
+    assert out["sources"]["operating_margin_pct"] == "sec"
+
+    # Providers a quarter ahead of SEC: their margins, not SEC's older ones.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("MSFT", fields, refresh=True)
+    assert {out["sources"][k] for k in ("operating_margin_pct", "net_margin_pct")} == {"finnhub"}
+    yahoo.data = yahoo.data | {"_period_end": "2026-06-30"}
+
+    # No SEC capex (HRMY): Yahoo's FCF stays labeled yahoo, but isn't divided by SEC revenue; SEC's
+    # operating cash flow margin over the same quarters stands in.
+    sec.facts = _margin_facts(capex=False)
+    out = a.fundamentals("HRMY", fields, refresh=True)
+    m, src = out["metrics"], out["sources"]
+    assert (m["fcf_ttm"], src["fcf_ttm"]) == (182.8, "yahoo")
+    assert m.get("fcf_margin_pct") is None and "fcf_margin_pct" not in src
+    assert src["ocf_margin_pct"] == "sec" and m["ocf_margin_pct"] == pytest.approx(352.931 / 796.107 * 100)
+    assert a.symbol_fundamentals(["HRMY"])["metrics"]["HRMY"]["fcf_margin_pct"] is None
+
+    # Both from one provider (SEC behind, so Yahoo supplies revenue too): that provider's ratio, labeled.
+    yahoo.data = yahoo.data | {"_period_end": "2026-12-31"}
+    out = a.fundamentals("HRMY", fields, refresh=True)
+    assert out["sources"]["fcf_margin_pct"] == "yahoo"
+    assert out["metrics"]["fcf_margin_pct"] == pytest.approx(182.8 / 756.331 * 100)
+    assert out["metrics"].get("ocf_margin_pct") is None
+
+
+def test_provider_ahead_of_sec():
+    from datetime import date
+
+    from argus.services.market import provider_ahead_of_sec
+
+    assert provider_ahead_of_sec("2026-09-30", ["2026-06-30"]) is False
+    assert provider_ahead_of_sec("2026-04-03", ["2026-04-03"]) is False
+    assert provider_ahead_of_sec("2026-04-03", ["2026-07-03"]) is True
+    assert provider_ahead_of_sec("2025-12-27", ["2026-01-02"]) is False  # 52/53-week calendars
+    assert provider_ahead_of_sec(None, []) is True
+    # No provider period: SEC counts as behind once a newer report is overdue.
+    assert provider_ahead_of_sec(date.today().isoformat(), []) is False
+    assert provider_ahead_of_sec("2020-03-31", []) is True
 
 
 def test_sec_prefers_restated_value():
@@ -139,6 +504,35 @@ def test_sec_prefers_restated_value():
     ]}}}}}
     assert build_financials(facts)["periods"][0]["revenue"] == 95
     json.dumps(build_financials(facts))  # serializable
+
+
+def test_sec_revenue_including_assessed_tax_only_fills_gaps():
+    incl = "RevenueFromContractWithCustomerIncludingAssessedTax"
+    # Rambus and BioCryst tag revenue only this way:
+    only = {"facts": {"us-gaap": {incl: {"units": {"USD": [
+        _fact("2025-01-01", "2025-03-31", 100), _fact("2025-01-01", "2025-06-30", 210),
+        _fact("2025-01-01", "2025-12-31", 460, form="10-K"),
+    ]}}, "GrossProfit": {"units": {"USD": [_fact("2025-01-01", "2025-03-31", 60)]}}}}}
+    q = {p["period_end"]: p for p in build_financials(only)["periods"]}
+    assert (q["2025-03-31"]["revenue"], q["2025-06-30"]["revenue"]) == (100, 110)
+    assert q["2025-03-31"]["gross_margin_pct"] == 60
+    assert build_financials(only, "annual")["periods"][0]["revenue"] == 460
+    # It's gross of sales taxes, so a net figure wins wherever the company tags one:
+    both = {"facts": {"us-gaap": {
+        incl: {"units": {"USD": [_fact("2025-01-01", "2025-03-31", 101), _fact("2025-04-01", "2025-06-30", 112)]}},
+        "Revenues": {"units": {"USD": [_fact("2025-04-01", "2025-06-30", 110)]}},
+    }}}
+    q = {p["period_end"]: p["revenue"] for p in build_financials(both)["periods"]}
+    assert q == {"2025-06-30": 110, "2025-03-31": 101}
+
+
+def test_screener_revenue_covers_statement_tags():
+    from argus.providers.sec_edgar import CONCEPTS
+    from argus.services.screener import REVENUE
+
+    revenue = next(c for c in CONCEPTS if c.field == "revenue")
+    us_gaap = [t for t in (*revenue.tags, *revenue.fallback) if t != "Revenue"]  # ifrs-full has no frames
+    assert set(us_gaap) <= set(REVENUE)
 
 
 class _Fund:
@@ -214,3 +608,43 @@ def test_sec_prefers_report_filings_over_later_proxy_copies():
     from datetime import date as D
     assert d[(D(2024, 1, 29), D(2025, 1, 26))] == (72.88, "10-K")       # the proxy copy doesn't displace it
     assert d[(D(2023, 1, 30), D(2024, 1, 28))] == (29.76, "10-K/A")     # a later report (restatement) still wins
+
+
+def test_yahoo_history_skips_a_session_without_a_close(monkeypatch):
+    # AEHR, 2026-10-23: Yahoo's bar had open/high/low but a NaN close.
+    import pandas as pd
+
+    from argus.providers.yahoo import YahooProvider
+
+    nan = float("nan")
+    df = pd.DataFrame({"Open": [65.14, nan, 55.06], "High": [65.49, 60.28, 57.83], "Low": [62.9, 54.6, 54.22],
+                       "Close": [63.88, 55.65, nan], "Volume": [1345400, nan, 1820190]},
+                      index=pd.to_datetime(["2026-10-21", "2026-10-22", "2026-10-23"]).tz_localize("America/New_York"))
+
+    class T:
+        def __init__(self, s):
+            pass
+
+        def history(self, **kw):
+            return df
+
+    monkeypatch.setattr("argus.providers.yahoo._yf", lambda: type("yf", (), {"Ticker": T}))
+    bars = YahooProvider().get_history("AEHR", datetime(2026, 10, 20, tzinfo=UTC), None, "1d")
+    assert [b.c for b in bars] == [63.88, 55.65]  # the closeless session is skipped
+    assert (bars[1].o, bars[1].v) == (55.65, 0.0)  # a missing open/volume doesn't sink the bar
+
+
+def test_a_bar_without_a_close_never_breaks_the_history_cache(make_argus):
+    # A provider handing back a NaN close used to fail the whole insert (price_bar.c is NOT NULL),
+    # so every performance request for the portfolio returned a 500.
+    from datetime import date, timedelta
+
+    from argus.providers.base import Bar
+    from tests.conftest import FakeHistory
+
+    today = date.today()
+    days = [today - timedelta(days=d) for d in (6, 5, 4)]
+    bars = [Bar(datetime(d.year, d.month, d.day, 4, tzinfo=UTC), 10, 11, 9, c, 100) for d, c in zip(days, (10.0, 10.5, float("nan")))]
+    a = make_argus(history=FakeHistory(bars))
+    closes = a.market.daily_closes("AEHR", today - timedelta(days=10))
+    assert sorted(closes.values()) == [10.0, 10.5]

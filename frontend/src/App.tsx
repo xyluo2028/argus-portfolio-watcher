@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
 import { useLive } from "./useLive";
 
@@ -12,6 +13,7 @@ const Screener = lazy(() => import("./pages/Screener").then((m) => ({ default: m
 const Markets = lazy(() => import("./pages/Markets").then((m) => ({ default: m.Markets })));
 const Analysis = lazy(() => import("./pages/Analysis").then((m) => ({ default: m.Analysis })));
 const Compare = lazy(() => import("./pages/Compare").then((m) => ({ default: m.Compare })));
+const Dcf = lazy(() => import("./pages/Dcf").then((m) => ({ default: m.Dcf })));
 const Data = lazy(() => import("./pages/Data").then((m) => ({ default: m.Data })));
 const Ticker = lazy(() => import("./pages/Ticker").then((m) => ({ default: m.Ticker })));
 const Transactions = lazy(() => import("./pages/Transactions").then((m) => ({ default: m.Transactions })));
@@ -67,6 +69,15 @@ function SignIn({ onDone }: { onDone: () => void }) {
 }
 
 function Main() {
+  const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [pathname]);
+
   const [portfolios, setPortfolios] = useState<PortfolioRef[] | null>(null);
   const [current, setCurrent] = useState<string>(() => {
     try {
@@ -97,9 +108,18 @@ function Main() {
 
   return (
     <>
-      <header className="topbar">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <header className="topbar" onKeyDown={(e) => {
+        if (e.key === "Escape" && menuOpen) {
+          setMenuOpen(false);
+          menuButton.current?.focus();
+        }
+      }}>
         <div className="brand"><span className="brand-dot" aria-hidden />Argus</div>
-        <nav className="nav">
+        <button ref={menuButton} className="btn menu-toggle" aria-expanded={menuOpen} aria-controls="primary-nav"
+                onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? "Close" : "Menu"}</button>
+        <nav id="primary-nav" className="nav" aria-label="Main navigation" data-open={menuOpen}
+             onClick={(e) => { if ((e.target as HTMLElement).closest("a")) setMenuOpen(false); }}>
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/watchlist">Watchlist</NavLink>
           <NavLink to="/transactions">Transactions</NavLink>
@@ -107,20 +127,22 @@ function Main() {
           <NavLink to="/markets">Markets</NavLink>
           <NavLink to="/screener">Screener</NavLink>
           <NavLink to="/compare">Compare</NavLink>
+          <NavLink to="/dcf">DCF</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
           <NavLink to="/data">Data</NavLink>
         </nav>
         {portfolios && portfolios.length > 0 && (
-          <select value={current} onChange={(e) => setCurrent(e.target.value)} aria-label="Portfolio">
+          <select className="portfolio-picker" value={current} onChange={(e) => setCurrent(e.target.value)} aria-label="Portfolio">
             {portfolios.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
             {portfolios.length > 1 && <option value={ALL}>All portfolios</option>}
           </select>
         )}
+        <TickerSearch />
         <div className="spacer" />
         <LiveBadge live={live} connected={connected} />
         <ThemeToggle />
       </header>
-      <main>
+      <main id="main-content" tabIndex={-1}>
         <Suspense fallback={<p className="muted">Loading…</p>}>
         {portfolios === null ? <p className="muted">Loading…</p>
           : portfolios.length === 0 ? (
@@ -141,6 +163,8 @@ function Main() {
               <Route path="/watchlist" element={<Watchlist live={live} />} />
               <Route path="/transactions" element={<Transactions portfolio={current} />} />
               <Route path="/compare" element={<Compare portfolio={current} />} />
+              <Route path="/dcf" element={<Dcf />} />
+              <Route path="/dcf/:symbol" element={<Dcf />} />
               <Route path="/analysis" element={<Analysis portfolio={current} />} />
               <Route path="/markets" element={<Markets />} />
               <Route path="/screener" element={<Screener />} />
