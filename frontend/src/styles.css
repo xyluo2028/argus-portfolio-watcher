@@ -114,6 +114,8 @@ button, select, summary, a.btn, .nav a { touch-action: manipulation; }
 .nav a.active { background: var(--accent-wash); color: var(--text); }
 .menu-toggle { display: none; }
 .spacer { flex: 1; }
+.ticker-search { display: flex; width: 260px; min-width: 160px; }
+.ticker-search .combo-list { min-width: 320px; }
 main { max-width: 1280px; margin: 0 auto; padding: 20px; }
 @media (max-width: 640px) { main { padding: 16px; } .topbar { padding: 10px 16px; flex-wrap: wrap; } }
 
@@ -430,10 +432,12 @@ td.pick input, th.pick input { cursor: pointer; }
   .topbar > .spacer { display: none; }
   .market-inline { display: none; }
   .market-status { display: block; }
-  .topbar > .badge, .market-status { grid-column: 1 / -1; grid-row: 2; }
+  .ticker-search { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+  .ticker-search .combo-list { min-width: 0; }
+  .topbar > .badge, .market-status { grid-column: 1 / -1; grid-row: 3; }
   .market-status summary { min-height: 40px; width: 100%; }
   .market-detail { top: 100%; left: 0; right: auto; }
-  .nav { display: none; grid-column: 1 / -1; grid-row: 3; width: 100%; }
+  .nav { display: none; grid-column: 1 / -1; grid-row: 4; width: 100%; }
   .nav[data-open="true"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px;
     max-height: calc(100dvh - 120px); overflow-y: auto; padding: 4px 0 8px; }
   .nav a { display: flex; align-items: center; min-height: 44px; padding: 8px 10px; }

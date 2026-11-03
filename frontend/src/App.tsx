@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
 import { useLive } from "./useLive";
 
@@ -134,6 +135,7 @@ function Main() {
             {portfolios.length > 1 && <option value={ALL}>All portfolios</option>}
           </select>
         )}
+        <TickerSearch />
         <div className="spacer" />
         <LiveBadge live={live} connected={connected} />
         <ThemeToggle />
