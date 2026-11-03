@@ -211,7 +211,6 @@ svg.curve .end-label { font-size: 11.5px; fill: var(--text-2); }
 /* screener */
 .filter-row select { min-width: 190px; }
 .filter-row .input { max-width: 120px; }
-th.sorted { color: var(--text); }
 
 /* stock page fundamentals, grouped like the dashboard tabs */
 .fund-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px 28px; }
