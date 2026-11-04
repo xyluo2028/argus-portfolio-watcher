@@ -21,7 +21,7 @@ from sqlalchemy.dialects.sqlite import insert
 from argus.config import Settings
 from argus.db import session_scope, upsert
 from argus.errors import ArgusError
-from argus.market_calendar import NY, market_status
+from argus.market_calendar import NY, market_status, session_date
 from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
 from argus.providers.base import Bar, ProviderError, Quote
 from argus.providers.sec_edgar import freshness, ttm_figures, ttm_free_cash_flow
@@ -124,6 +124,19 @@ def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -
 def _aware(dt: datetime) -> datetime:
     """Aggregates (min/max) bypass the UTC column type and come back naive."""
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+def session_close_from_quote(last_bar: date | None, quote: Quote | None, session: date) -> float | None:
+    """`session`'s close from a quote while the stored daily history still ends before it.
+
+    Yahoo can withhold the last completed session's daily bar for hours (a NaN close, B-128) while
+    quotes already carry that close as their regular price (`price`, never the extended one). Callers
+    use it for computations only and never store it, so the real bar replaces it once it arrives and a
+    later bar is never overwritten. None when there's a bar for `session` already, no history to extend,
+    or the quote belongs to another session (e.g. today's, mid-session)."""
+    if quote is None or not quote.price or last_bar is None or last_bar >= session:
+        return None
+    return quote.price if session_date(quote.as_of) == session else None
+
 
 class MarketService:
     def __init__(self, engine: Engine, settings: Settings, quote_providers: list, history_provider,

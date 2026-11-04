@@ -44,7 +44,7 @@ from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
-from argus.services.market import MarketService, with_pe
+from argus.services.market import MarketService, session_close_from_quote, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import AccountSnapshots, SnapshotService
@@ -1282,6 +1282,11 @@ class Argus:
         bars = {b.ts.astimezone(NY).date(): (b.o, b.c) for b in history if b.ts.astimezone(NY).date() >= start}
         quotes, _ = self.market.get_quotes([sym])
         status = market_status()
+        # An after-close report's base is that session's close: from the quote until its bar arrives (B-134).
+        last_session, q = date.fromisoformat(status["last_session"]), quotes.get(sym)
+        close = session_close_from_quote(max(bars, default=None), q, last_session)
+        if close is not None:
+            bars[last_session] = (q.open or close, close)
         built = earnings_mod.build(periods, yahoo, calendar, results, bars, today, quotes.get(sym), status["session"])
         return {"symbol": sym, "as_of": today.isoformat(), **built, "reports": built["reports"][:limit],
                 "errors": {"price_history": err} if err else {}}
@@ -1695,6 +1700,29 @@ class Argus:
             "saved": False,
         }
 
+    def _fill_last_session(self, closes: dict[str, dict[date, float]], session: date,
+                           live_quotes: dict[str, Quote] | None = None) -> list[str]:
+        """Add `session`'s close from a quote to every symbol whose stored closes end before it
+        (market.session_close_from_quote), in memory only. Prefers live quotes, as the portfolio
+        summary does. Returns the symbols filled."""
+        behind = [sym for sym, c in closes.items() if c and max(c) < session]
+        if not behind:
+            return []
+        quotes = {sym: live_quotes[sym] for sym in behind if live_quotes and sym in live_quotes}
+        missing = [sym for sym in behind if sym not in quotes]
+        if missing:
+            try:
+                quotes |= self.market.get_quotes(missing)[0]
+            except Exception as e:  # noqa: BLE001 - without quotes the prior close carries forward, as before
+                log.warning("quotes for %s's closes: %s", session, e)
+        filled = []
+        for sym in behind:
+            close = session_close_from_quote(max(closes[sym]), quotes.get(sym), session)
+            if close is not None:
+                closes[sym][session] = close
+                filled.append(sym)
+        return sorted(filled)
+
     PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
 
     def performance(self, ref: str, range_: str = "all", live_quotes: dict[str, Quote] | None = None) -> dict:
@@ -1711,6 +1739,9 @@ class Argus:
         sessions = sessions_between(start, end)
         symbols = sorted({t.symbol for t in txns} | {p.benchmark})
         closes = self.market.daily_closes_many(symbols, start)  # one query; downloads only what's missing
+        # Until Yahoo publishes the last session's bar, value that session at the quotes' close (as Day
+        # P&L does), benchmark included: carrying the prior close forward would show a flat day.
+        from_quotes = self._fill_last_session(closes, end, live_quotes)
 
         # While a session is open, add today as a provisional point priced from live quotes.
         today = datetime.now(NY).date()
@@ -1755,6 +1786,8 @@ class Argus:
             "range": range_,
             "benchmark": p.benchmark,
             "provisional_today": bool(points) and points[-1].d == today and status["session"] != "closed",
+            # The last session's closes taken from quotes, not daily bars (B-134).
+            "closes_from_quotes": {"date": end.isoformat(), "symbols": from_quotes} if from_quotes else None,
             "summary": summary,
             "dividends_accrued": in_slice,
             "series": [{
