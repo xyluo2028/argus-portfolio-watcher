@@ -65,20 +65,41 @@ def _rhythm(pays: list[tuple[date, float]], today: date):
 
 def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: date,
             announced: Iterable[date]) -> list[tuple[date, float, bool]]:
-    """Ex-dates that have passed but the provider's history doesn't show yet (Yahoo lags days behind
-    the ex-date, while quotes' previous close already drops by the dividend): (ex-date, projected cash
-    per share, whether the date is estimated). A declared one counts as is; failing that, the next
-    estimated ex-date after the last paid one counts within half a period of grace (about two weeks
-    for a monthly payer, six for a quarterly one). Later than that, the history hasn't merely lagged:
-    the payer more likely skipped or stopped, so nothing is counted. When the history catches up, its
-    row (within half a period) becomes the last ex-date and replaces this one, with the real amount."""
+    """Ex-dates that have passed but the provider's history doesn't show (Yahoo lags days behind the
+    ex-date, while quotes' previous close already drops by the dividend, and it sometimes drops a
+    recent row it served before): (ex-date, projected cash per share, whether the date is estimated).
+    A declared one counts as is. The estimated ex-dates are walked step by step from the last paid one
+    up to today, so a history that is missing its last row still counts the payment after it; each
+    one a declared date doesn't replace counts. They count only while the newest of them is within
+    half a period of grace (about two weeks for a monthly payer, six for a quarterly one): later than
+    that, the history hasn't merely lagged, the payer more likely skipped or stopped, so nothing is
+    counted. When the history catches up, its row (within half a period) becomes the last ex-date and
+    replaces the estimate, with the real amount."""
     half = timedelta(days=round(365 / freq)) / 2
-    out = [(a, per_payment, False) for a in sorted(set(announced)) if last_d + half <= a <= today]
-    if not stale and not out:
-        est = session_on_or_after(add_months(last_d, 12 // freq))
-        if est <= today <= est + half:
-            out.append((est, per_payment, True))
-    return out
+    declared = [a for a in sorted(set(announced)) if last_d + half <= a <= today]
+    out = [(a, per_payment, False) for a in declared]
+    if not stale:
+        steps, k = [], 1
+        while (est := session_on_or_after(add_months(last_d, 12 // freq * k))) <= today:
+            steps.append(est)
+            k += 1
+        if steps and today <= steps[-1] + half:
+            out += [(e, per_payment, True) for e in steps if all(abs(e - a) >= half for a in declared)]
+    return sorted(out)
+
+
+def merge_history(stored: list[tuple[str, float]], fetched: list[tuple[str, float]],
+                  today: date) -> list[tuple[str, float]]:
+    """A refreshed dividend history merged into the stored one. Yahoo sometimes drops a recent row it
+    served the day before (SGOV's 10-01 went missing overnight), so a stored ex-date the new answer
+    lacks is kept while it's in the lookback window, unless the new answer has a row within a week of
+    it (the same payment, re-dated). A new amount for the same date overwrites the stored one."""
+    new = [(d, a) for d, a in fetched]
+    seen = [date.fromisoformat(d) for d, _ in new]
+    cutoff = today - timedelta(days=LOOKBACK_DAYS)
+    kept = [(d, a) for d, a in stored
+            if (x := date.fromisoformat(d)) > cutoff and all(abs((x - n).days) > 7 for n in seen)]
+    return sorted([*new, *kept])
 
 
 def pending(history: list[tuple[str, float]], today: date, announced: Iterable[date] = ()) -> list[tuple[str, float]]:

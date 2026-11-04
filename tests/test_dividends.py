@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from argus.services.dividends import accrue, add_months, analyze, analyze_holding, frequency
+from argus.services.dividends import accrue, add_months, analyze, analyze_holding, frequency, merge_history
 from argus.services.portfolio import TxnInput
 
 TODAY = date(2026, 10, 5)
@@ -197,3 +197,32 @@ def test_passed_estimated_ex_date_accrues_once():
     assert accrue([_t("BUY", date(2026, 11, 2), 100, 71.3, sym="BND")], BND, nov3) == []
     # Too long past the estimate to be a lag.
     assert [x["ex_date"] for x in accrue(txns, BND, date(2026, 11, 20))] == ["2026-10-01"]
+
+
+# -- Yahoo drops a recent row it served before (B-133) -------------------------
+def test_refresh_merges_into_the_stored_history():
+    nov4 = date(2026, 11, 4)
+    stored = [("2024-06-03", 0.2), ("2026-09-01", 0.253), ("2026-10-01", 0.255)]
+    fetched = [("2026-08-01", 0.25), ("2026-09-01", 0.254)]  # 10-01 gone, 09-01 restated
+    assert merge_history(stored, fetched, nov4) == [("2026-08-01", 0.25), ("2026-09-01", 0.254),
+                                                     ("2026-10-01", 0.255)]
+    # A stored row re-dated by a few days in the new answer is the same payment: not kept twice.
+    assert merge_history([("2026-10-01", 0.255)], [("2026-10-02", 0.255)], nov4) == [("2026-10-02", 0.255)]
+
+
+def test_history_missing_its_last_row_still_counts_the_payment_after_it():
+    gap = BND["BND"][:-1]  # Yahoo's list lost 10-01 and ends at 09-01
+    nov3 = date(2026, 11, 3)  # the 11-02 estimate passed yesterday
+    h = analyze_holding(gap, 100, lambda d: 100, nov3)
+    late = [(x["ex_date"], x.get("estimated")) for x in h["received"] if x["ex_date"] >= "2026-09-15"]
+    assert late == [("2026-10-01", True), ("2026-11-02", True)]
+    assert h["projected"][0]["ex_date"] == "2026-12-01"
+    # The row comes back: each payment counted once, 10-01 at its real amount.
+    back = analyze_holding(BND["BND"], 100, lambda d: 100, nov3)
+    assert [x["ex_date"] for x in back["received"] if x["ex_date"] >= "2026-09-15"] == ["2026-10-01", "2026-11-02"]
+    txns = [_t("BUY", date(2026, 9, 15), 100, 72, sym="BND")]
+    out = accrue(txns, {"BND": gap}, nov3)
+    assert [(x["ex_date"], x.get("estimated")) for x in out] == [("2026-10-01", True), ("2026-11-02", True)]
+    assert [x["ex_date"] for x in accrue(txns, BND, nov3)] == ["2026-10-01", "2026-11-02"]
+    # Past the grace of the newest estimate, the payer more likely stopped: nothing counted.
+    assert accrue(txns, {"BND": gap}, date(2026, 11, 20)) == []
