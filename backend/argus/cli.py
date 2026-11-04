@@ -33,7 +33,12 @@ app.add_typer(txn_app, name="txn")
 app.add_typer(import_app, name="import")
 app.add_typer(alert_app, name="alert")
 app.add_typer(note_app, name="note")
+user_app = typer.Typer(help="Accounts that sign in to the web UI, API and MCP (a bot is an account too).",
+                       no_args_is_help=True)
+key_app = typer.Typer(help="API keys: how bots, scripts and MCP clients sign in.", no_args_is_help=True)
 app.add_typer(snapshot_app, name="snapshot")
+app.add_typer(user_app, name="user")
+app.add_typer(key_app, name="key")
 
 console = Console()
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
@@ -606,3 +611,99 @@ def import_investing(file: Path,
             console.print(f"[green]Imported {d['inserted']} lots[/green]"
                           + (f", skipped {d['skipped_existing']} already imported" if d["skipped_existing"] else ""))
     _run(as_json, go, render)
+
+
+# -- accounts -----------------------------------------------------------------------
+PasswordOpt = Annotated[str | None, typer.Option(help="Default: asks (keeps it out of your shell history)")]
+
+
+def _ask_password() -> str:
+    return typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+
+
+@user_app.command("add")
+def user_add(username: str,
+             password: PasswordOpt = None,
+             no_password: Annotated[bool, typer.Option("--no-password", help="API keys only; no web sign-in")] = False,
+             as_json: JsonOpt = False):
+    """Create an account. Once one exists, every request to `argus serve` must sign in."""
+    if not no_password and password is None:
+        password = _ask_password()
+
+    def render(d):
+        console.print(f"[green]Created account {d['username']}[/green] (id {d['id']})")
+        if d["first"]:
+            console.print("[yellow]This is the first account: from now on every request to `argus serve` must "
+                          "sign in, and ARGUS_TOKEN (if set) acts as this account. Make it yours, not a bot's.[/yellow]")
+        if not d["has_password"]:
+            console.print(f"Make it a key: argus key create {d['username']} --name <what uses it>")
+    _run(as_json, lambda: _argus().accounts.create(username, None if no_password else password), render)
+
+
+@user_app.command("list")
+def user_list(as_json: JsonOpt = False):
+    def render(rows):
+        t = Table("ID", "Username", "Web sign-in", "API keys", "Status", "Created")
+        for r in rows:
+            t.add_row(str(r["id"]), r["username"], "password" if r["has_password"] else "-", str(r["keys"]),
+                      "[red]disabled[/red]" if r["disabled"] else "active", r["created_at"][:10])
+        console.print(t)
+    _run(as_json, lambda: _argus().accounts.list_accounts(), render)
+
+
+@user_app.command("passwd")
+def user_passwd(username: str, password: PasswordOpt = None, as_json: JsonOpt = False):
+    """Set a new password; signs the account out of every browser."""
+    password = password if password is not None else _ask_password()
+    _run(as_json, lambda: _argus().accounts.set_password(username, password),
+         lambda d: console.print(f"[green]Password set for {d['username']}[/green]; "
+                                 f"ended {d['sessions_ended']} web session(s)."))
+
+
+@user_app.command("disable")
+def user_disable(username: str, as_json: JsonOpt = False):
+    """Stop an account from signing in; its sessions and keys stop working until `enable`."""
+    _run(as_json, lambda: _argus().accounts.set_disabled(username, True),
+         lambda d: console.print(f"Disabled {d['username']}."))
+
+
+@user_app.command("enable")
+def user_enable(username: str, as_json: JsonOpt = False):
+    _run(as_json, lambda: _argus().accounts.set_disabled(username, False),
+         lambda d: console.print(f"Enabled {d['username']}."))
+
+
+@key_app.command("create")
+def key_create(username: str,
+               name: Annotated[str, typer.Option(help="What will use it, e.g. 'sim-bot routine'")],
+               expires_days: Annotated[int | None, typer.Option(help="Default: never expires")] = None,
+               as_json: JsonOpt = False):
+    """Make an API key for an account. It is shown once; Argus keeps only a hash."""
+    def render(d):
+        console.print(f"[green]API key {d['id']} for {d['username']}[/green] ({d['name']}"
+                      + (f", expires {d['expires_at'][:10]}" if d["expires_at"] else "") + "):")
+        console.print(d["key"], soft_wrap=True, highlight=False)
+        console.print("[dim]Copy it now; it can't be shown again. Send it as 'Authorization: Bearer <key>'.[/dim]")
+    _run(as_json, lambda: _argus().accounts.create_key(username, name, expires_days), render)
+
+
+@key_app.command("list")
+def key_list(username: Annotated[str | None, typer.Argument(help="Default: every account")] = None,
+             all_: Annotated[bool, typer.Option("--all", help="Include revoked keys")] = False,
+             as_json: JsonOpt = False):
+    def render(rows):
+        t = Table("ID", "Account", "Name", "Starts with", "Created", "Last used", "Expires", "Status")
+        for r in rows:
+            status = "revoked" if r["revoked_at"] else ("active" if r["active"] else "expired")
+            t.add_row(str(r["id"]), r["username"], r["name"], r["prefix"] + "…", r["created_at"][:10],
+                      (r["last_used_at"] or "-")[:16].replace("T", " "), (r["expires_at"] or "never")[:10],
+                      status, style="dim" if status != "active" else "")
+        console.print(t)
+    _run(as_json, lambda: _argus().accounts.list_keys(username, include_revoked=all_), render)
+
+
+@key_app.command("revoke")
+def key_revoke(key_id: int, as_json: JsonOpt = False):
+    """Revoke an API key for good (it stops working at once)."""
+    _run(as_json, lambda: _argus().accounts.revoke_key(key_id),
+         lambda d: console.print(f"Revoked key {d['id']} ({d['name']})."))

@@ -114,6 +114,7 @@ button, select, summary, a.btn, .nav a { touch-action: manipulation; }
 .nav a.active { background: var(--accent-wash); color: var(--text); }
 .menu-toggle { display: none; }
 .spacer { flex: 1; }
+.nav .nav-sign-out { display: none; }
 .ticker-search { display: flex; width: 260px; min-width: 160px; }
 .ticker-search .combo-list { min-width: 320px; }
 main { max-width: 1280px; margin: 0 auto; padding: 20px; }
@@ -468,6 +469,9 @@ td.pick input, th.pick input { cursor: pointer; }
   .nav[data-open="true"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px;
     max-height: calc(100dvh - 120px); overflow-y: auto; padding: 4px 0 8px; }
   .nav a { display: flex; align-items: center; min-height: 44px; padding: 8px 10px; }
+  .topbar > .sign-out { display: none; }
+  .nav .nav-sign-out { display: flex; align-items: center; min-height: 44px; padding: 8px 10px; border: 0;
+    background: none; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
   .card { padding: 12px; }
   .stack { gap: 12px; }
   .grid-2 { gap: 12px; }

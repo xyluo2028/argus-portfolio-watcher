@@ -333,9 +333,50 @@ class NavDaily(Base):
     income: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class Account(Base):
+    """Someone (or a bot) who signs in to the web UI, API or MCP. See argus.services.accounts."""
+
+    __tablename__ = "account"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(40), unique=True)  # lowercase
+    password_hash: Mapped[str | None] = mapped_column(String(200))  # None: API keys only
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class LoginSession(Base):
+    """A web sign-in. The cookie holds a random id; only its SHA-256 is stored."""
+
+    __tablename__ = "login_session"
+
+    id_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("account.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column()
+
+
+class ApiKey(Base):
+    """A bearer key for scripts, bots and MCP clients. Only its SHA-256 is stored; `prefix` identifies it."""
+
+    __tablename__ = "api_key"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("account.id"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column()
+    last_used_at: Mapped[datetime | None] = mapped_column()
+    revoked_at: Mapped[datetime | None] = mapped_column()
+
+
 __all__ = [
+    "Account",
     "Alert",
     "AlertEvent",
+    "ApiKey",
     "AuditLog",
     "CompanyProfile",
     "DividendHistory",
@@ -346,6 +387,7 @@ __all__ = [
     "FundProfile",
     "Fundamental",
     "Instrument",
+    "LoginSession",
     "NavDaily",
     "PeerList",
     "Portfolio",

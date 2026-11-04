@@ -57,6 +57,21 @@ During market hours prices stream live (Finnhub WebSocket for the largest ~48 po
 refresh for the rest each minute). Set `ARGUS_PORT` in `.env` to use another port. For UI
 development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite proxies `/api`).
 
+## Accounts and bots
+
+Argus starts without sign-in, for use on your own machine. Create an account to turn sign-in on for
+every request: the web UI asks for a username and password, and bots, scripts and MCP clients send
+an account's API key.
+
+```bash
+uv run argus user add me                                  # asks for a password
+uv run argus user add trader-bot --no-password            # a bot is just another account
+uv run argus key create trader-bot --name "sim routine"   # shown once: Authorization: Bearer <key>
+```
+
+`ARGUS_TOKEN`, if set, keeps working and acts as the oldest account. More in
+[docs/deployment.md](docs/deployment.md#accounts-and-api-keys).
+
 ## Use it from Claude (MCP)
 
 Argus exposes 37 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
@@ -72,6 +87,7 @@ claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/a
 
 # or over HTTP while `argus serve` is running (uses the live price stream)
 claude mcp add --transport http argus http://localhost:8787/mcp/
+# with accounts: add --header "Authorization: Bearer <API key>"
 ```
 
 For Claude Desktop, add the same stdio command under `mcpServers` in
@@ -122,8 +138,8 @@ notes, alerts, targets and the audit log. Market data caches are not included; t
 ## Running it always-on
 
 To run Argus on a server, a home box or your PC and reach it from other devices (Tailscale,
-Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: access token
-(`ARGUS_TOKEN`) and allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
+Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: accounts, API keys
+and the access token (`ARGUS_TOKEN`), allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
 nightly `argus backup`, schema migrations, and moving your data.
 
 ## Development

@@ -29,6 +29,7 @@ from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
+from argus.services.accounts import AccountService
 from argus.services import dividends as dividends_mod
 from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
@@ -124,6 +125,7 @@ class Argus:
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
+        self.accounts = AccountService(self.engine)
         self.factors = FrenchFactors(self.settings.cache_dir)
         self.macro = MacroProvider(cache_dir=self.settings.cache_dir)
         self.screener = screener_mod.ScreenerService(self.settings.cache_dir, self.market.sec, self.market.profile_provider)

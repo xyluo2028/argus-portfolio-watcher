@@ -212,7 +212,17 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired when the server wants a token (ARGUS_TOKEN set and the cookie missing or stale). */
+export type SignInMethod = "password" | "token";
+
+export interface AuthStatus {
+  required: boolean;
+  authenticated: boolean;
+  // How you can sign in: "password" once an account exists, "token" when ARGUS_TOKEN is set.
+  methods: SignInMethod[];
+  account: { id: number; username: string } | null;
+}
+
+/** Fired when the server wants a sign-in (an account exists or ARGUS_TOKEN is set, and the cookie is missing or stale). */
 export const UNAUTHORIZED_EVENT = "argus:unauthorized";
 
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
@@ -500,8 +510,9 @@ export const api = {
   },
   importInvesting: (body: { filename: string; content: string; portfolio?: string; opening_through?: string; dry_run: boolean }) =>
     send<ImportReport>("POST", "/api/import/investing", body),
-  authStatus: () => get<{ required: boolean; authenticated: boolean }>("/api/auth/status"),
-  login: (token: string) => send<{ ok: boolean }>("POST", "/api/auth/login", { token }),
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  login: (creds: { username: string; password: string } | { token: string }) =>
+    send<{ ok: boolean }>("POST", "/api/auth/login", creds),
   logout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
   snapshotUrl: "/api/snapshot",
   restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>

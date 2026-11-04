@@ -18,12 +18,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
-from argus.api.auth import COOKIE, COOKIE_MAX_AGE, TokenAuthMiddleware, request_token, token_ok
+from argus.api.auth import (COOKIE_MAX_AGE, OPEN, SESSION_COOKIE, TOKEN_COOKIE, Authenticator, AuthMiddleware,
+                            LoginThrottle, credentials, token_ok)
 from argus.app import Argus
 from argus.config import REPO_ROOT
 from argus.errors import ArgusError
 from argus.live import LiveHub
 from argus.mcp_server import create_mcp
+from argus.services.accounts import Principal
 from argus.market_calendar import parse_ny_datetime
 from argus.services.alerts import KINDS
 from argus.services.portfolio import TxnInput
@@ -32,8 +34,10 @@ from argus.symbols import normalize_symbol
 UI_DIST = REPO_ROOT / "frontend" / "dist"
 STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
+LOGIN_FAIL_DELAY_S = 1.0  # slows guessing; the throttle caps it
 
-_STATUS = {"UNAUTHORIZED": 401, "NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
+_STATUS = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "WRONG_PASSWORD": 403, "NOT_FOUND": 404, "ALREADY_EXISTS": 409,
+           "TOO_MANY_ATTEMPTS": 429, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
 
 
 class PeersBody(BaseModel):
@@ -119,7 +123,19 @@ class SimBody(BaseModel):
 
 
 class LoginBody(BaseModel):
-    token: str
+    username: str | None = None  # with password; without, `token` is the server token
+    password: str | None = None
+    token: str | None = None
+
+
+class PasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class KeyBody(BaseModel):
+    name: str
+    expires_days: int | None = None
 
 
 class PortfolioBody(BaseModel):
@@ -145,7 +161,9 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
     app = FastAPI(title="Argus", lifespan=lifespan)
     settings = argus.settings
-    app.add_middleware(TokenAuthMiddleware, token=settings.token)
+    auth = Authenticator(settings.token, argus.accounts)
+    throttle = LoginThrottle()
+    app.add_middleware(AuthMiddleware, auth=auth)
     # Only answer requests addressed to this machine (or a configured tunnel name): blocks DNS-rebinding
     # pages in the browser from reaching the portfolio through a hostile name that resolves to 127.0.0.1.
     # Added last, so it runs first.
@@ -160,6 +178,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def run(fn, *args, **kwargs):
         # Service calls hit SQLite and providers synchronously; keep the event loop free.
         return await asyncio.to_thread(fn, *args, **kwargs)
+
+    def own_account(request: Request, signed_in: bool = False) -> Principal:
+        """The caller's account. `signed_in`: refuse API keys, so a leaked key can't mint more keys
+        or take over the password."""
+        p: Principal = getattr(request.state, "principal", OPEN)
+        if p.account_id is None:
+            raise ArgusError("NO_ACCOUNT", "Not signed in with an account.",
+                             hint="Create one on the server (`argus user add <name>`) and sign in with it.")
+        if signed_in and p.via == "key":
+            raise ArgusError("FORBIDDEN", "API keys can't manage keys or passwords.",
+                             hint="Sign in in the web UI, or use `argus key` / `argus user passwd` on the server.")
+        return p
 
     # -- market ----------------------------------------------------------------
     @app.get("/api/market-status")
@@ -460,30 +490,82 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def health():
         return {"ok": True, "stream": hub.ws_state, "session": hub.status["session"]}
 
-    # -- auth (only matters when ARGUS_TOKEN is set) ------------------------------
+    # -- auth (only matters once an account exists or ARGUS_TOKEN is set) ------------------
     @app.get("/api/auth/status")
     async def auth_status(request: Request):
-        required = bool(settings.token)
-        return {"required": required,
-                "authenticated": not required or token_ok(settings.token, request_token(dict(request.headers)))}
+        def status():
+            p = auth.check(dict(request.headers))
+            has_accounts = argus.accounts.exist()
+            return {"required": has_accounts or bool(settings.token), "authenticated": p is not None,
+                    "methods": [m for m, on in (("password", has_accounts), ("token", bool(settings.token))) if on],
+                    "account": {"id": p.account_id, "username": p.username} if p and p.account_id else None}
+        return await run(status)
+
+    def _cookie(resp: JSONResponse, request: Request, name: str, value: str) -> None:
+        resp.set_cookie(name, value, max_age=COOKIE_MAX_AGE, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+
+    async def _refuse(key: str, message: str):
+        throttle.failed(key)
+        await asyncio.sleep(LOGIN_FAIL_DELAY_S)
+        raise ArgusError("UNAUTHORIZED", message)
 
     @app.post("/api/auth/login")
     async def login(body: LoginBody, request: Request):
-        if not settings.token:
+        if not await run(auth.required):
             return {"ok": True, "required": False}
-        if not token_ok(settings.token, body.token.strip()):
-            await asyncio.sleep(1)  # slow down guessing (the token itself should be long and random)
-            raise ArgusError("UNAUTHORIZED", "Wrong token.")
-        resp = JSONResponse({"ok": True, "required": True})
-        resp.set_cookie(COOKIE, settings.token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", path="/")
+        key = "token" if body.username is None else "user:" + body.username.strip().lower()
+        if throttle.blocked(key):
+            raise ArgusError("TOO_MANY_ATTEMPTS", "Too many failed sign-ins.",
+                             hint="Wait 15 minutes, or set a new password on the server: `argus user passwd <name>`.")
+        if body.username is None:  # the server token
+            if not token_ok(settings.token, (body.token or "").strip()):
+                await _refuse(key, "Wrong token.")
+            throttle.succeeded(key)
+            resp = JSONResponse({"ok": True, "required": True})
+            _cookie(resp, request, TOKEN_COOKIE, settings.token)
+            return resp
+        p = await run(argus.accounts.authenticate, body.username, body.password or "")
+        if p is None:
+            await _refuse(key, "Wrong username or password.")
+        throttle.succeeded(key)
+        resp = JSONResponse({"ok": True, "required": True, "account": {"id": p.account_id, "username": p.username}})
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, p.account_id))
         return resp
 
     @app.post("/api/auth/logout")
-    async def logout():
+    async def logout(request: Request):
+        _, session, _ = credentials(dict(request.headers))
+        if session:
+            await run(argus.accounts.end_session, session)
         resp = JSONResponse({"ok": True})
-        resp.delete_cookie(COOKIE, path="/")
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        resp.delete_cookie(TOKEN_COOKIE, path="/")
         return resp
+
+    # -- your account -----------------------------------------------------------------
+    @app.get("/api/account")
+    async def account(request: Request):
+        p = own_account(request)
+        return await run(lambda: {"account": argus.accounts.get(p.account_id), "via": p.via,
+                                  "keys": argus.accounts.list_keys(p.account_id)})
+
+    @app.put("/api/account/password")
+    async def change_password(body: PasswordBody, request: Request):
+        p = own_account(request, signed_in=True)
+        _, session, _ = credentials(dict(request.headers))
+        return await run(argus.accounts.change_password, p.account_id, body.current_password, body.new_password,
+                         session, "ui")
+
+    @app.post("/api/account/keys", status_code=201)
+    async def create_key(body: KeyBody, request: Request):
+        p = own_account(request, signed_in=True)
+        return await run(argus.accounts.create_key, p.account_id, body.name, body.expires_days, "ui")
+
+    @app.delete("/api/account/keys/{key_id}")
+    async def revoke_key(key_id: int, request: Request):
+        p = own_account(request, signed_in=True)
+        return await run(argus.accounts.revoke_key, key_id, p.account_id, "ui")
 
     app.mount("/mcp", mcp_app)
 
@@ -543,24 +625,26 @@ def serve(port: int, host: str | None = None) -> None:
 
     settings = load_settings()
     host = host or settings.host
-    if host not in LOOPBACK and not settings.token and not settings.insecure_bind:
-        raise ArgusError("INSECURE", f"Refusing to listen on {host} without ARGUS_TOKEN.",
-                         hint="Set ARGUS_TOKEN (openssl rand -hex 32), or keep the default 127.0.0.1 and use a tunnel.")
-    if settings.allowed_hosts and not settings.token:
-        logging.getLogger("argus").warning(
-            "ARGUS_ALLOWED_HOSTS is set but ARGUS_TOKEN isn't: anyone who can reach %s gets full access.",
-            ", ".join(settings.allowed_hosts))
     lock = _lock_data_dir(settings.data_dir)
-    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex((host, port)) == 0:
-            raise ArgusError("PORT_IN_USE", f"Port {port} is already in use.",
-                             hint="Pass --port, or set ARGUS_PORT in .env.")
     try:
+        argus = Argus(settings)
+        secured = bool(settings.token) or argus.accounts.exist()
+        if host not in LOOPBACK and not secured and not settings.insecure_bind:
+            raise ArgusError("INSECURE", f"Refusing to listen on {host} with sign-in off.",
+                             hint="Create an account (`argus user add <name>`) or set ARGUS_TOKEN "
+                                  "(openssl rand -hex 32), or keep the default 127.0.0.1 and use a tunnel.")
+        if settings.allowed_hosts and not secured:
+            logging.getLogger("argus").warning(
+                "ARGUS_ALLOWED_HOSTS is set but sign-in is off (no accounts, no ARGUS_TOKEN): "
+                "anyone who can reach %s gets full access.", ", ".join(settings.allowed_hosts))
+        with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex((host, port)) == 0:
+                raise ArgusError("PORT_IN_USE", f"Port {port} is already in use.",
+                                 hint="Pass --port, or set ARGUS_PORT in .env.")
         # One worker on purpose: the live hub lives in memory and SQLite has one writer.
         # Proxy headers (from a local tunnel) give the real scheme, so the auth cookie is Secure on https.
-        uvicorn.run(create_app(), host=host, port=port, log_level="info", proxy_headers=True,
+        uvicorn.run(create_app(argus), host=host, port=port, log_level="info", proxy_headers=True,
                     forwarded_allow_ips="127.0.0.1")
     finally:
         if lock:
             lock.close()
-

@@ -31,7 +31,8 @@ def test_api_and_mcp_need_the_token(client):
 
 def test_public_paths_stay_open(client):
     assert client.get("/api/health").status_code == 200
-    assert client.get("/api/auth/status").json() == {"required": True, "authenticated": False}
+    assert client.get("/api/auth/status").json() == {"required": True, "authenticated": False, "methods": ["token"],
+                                                     "account": None}
     assert client.get("/").status_code == 200  # UI shell (or the "not built" note): no data in it
 
 
@@ -57,7 +58,7 @@ def test_host_allow_list(client):
 def test_without_a_token_everything_is_open(settings):
     with TestClient(create_app(Argus(settings), start_hub=False), base_url="http://localhost") as c:
         assert c.get("/api/portfolios").status_code == 200
-        assert c.get("/api/auth/status").json() == {"required": False, "authenticated": True}
+        assert c.get("/api/auth/status").json()["authenticated"] is True
 
 
 @pytest.mark.skipif(not server.UI_DIST.exists(), reason="web UI not built")

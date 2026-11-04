@@ -43,7 +43,7 @@ export async function mockApi(page: Page) {
         quotes: { TEST: quote }, alerts_fired: [], portfolio: summary })}\n\n` });
     if (path === "/api/screener") return json(route.request().method() === "POST" ? { status, matches: 0, rows: [] } : status);
     if (route.request().method() !== "GET") throw new Error(`Unexpected API mutation: ${path}`);
-    if (path === "/api/auth/status") return json({ required: false, authenticated: true });
+    if (path === "/api/auth/status") return json({ required: false, authenticated: true, methods: [], account: null });
     if (path === "/api/portfolios") return json([portfolio]);
     if (path === "/api/portfolios/growth") return json(summary);
     if (path.endsWith("/performance")) return json({ portfolio: "growth", benchmark: "SPY", summary: { start: days[0],
