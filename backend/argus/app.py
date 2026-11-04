@@ -1175,7 +1175,8 @@ class Argus:
     DIVIDEND_MAX_AGE = timedelta(hours=24)
 
     def dividend_histories(self, symbols: list[str]) -> dict[str, list[tuple[str, float]]]:
-        """Ex-date dividend history per symbol (Yahoo), cached a day; a failed fetch keeps the old copy."""
+        """Ex-date dividend history per symbol (Yahoo), cached a day; a failed fetch keeps the old copy
+        and a refresh is merged into it (see dividends.merge_history)."""
         now = datetime.now(UTC)
         fresh: dict[str, list] = {}
         stale: dict[str, list] = {}
@@ -1195,6 +1196,7 @@ class Argus:
             with session_scope(self.engine) as s:
                 for sym, rows in fetched.items():
                     if rows is not None:
+                        rows = dividends_mod.merge_history(stale.get(sym, []), rows, now.astimezone(NY).date())
                         upsert(s, DividendHistory, symbol=sym, as_of=now, data=[list(x) for x in rows])
                         fresh[sym] = rows
         return {sym: fresh.get(sym) or stale.get(sym, []) for sym in symbols}

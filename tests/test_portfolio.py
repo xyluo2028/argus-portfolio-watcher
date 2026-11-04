@@ -417,3 +417,26 @@ def test_passed_estimated_ex_date_counts_before_the_history_shows_it(make_argus)
     if est.year == today.year:  # the Dividends page counts this calendar year's
         assert len(received) == 1 and received[0]["estimated"] and received[0]["amount"] == pytest.approx(22.0)
     assert date.fromisoformat(a.dividends("inc")["holdings"][0]["next_ex_date_est"]) > today
+
+
+def test_dividend_refresh_keeps_a_row_yahoo_dropped(make_argus):
+    """B-133: Yahoo's answer lost the last ex-date it served yesterday; the stored row is kept."""
+    from argus.db import session_scope
+    from argus.models import DividendHistory
+
+    day = datetime.now(UTC).date()
+    d1, d2, d3 = ((day - timedelta(days=n)).isoformat() for n in (95, 65, 35))
+
+    class Divs:
+        def get_dividends(self, symbol):
+            return [(d1, 0.25), (d2, 0.254)]
+
+    a = make_argus([])
+    a.market.profile_provider = Divs()
+    stored = [[d1, 0.25], [d2, 0.253], [d3, 0.255]]
+    with session_scope(a.engine) as s:
+        s.add(DividendHistory(symbol="BND", as_of=datetime.now(UTC) - a.DIVIDEND_MAX_AGE * 2, data=stored))
+    want = [(d1, 0.25), (d2, 0.254), (d3, 0.255)]  # d2 restated by the new answer, d3 kept
+    assert a.dividend_histories(["BND"])["BND"] == want
+    with session_scope(a.engine) as s:
+        assert [tuple(x) for x in s.get(DividendHistory, "BND").data] == want
