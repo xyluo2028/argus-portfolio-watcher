@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-03T02:40:04.421916+00:00",
+ "created_at": "2026-11-04T02:52:15.593809+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1261,6 +1261,38 @@
     "external_id": "r011-growth-krys-add",
     "deleted": false,
     "created_at": "2026-11-03T02:18:03.733992+00:00"
+   },
+   {
+    "id": 49,
+    "portfolio_id": 3,
+    "type": "SELL",
+    "symbol": "GLD",
+    "qty": 12.0,
+    "price": 360.39,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-04T02:19:26.834714+00:00",
+    "note": "r012 note 56 trigger: 20d corr to SPY 0.69 > 0.5",
+    "source": "cli",
+    "external_id": "loop-macro-r012-gld-sell",
+    "deleted": false,
+    "created_at": "2026-11-04T02:19:27.093652+00:00"
+   },
+   {
+    "id": 50,
+    "portfolio_id": 3,
+    "type": "BUY",
+    "symbol": "IEF",
+    "qty": 47.0,
+    "price": 91.31,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-04T02:19:28.054795+00:00",
+    "note": "r012 note 56: GLD proceeds into IEF",
+    "source": "cli",
+    "external_id": "loop-macro-r012-ief-buy",
+    "deleted": false,
+    "created_at": "2026-11-04T02:19:28.359173+00:00"
    }
   ],
   "target": [
@@ -1375,14 +1407,8 @@
    {
     "portfolio_id": 3,
     "level": "symbol",
-    "key": "GLD",
-    "weight_pct": 4.5
-   },
-   {
-    "portfolio_id": 3,
-    "level": "symbol",
     "key": "IEF",
-    "weight_pct": 7.5
+    "weight_pct": 12.5
    },
    {
     "portfolio_id": 3,
@@ -1394,7 +1420,7 @@
     "portfolio_id": 3,
     "level": "symbol",
     "key": "SGOV",
-    "weight_pct": 13.0
+    "weight_pct": 13.5
    },
    {
     "portfolio_id": 3,
@@ -2326,6 +2352,50 @@
     "created_by": "cli",
     "created_at": "2026-11-03T02:18:42.162533+00:00",
     "updated_at": "2026-11-03T02:18:42.162539+00:00"
+   },
+   {
+    "id": 66,
+    "symbol": "TOST",
+    "kind": "note",
+    "text": "[loop-growth] r012 (11-03 close 33.53, AH 32.27 -3.8%): Q3 revenue 1.981B vs Q3-25 1.633B (SEC) = +21.3% y/y, down from +23.1% in Q2; in line with consensus (2.012B Finnhub, -1.6%). GAAP EPS 0.29 per headline (SEC Q3-25 0.16); adjusted 0.38 vs 0.37 (Yahoo) - Argus's 'beat +44%' compares adjusted actual with a GAAP-basis estimate, ignore it. Q4 guide 'moderates' (ChartMill headline, no figures in Argus). Thesis (note 31, break < 18%) intact but decelerating. Hold, no add. Re-check when the 10-Q lands: operating margin vs Q2 8.0%; exit if Q4 guide implies < 18% growth or FTC case (note 55) touches pricing.",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-04T02:18:31.248884+00:00",
+    "updated_at": "2026-11-04T02:18:31.248889+00:00"
+   },
+   {
+    "id": 67,
+    "symbol": "BND",
+    "kind": "note",
+    "text": "loop-income r012: bond sleeve (BND/VCIT/VGIT/SCHP, 34.7%) within 2-2.2% of 52w lows with 10y at 4.95%. Hold at targets; forward yields 4.3-5.2% beat staying in cash. Revisit after Fri payrolls and the 11-10 CPI: add only if 10y >5.1% and drift calls for it. Argus currently omits the Nov 2 bond-ETF ex-dates (~$132), so check November income by hand.",
+    "review_on": "2026-11-10",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-04T02:18:39.063609+00:00",
+    "updated_at": "2026-11-04T02:18:39.063618+00:00"
+   },
+   {
+    "id": 68,
+    "symbol": "IEF",
+    "kind": "thesis",
+    "text": "loop-macro r012 (11-03 21:15 ET): EXECUTED note 56. SELL 12 GLD @360.39 / BUY 47 IEF @91.31 post-market (net cash +33.11, realized -224.76). Trigger: GLD 20d corr to SPY 0.69 (>0.5; 60d 0.51) vs IEF -0.44; GLD 1.0% above 52w closing low 355.78, -4.9% 1M. GLD gone; IEF target 12.5%, SGOV 13.5% (targets now sum 100). Risk: 10Y backed up 6bp to 4.95% on JOLTS 7.52M vs 7.15M; rethink if 10Y > 5.15% or IEF corr to SPY turns positive. Review after CPI 11-10.",
+    "review_on": "2026-11-13",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-04T02:19:50.778569+00:00",
+    "updated_at": "2026-11-04T02:19:50.778575+00:00"
+   },
+   {
+    "id": 69,
+    "symbol": "XLE",
+    "kind": "note",
+    "text": "loop-macro r012 (11-03): note 62 plan still staged, not executed. WTI 96.09 settle (-0.4%), 95.4 overnight, below 98. XLE -0.85%. Waiting for ISM services 11-04 (prices prev 74.0) and payrolls; NFP no longer shows in Argus calendar (Nasdaq feed has no Fri 11-06 US rows), so the trigger falls back to ISM services + claims.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-04T02:19:51.925957+00:00",
+    "updated_at": "2026-11-04T02:19:51.925962+00:00"
    }
   ],
   "peer_list": [],
@@ -5416,6 +5486,156 @@
      "created_by": "cli",
      "created_at": "2026-10-22T02:17:51.021412+00:00",
      "updated_at": "2026-11-03T02:18:42.481150+00:00"
+    }
+   },
+   {
+    "id": 153,
+    "ts": "2026-11-04T02:18:31.250196+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "66",
+    "before": null,
+    "after": {
+     "id": 66,
+     "symbol": "TOST",
+     "kind": "note",
+     "text": "[loop-growth] r012 (11-03 close 33.53, AH 32.27 -3.8%): Q3 revenue 1.981B vs Q3-25 1.633B (SEC) = +21.3% y/y, down from +23.1% in Q2; in line with consensus (2.012B Finnhub, -1.6%). GAAP EPS 0.29 per headline (SEC Q3-25 0.16); adjusted 0.38 vs 0.37 (Yahoo) - Argus's 'beat +44%' compares adjusted actual with a GAAP-basis estimate, ignore it. Q4 guide 'moderates' (ChartMill headline, no figures in Argus). Thesis (note 31, break < 18%) intact but decelerating. Hold, no add. Re-check when the 10-Q lands: operating margin vs Q2 8.0%; exit if Q4 guide implies < 18% growth or FTC case (note 55) touches pricing.",
+     "review_on": "2026-11-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-04T02:18:31.248884+00:00",
+     "updated_at": "2026-11-04T02:18:31.248889+00:00"
+    }
+   },
+   {
+    "id": 154,
+    "ts": "2026-11-04T02:18:39.065641+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "67",
+    "before": null,
+    "after": {
+     "id": 67,
+     "symbol": "BND",
+     "kind": "note",
+     "text": "loop-income r012: bond sleeve (BND/VCIT/VGIT/SCHP, 34.7%) within 2-2.2% of 52w lows with 10y at 4.95%. Hold at targets; forward yields 4.3-5.2% beat staying in cash. Revisit after Fri payrolls and the 11-10 CPI: add only if 10y >5.1% and drift calls for it. Argus currently omits the Nov 2 bond-ETF ex-dates (~$132), so check November income by hand.",
+     "review_on": "2026-11-10",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-04T02:18:39.063609+00:00",
+     "updated_at": "2026-11-04T02:18:39.063618+00:00"
+    }
+   },
+   {
+    "id": 155,
+    "ts": "2026-11-04T02:19:27.095930+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "49",
+    "before": null,
+    "after": {
+     "id": 49,
+     "type": "SELL",
+     "symbol": "GLD",
+     "qty": 12.0,
+     "price": 360.39,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-04T02:19:26.834714+00:00",
+     "note": "r012 note 56 trigger: 20d corr to SPY 0.69 > 0.5",
+     "source": "cli",
+     "external_id": "loop-macro-r012-gld-sell",
+     "deleted": false
+    }
+   },
+   {
+    "id": 156,
+    "ts": "2026-11-04T02:19:28.361497+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "50",
+    "before": null,
+    "after": {
+     "id": 50,
+     "type": "BUY",
+     "symbol": "IEF",
+     "qty": 47.0,
+     "price": 91.31,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-04T02:19:28.054795+00:00",
+     "note": "r012 note 56: GLD proceeds into IEF",
+     "source": "cli",
+     "external_id": "loop-macro-r012-ief-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 157,
+    "ts": "2026-11-04T02:19:38.707692+00:00",
+    "actor": "ui",
+    "action": "set_targets",
+    "entity": "portfolio",
+    "entity_id": "3",
+    "before": null,
+    "after": {
+     "level": "symbol",
+     "weights": {
+      "SGOV": 13.5,
+      "XLV": 12.0,
+      "QUAL": 12.0,
+      "XLE": 10.0,
+      "SPY": 10.0,
+      "XLP": 8.0,
+      "USMV": 8.0,
+      "VTIP": 8.0,
+      "IEF": 12.5,
+      "DBC": 6.0
+     }
+    }
+   },
+   {
+    "id": 158,
+    "ts": "2026-11-04T02:19:50.779927+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "68",
+    "before": null,
+    "after": {
+     "id": 68,
+     "symbol": "IEF",
+     "kind": "thesis",
+     "text": "loop-macro r012 (11-03 21:15 ET): EXECUTED note 56. SELL 12 GLD @360.39 / BUY 47 IEF @91.31 post-market (net cash +33.11, realized -224.76). Trigger: GLD 20d corr to SPY 0.69 (>0.5; 60d 0.51) vs IEF -0.44; GLD 1.0% above 52w closing low 355.78, -4.9% 1M. GLD gone; IEF target 12.5%, SGOV 13.5% (targets now sum 100). Risk: 10Y backed up 6bp to 4.95% on JOLTS 7.52M vs 7.15M; rethink if 10Y > 5.15% or IEF corr to SPY turns positive. Review after CPI 11-10.",
+     "review_on": "2026-11-13",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-04T02:19:50.778569+00:00",
+     "updated_at": "2026-11-04T02:19:50.778575+00:00"
+    }
+   },
+   {
+    "id": 159,
+    "ts": "2026-11-04T02:19:51.927442+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "69",
+    "before": null,
+    "after": {
+     "id": 69,
+     "symbol": "XLE",
+     "kind": "note",
+     "text": "loop-macro r012 (11-03): note 62 plan still staged, not executed. WTI 96.09 settle (-0.4%), 95.4 overnight, below 98. XLE -0.85%. Waiting for ISM services 11-04 (prices prev 74.0) and payrolls; NFP no longer shows in Argus calendar (Nasdaq feed has no Fri 11-06 US rows), so the trigger falls back to ISM services + claims.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-04T02:19:51.925957+00:00",
+     "updated_at": "2026-11-04T02:19:51.925962+00:00"
     }
    }
   ]
