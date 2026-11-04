@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from statistics import mean, median, pstdev
 
-from argus.market_calendar import NY, session_on_or_after
+from argus.market_calendar import NY, session_before, session_on_or_after
 from argus.models import TxnType
 
 FREQ_NAMES = {12: "monthly", 4: "quarterly", 2: "semiannual", 1: "annual"}
@@ -22,6 +22,37 @@ def add_months(d: date, n: int) -> date:
     year, month = d.year + y, m + 1
     last_day = (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)).day
     return date(year, month, min(d.day, last_day))
+
+
+def _month_end(d: date) -> date:
+    """The last trading day of d's month."""
+    return session_before(date(d.year + (d.month == 12), d.month % 12 + 1, 1))
+
+
+def _month_start(d: date) -> date:
+    """The first trading day of d's month."""
+    return session_on_or_after(d.replace(day=1))
+
+
+def anchor(ex_dates: list[date]) -> str | None:
+    """Where a payer's ex-dates sit in the month: "end" for the last trading day (Realty Income),
+    "start" for the first (Vanguard's bond funds), else None (the same day of the month). The last
+    ex-date and all but one of the last six must fit, so one odd December date doesn't break it but
+    a payer on the 2nd isn't taken for a first-day payer because the 1st was a Sunday a few times."""
+    recent = ex_dates[-6:]
+    for name, fits in (("end", _month_end), ("start", _month_start)):
+        if len(recent) >= 3 and recent[-1] == fits(recent[-1]) and sum(d != fits(d) for d in recent) <= 1:
+            return name
+    return None
+
+
+def next_ex(last_d: date, months: int, anchored: str | None) -> date:
+    """The estimated ex-date `months` after `last_d`: the same day of the month, moved to the next
+    trading day when that's a weekend or holiday (funds go ex on business days), or the month's
+    last / first trading day for a payer anchored there, so a month-end payer's 10-30 (a Friday)
+    projects 12-31, not 12-30, and its 02-26 projects 03-31, not 03-26."""
+    d = add_months(last_d, months)
+    return _month_end(d) if anchored == "end" else _month_start(d) if anchored == "start" else session_on_or_after(d)
 
 
 def frequency(ex_dates: list[date]) -> int:
@@ -48,8 +79,8 @@ def _year(pays: list[tuple[date, float]], today: date) -> list[float]:
 
 
 def _rhythm(pays: list[tuple[date, float]], today: date):
-    """(freq, period, last ex-date, last amount, trailing 12m, stale, per payment) from sorted `pays`,
-    or None for a payer with nothing in the lookback window."""
+    """(freq, period, last ex-date, last amount, trailing 12m, stale, per payment, anchor) from sorted
+    `pays`, or None for a payer with nothing in the lookback window."""
     recent = [(d, a) for d, a in pays if d > today - timedelta(days=LOOKBACK_DAYS)]
     if not recent:
         return None
@@ -60,11 +91,11 @@ def _rhythm(pays: list[tuple[date, float]], today: date):
     trailing = sum(year)
     stale = today - last_d > period * 2 + timedelta(days=30)  # missed two payments: don't extrapolate
     per_payment = trailing / freq if lumpy(year) else last_amt  # projected at the year's average if lumpy
-    return freq, period, last_d, last_amt, trailing, stale, per_payment
+    return freq, period, last_d, last_amt, trailing, stale, per_payment, anchor([d for d, _ in recent])
 
 
 def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: date,
-            announced: Iterable[date]) -> list[tuple[date, float, bool]]:
+            announced: Iterable[date], anchored: str | None = None) -> list[tuple[date, float, bool]]:
     """Ex-dates that have passed but the provider's history doesn't show (Yahoo lags days behind the
     ex-date, while quotes' previous close already drops by the dividend, and it sometimes drops a
     recent row it served before): (ex-date, projected cash per share, whether the date is estimated).
@@ -80,7 +111,7 @@ def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: dat
     out = [(a, per_payment, False) for a in declared]
     if not stale:
         steps, k = [], 1
-        while (est := session_on_or_after(add_months(last_d, 12 // freq * k))) <= today:
+        while (est := next_ex(last_d, 12 // freq * k, anchored)) <= today:
             steps.append(est)
             k += 1
         if steps and today <= steps[-1] + half:
@@ -107,8 +138,8 @@ def pending(history: list[tuple[str, float]], today: date, announced: Iterable[d
     pays = sorted((date.fromisoformat(d), a) for d, a in history)
     if (r := _rhythm(pays, today)) is None:
         return []
-    freq, _, last_d, _, _, stale, per_payment = r
-    return [(d.isoformat(), a) for d, a, _ in _passed(freq, last_d, per_payment, stale, today, announced)]
+    freq, _, last_d, _, _, stale, per_payment, anchored = r
+    return [(d.isoformat(), a) for d, a, _ in _passed(freq, last_d, per_payment, stale, today, announced, anchored)]
 
 
 def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callable[[date], float],
@@ -121,7 +152,7 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
     if r is None:
         return {"pays": False, "frequency": None, "rate": 0.0, "trailing_12m": 0.0,
                 "received": [], "projected": [], "last_ex_date": pays[-1][0].isoformat() if pays else None}
-    freq, period, last_d, last_amt, trailing, stale, per_payment = r
+    freq, period, last_d, last_amt, trailing, stale, per_payment, anchored = r
     rate = trailing if stale or lumpy(_year(pays, today)) else last_amt * freq
 
     year_start, year_end = date(today.year, 1, 1), date(today.year, 12, 31)
@@ -130,12 +161,10 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
                 for d, a in pays if year_start <= d <= today and (q := qty_at(d)) > 0]
     projected = []
     if not stale:  # with no shares (a watchlist) this still gives the expected dates, at $0
-        # Same day of the month as the last ex-date, every 12/freq months (payers keep their rhythm),
-        # moved to the next trading day when that's a weekend or holiday (funds go ex on business days).
+        # Every 12/freq months from the last ex-date, on the payer's usual day (see next_ex).
         step, k = 12 // freq, 1
-        while add_months(last_d, step * k) <= horizon:
-            nxt = session_on_or_after(add_months(last_d, step * k))
-            if today < nxt <= horizon:
+        while (nxt := next_ex(last_d, step * k, anchored)) <= horizon:
+            if today < nxt:
                 projected.append({"ex_date": nxt.isoformat(), "per_share": per_payment, "shares": qty,
                                   "amount": qty * per_payment, "estimated_date": True})
             k += 1
@@ -150,7 +179,7 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
         if a > today:
             projected.append({"ex_date": a.isoformat(), "per_share": per_payment, "shares": qty,
                               "amount": qty * per_payment, "estimated_date": False})
-    for d, per_share, est in _passed(freq, last_d, per_payment, stale, today, announced):
+    for d, per_share, est in _passed(freq, last_d, per_payment, stale, today, announced, anchored):
         if d >= year_start and (q := qty_at(d)) > 0:
             received.append({"ex_date": d.isoformat(), "per_share": per_share, "shares": q,
                              "amount": q * per_share, "estimated": True, "estimated_date": est})

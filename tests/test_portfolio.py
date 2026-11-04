@@ -341,13 +341,15 @@ def test_earnings_overview_uses_calendar_then_eps_history(make_argus):
     assert FH.calls == 1  # NVDA only, then cached
 
 
-def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch):
+def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch, freeze_today):
     """PG goes ex $1.089 on 10-23: the quote's previous close is dividend-adjusted (Day P&L leaves the
     dividend out), the price-only close history isn't, so the dividend must count as income there."""
     from datetime import date
 
     import argus.app as app_mod
     from tests.conftest import FakeQuotes
+
+    freeze_today(date(2026, 10, 24))  # the day after; later, PG's January estimate would count too
 
     class Divs:
         def get_dividends(self, symbol):

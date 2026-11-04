@@ -67,6 +67,40 @@ def test_estimated_ex_dates_move_off_weekends_and_holidays():
     assert [x["ex_date"] for x in m["projected"]] == ["2026-10-26", "2026-11-27", "2026-12-28"]
 
 
+# Realty Income-style: ex on each month's last trading day (10-31 is a Saturday, so 10-30)
+O_HIST = [("2026-05-29", 0.27), ("2026-06-30", 0.27), ("2026-07-31", 0.27), ("2026-08-31", 0.27),
+          ("2026-09-30", 0.27), ("2026-10-30", 0.27)]
+
+
+def test_month_end_payer_keeps_the_last_trading_day():
+    # Same-day-of-the-month from 10-30 would give 12-30, then 01-30 (a Saturday) -> 02-01, 03-01, 03-30:
+    # January lost, February twice. Each month's last trading day instead.
+    h = analyze_holding(O_HIST, 10, lambda d: 10, date(2026, 11, 4), until=date(2027, 7, 1))
+    assert [x["ex_date"] for x in h["projected"]] == [
+        "2026-11-30", "2026-12-31", "2027-01-29", "2027-02-26", "2027-03-31", "2027-04-30", "2027-05-28",
+        "2027-06-30"]
+    # from February's 02-26 (a Friday; the 28th is a Sunday) the next is 03-31, not 03-26
+    feb = [*O_HIST, ("2026-11-30", 0.27), ("2026-12-31", 0.27), ("2027-01-29", 0.27), ("2027-02-26", 0.27)]
+    assert analyze_holding(feb, 1, lambda d: 1, date(2027, 3, 1))["projected"][0]["ex_date"] == "2027-03-31"
+    # a passed month-end estimate the history doesn't show yet counts on that day
+    late = analyze_holding(O_HIST[:-1], 10, lambda d: 10, date(2026, 11, 3))
+    assert [x["ex_date"] for x in late["received"] if x.get("estimated")] == ["2026-10-30"]
+
+
+def test_first_trading_day_payer_keeps_it_and_other_days_stay_put():
+    # Vanguard bond fund-style: ex on each month's first trading day; one odd December date is fine
+    bnd = [("2026-04-01", 0.24), ("2026-05-01", 0.24), ("2026-06-01", 0.24), ("2026-07-01", 0.24),
+           ("2026-08-03", 0.24)]
+    h = analyze_holding(bnd, 1, lambda d: 1, date(2026, 8, 10))
+    assert [x["ex_date"] for x in h["projected"]][:3] == ["2026-09-01", "2026-10-01", "2026-11-02"]
+    odd = [("2026-10-01", 0.2), ("2026-11-02", 0.2), ("2026-12-22", 0.2), ("2027-01-04", 0.2),
+           ("2027-02-01", 0.2)]
+    assert analyze_holding(odd, 1, lambda d: 1, date(2027, 2, 5))["projected"][0]["ex_date"] == "2027-03-01"
+    # a payer on the 2nd whose 1st was a weekend or holiday a few times isn't a first-day payer
+    second = [(f"{y}-{m:02d}-02", 0.1) for y, m in ((2025, 10), (2025, 12), (2026, 1), (2026, 2), (2026, 3))]
+    assert analyze_holding(second, 1, lambda d: 1, date(2026, 3, 10))["projected"][0]["ex_date"] == "2026-04-02"
+
+
 KO_HIST = [("2025-12-01", 0.51), ("2026-03-13", 0.53), ("2026-06-15", 0.53), ("2026-09-15", 0.53)]
 
 
@@ -169,7 +203,8 @@ def test_passed_estimated_ex_date_counts_as_received_until_the_history_catches_u
     caught = analyze_holding([*BND["BND"], ("2026-11-02", 0.231)], 100, lambda d: 100, nov3)
     nov = [x for x in caught["received"] if x["ex_date"] >= "2026-11"]
     assert len(nov) == 1 and nov[0]["amount"] == pytest.approx(23.1) and "estimated" not in nov[0]
-    assert caught["projected"][0]["ex_date"] == "2026-12-02"  # anchored on the real 11-02 now
+    # anchored on the real 11-02 now, still the month's first trading day (not the 2nd, B-115)
+    assert caught["projected"][0]["ex_date"] == "2026-12-01"
     # Bought on/after the estimated ex-date: not owed.
     assert not [x for x in analyze_holding(BND["BND"], 100, lambda d: 0 if d <= nov3 else 100, nov3)["received"]
                 if x["ex_date"] >= "2026-11"]
