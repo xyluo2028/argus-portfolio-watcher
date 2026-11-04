@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
@@ -153,3 +153,101 @@ def test_after_close_sell_still_holds_the_shares_through_the_session():
     pts = compute_series(txns, D[:3], closes)
     assert pts[1].flow_out == pytest.approx(0) and pts[1].value - pts[0].value == pytest.approx(18 * -5)
     assert pts[2].flow_out == pytest.approx(6 * 95) and pts[2].value == pytest.approx(12 * 97)
+
+
+# -- B-134: the last session's close from quotes while Yahoo lags its daily bar -------------------
+
+OCT = [date(2026, 10, d) for d in (20, 21, 22, 23)]
+
+
+def _session_quote(sym, price, prev, d=OCT[-1]):
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    return Quote(sym, price, prev, prev, price, prev, datetime.combine(d, time(16, 5), NY), "fake")
+
+
+def test_session_close_from_quote_only_extends_history():
+    from argus.services.market import session_close_from_quote
+    q = _session_quote("X", 110, 102)
+    assert session_close_from_quote(OCT[2], q, OCT[3]) == 110          # history a session behind: filled
+    assert session_close_from_quote(OCT[3], q, OCT[3]) is None         # the real bar is there
+    assert session_close_from_quote(None, q, OCT[3]) is None           # nothing to extend
+    assert session_close_from_quote(OCT[2], _session_quote("X", 110, 102, OCT[2]), OCT[3]) is None  # older quote
+
+
+def _perf_argus(make_argus, monkeypatch, closes, spy_quote):
+    import argus.app as app_mod
+    from argus.services.portfolio import TxnInput
+
+    class Provider:
+        name = "fake"
+
+        def get_quotes(self, symbols):
+            return {"SPY": spy_quote} if "SPY" in symbols else {}
+
+    a = make_argus([Provider()])
+    a.portfolios.create_portfolio("p")
+    a.portfolios.add_transactions("p", [TxnInput("BUY", "X", at(OCT[0], 18), 10, 100)])
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": OCT[-1].isoformat(), "session": "closed",
+                                                              "is_trading_day": False})
+    monkeypatch.setattr(app_mod, "sessions_between", lambda s, e: [d for d in OCT if s <= d <= e])
+    monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {s: dict(c) for s, c in closes.items()})
+    return a
+
+
+def test_performance_values_the_last_session_from_quotes_until_its_bar_arrives(make_argus, monkeypatch):
+    """Yahoo's daily bars end a session before the quotes' session: that session is valued at the
+    quotes' close, the benchmark too, so the last step equals Day P&L and excess return isn't null."""
+    closes = {"X": dict(zip(OCT[:3], (100, 101, 102))), "SPY": dict(zip(OCT[:3], (600, 603, 606)))}
+    x = _session_quote("X", 110, 102)
+    a = _perf_argus(make_argus, monkeypatch, closes, _session_quote("SPY", 612, 606))
+    perf = a.performance("p", live_quotes={"X": x})
+    last, prev = perf["series"][-1], perf["series"][-2]
+    assert last["d"] == "2026-10-23" and last["value"] == pytest.approx(1100)
+    assert last["bench_pct"] == pytest.approx(2.0)
+    assert perf["summary"]["benchmark_pct"] == pytest.approx(2.0) and perf["summary"]["excess_pct"] is not None
+    assert perf["closes_from_quotes"] == {"date": "2026-10-23", "symbols": ["SPY", "X"]}
+    day_pnl = a.portfolio("p", live_quotes={"X": x})["totals"]["day_pnl"]
+    assert last["value"] - prev["value"] == pytest.approx(day_pnl) == pytest.approx(80)
+    assert len(perf["series"]) == len(OCT)  # the filled close is one point, used once
+    assert 10 * 110 not in [p["value"] for p in perf["series"][:-1]]
+
+
+def test_performance_uses_the_real_bar_once_it_is_stored(make_argus, monkeypatch):
+    closes = {"X": dict(zip(OCT, (100, 101, 102, 108))), "SPY": dict(zip(OCT, (600, 603, 606, 609)))}
+    a = _perf_argus(make_argus, monkeypatch, closes, _session_quote("SPY", 612, 606))
+    perf = a.performance("p", live_quotes={"X": _session_quote("X", 110, 102)})
+    assert perf["series"][-1]["value"] == pytest.approx(1080) and perf["series"][-1]["bench_pct"] == pytest.approx(1.5)
+    assert perf["closes_from_quotes"] is None
+
+
+def test_earnings_reaction_after_the_close_uses_the_report_days_close_from_the_quote(make_argus, monkeypatch):
+    """An after-close report on the last session, whose daily bar Yahoo hasn't published: the base is
+    that session's close from the quote, not the day before's, so after hours shows the real move."""
+    from dataclasses import replace
+
+    from argus.errors import ArgusError
+    from argus.market_calendar import NY, market_status
+    from argus.providers.base import Bar
+
+    report = date.fromisoformat(market_status()["last_session"])  # real dates: the after-hours path is recent-only
+    bars = [Bar(datetime.combine(report - timedelta(days=k), time(), NY), 135, 136, 134, 135.27, 1e6) for k in (2, 1)]
+    q = replace(_session_quote("DUOL", 128.0, 135.27, report), ext_price=143.29, ext_session="post",
+                ext_as_of=datetime.combine(report, time(19), NY))
+    a = make_argus()
+    monkeypatch.setattr(a.market, "get_financials", lambda *a_: (_ for _ in ()).throw(ArgusError("NOT_CONFIGURED", "x")))
+    monkeypatch.setattr(a.market, "get_history", lambda *a_: bars)
+    monkeypatch.setattr(a.market, "get_quotes", lambda syms, *a_: ({"DUOL": q}, {}))
+    monkeypatch.setattr(a.events, "report_history", lambda s: [{"date": report.isoformat(), "hour": "amc",
+                                                               "eps_estimate": 0.8, "eps_actual": 1.0}])
+    monkeypatch.setattr(a.events, "refresh", lambda syms: {"failed": []})
+    monkeypatch.setattr(a.events, "between", lambda *a_: [])
+    monkeypatch.setattr(a.events, "results_history", lambda s: [])
+    r = a.earnings_history("DUOL")["reports"][0]["reaction"]
+    assert (r["base_date"], r["base_close"]) == (report.isoformat(), 128.0)
+    assert r["close_pct"] == pytest.approx((143.29 / 128 - 1) * 100) and r["label"] == "after hours"
+
+    # Once the real bar is stored, it's the base.
+    bars.append(Bar(datetime.combine(report, time(), NY), 135, 136, 127, 127.5, 1e6))
+    r = a.earnings_history("DUOL")["reports"][0]["reaction"]
+    assert r["base_close"] == 127.5
