@@ -15,6 +15,7 @@ FREQ_NAMES = {12: "monthly", 4: "quarterly", 2: "semiannual", 1: "annual"}
 LOOKBACK_DAYS = 400  # a payer with nothing in this window is treated as not paying
 LUMPY_CV = 0.25  # payments this dispersed (stdev / mean) over a year aren't a rate to extrapolate
 MATCH_DAYS = 120  # a DIVIDEND transaction records the latest ex-date this far back (pay dates trail ex-dates)
+SAME_DATE_DAYS = 10  # a month's ex-dates a year apart this close are the payer's calendar, not chance
 
 
 def add_months(d: date, n: int) -> date:
@@ -53,6 +54,64 @@ def next_ex(last_d: date, months: int, anchored: str | None) -> date:
     projects 12-31, not 12-30, and its 02-26 projects 03-31, not 03-26."""
     d = add_months(last_d, months)
     return _month_end(d) if anchored == "end" else _month_start(d) if anchored == "start" else session_on_or_after(d)
+
+
+def _month_key(d: date) -> int:
+    return d.year * 12 + d.month - 1
+
+
+def _roll(d: date, before: date, months: int, anchored: str | None) -> date:
+    """Past ex-date `d` (matched by `before` a year earlier) moved `months` ahead: the month's last /
+    first trading day if it was one (for an anchored payer, or both years), the same weekday if it
+    was that both years (SPY's third Friday, SCHD's Wednesday), else the same day; on a trading day
+    and kept in its month (a Saturday the 28th moves back to Friday, not into the next month)."""
+    t = add_months(d, months)
+    if (anchored == "end" or before == _month_end(before)) and d == _month_end(d):
+        return _month_end(t)
+    if (anchored == "start" or before == _month_start(before)) and d == _month_start(d):
+        return _month_start(t)
+    if d.weekday() == before.weekday():
+        w = t + timedelta(days=(d.weekday() - t.weekday() + 3) % 7 - 3)
+        t = w if w.month == t.month else t
+    s = session_on_or_after(t)
+    return s if s.month == t.month else session_before(t)
+
+
+def schedule(ex_dates: list[date], freq: int, last_d: date, anchored: str | None, until: date) -> list[date]:
+    """Estimated ex-dates after `last_d` up to `until`. A month whose ex-dates in the latest year of
+    history match the year before (as many, each within SAME_DATE_DAYS) follows that calendar,
+    including none: Vanguard's and Schwab's bond funds go ex on 12-01 and again around 12-18 and skip
+    January, SCHD goes ex around 12-10 although its other quarters are near the 24th. Any other month
+    gets the step estimate: every 12/freq months from the last ex-date on the payer's usual day
+    (see next_ex). In `last_d`'s own month only the calendar's dates after those already paid count."""
+    steps, k = [], 1
+    while (e := next_ex(last_d, 12 // freq * k, anchored)) <= until:
+        steps.append(e)
+        k += 1
+    by_month: dict[int, list[date]] = {}
+    for d in sorted(ex_dates):
+        by_month.setdefault(_month_key(d), []).append(d)
+    ago = add_months(last_d, -12)
+    if not any(abs((d - ago).days) <= SAME_DATE_DAYS for d in ex_dates):
+        return steps  # the latest ex-date breaks last year's calendar (PEGA moved 10-01 to 08-17)
+    first, last = min(by_month), _month_key(last_d)
+    out = []
+    for m in range(last, _month_key(until) + 1):
+        years = 1  # the latest same month that's wholly before last_d's month
+        while m - 12 * years >= last:
+            years += 1
+        t = m - 12 * years
+        a, b = by_month.get(t, []), by_month.get(t - 12, [])
+        known = t - 12 > first and len(a) == len(b) and all(
+            abs((add_months(y, 12) - x).days) <= SAME_DATE_DAYS for x, y in zip(a, b))
+        if not known:
+            out += [e for e in steps if _month_key(e) == m]
+            continue
+        # (both years on the first trading day: kept even while the anchor can't be read from the
+        # latest dates, as BND's last ex-date is 12-18 until February's arrives)
+        rolled = [_roll(x, y, 12 * years, anchored) for x, y in zip(a, b)]
+        out += rolled[len(by_month.get(m, [])):] if m == last else rolled
+    return sorted(d for d in out if last_d < d <= until)
 
 
 def frequency(ex_dates: list[date]) -> int:
@@ -95,11 +154,12 @@ def _rhythm(pays: list[tuple[date, float]], today: date):
 
 
 def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: date,
-            announced: Iterable[date], anchored: str | None = None) -> list[tuple[date, float, bool]]:
+            announced: Iterable[date], anchored: str | None = None,
+            ex_dates: list[date] | None = None) -> list[tuple[date, float, bool]]:
     """Ex-dates that have passed but the provider's history doesn't show (Yahoo lags days behind the
     ex-date, while quotes' previous close already drops by the dividend, and it sometimes drops a
     recent row it served before): (ex-date, projected cash per share, whether the date is estimated).
-    A declared one counts as is. The estimated ex-dates are walked step by step from the last paid one
+    A declared one counts as is. The estimated ex-dates (see schedule) are walked from the last paid one
     up to today, so a history that is missing its last row still counts the payment after it; each
     one a declared date doesn't replace counts. They count only while the newest of them is within
     half a period of grace (about two weeks for a monthly payer, six for a quarterly one): later than
@@ -110,10 +170,7 @@ def _passed(freq: int, last_d: date, per_payment: float, stale: bool, today: dat
     declared = [a for a in sorted(set(announced)) if last_d + half <= a <= today]
     out = [(a, per_payment, False) for a in declared]
     if not stale:
-        steps, k = [], 1
-        while (est := next_ex(last_d, 12 // freq * k, anchored)) <= today:
-            steps.append(est)
-            k += 1
+        steps = schedule(ex_dates or [], freq, last_d, anchored, today)
         if steps and today <= steps[-1] + half:
             out += [(e, per_payment, True) for e in steps if all(abs(e - a) >= half for a in declared)]
     return sorted(out)
@@ -139,7 +196,8 @@ def pending(history: list[tuple[str, float]], today: date, announced: Iterable[d
     if (r := _rhythm(pays, today)) is None:
         return []
     freq, _, last_d, _, _, stale, per_payment, anchored = r
-    return [(d.isoformat(), a) for d, a, _ in _passed(freq, last_d, per_payment, stale, today, announced, anchored)]
+    return [(d.isoformat(), a) for d, a, _ in
+            _passed(freq, last_d, per_payment, stale, today, announced, anchored, [d for d, _ in pays])]
 
 
 def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callable[[date], float],
@@ -161,13 +219,11 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
                 for d, a in pays if year_start <= d <= today and (q := qty_at(d)) > 0]
     projected = []
     if not stale:  # with no shares (a watchlist) this still gives the expected dates, at $0
-        # Every 12/freq months from the last ex-date, on the payer's usual day (see next_ex).
-        step, k = 12 // freq, 1
-        while (nxt := next_ex(last_d, step * k, anchored)) <= horizon:
+        # The payer's own calendar where its history repeats, else every 12/freq months (see schedule).
+        for nxt in schedule([d for d, _ in pays], freq, last_d, anchored, horizon):
             if today < nxt:
                 projected.append({"ex_date": nxt.isoformat(), "per_share": per_payment, "shares": qty,
                                   "amount": qty * per_payment, "estimated_date": True})
-            k += 1
     # A declared ex-date is the payment the estimate guessed at: it replaces any estimate within half
     # a period of it (KO's 12-01 replaces a 12-15 guess), at the projected amount per share. One the
     # history already has is skipped; one that's passed before the history shows it is received (below).
@@ -179,7 +235,8 @@ def analyze_holding(history: list[tuple[str, float]], qty: float, qty_at: Callab
         if a > today:
             projected.append({"ex_date": a.isoformat(), "per_share": per_payment, "shares": qty,
                               "amount": qty * per_payment, "estimated_date": False})
-    for d, per_share, est in _passed(freq, last_d, per_payment, stale, today, announced, anchored):
+    for d, per_share, est in _passed(freq, last_d, per_payment, stale, today, announced, anchored,
+                                     [d for d, _ in pays]):
         if d >= year_start and (q := qty_at(d)) > 0:
             received.append({"ex_date": d.isoformat(), "per_share": per_share, "shares": q,
                              "amount": q * per_share, "estimated": True, "estimated_date": est})

@@ -285,3 +285,26 @@ def test_announced_ex_date_replaces_a_distant_estimate_and_projections_cross_the
            if e["symbol"] == "JJJ"]
     assert any(e["date"] > f"{today.year}-12-31" and e["estimated"] for e in jjj)
     assert div["JJJ"]["next_ex_date_est"] is not None
+
+
+@pytest.mark.parametrize("day", ["2026-11-06", "2026-12-05", "2026-12-19", "2026-12-28", "2027-01-05",
+                                 "2027-02-03"])
+def test_december_double_payer_on_the_dividends_page(make_argus, freeze_today, day):
+    # A Vanguard bond fund's two December payments both land in December, none in January (B-141)
+    from argus.db import session_scope
+    from argus.models import DividendHistory
+    from tests.test_dividends import _vanguard_bond_history
+
+    today = freeze_today(date.fromisoformat(day))
+    a = make_argus([FakeQuotes("fake", {s: (72, 72) for s in ("BND", "SPY")})])
+    a.portfolios.create_portfolio("inc")
+    a.portfolios.add_transactions("inc", [TxnInput("BUY", "BND", datetime.now(UTC) - timedelta(days=900), 100, 72)])
+    with session_scope(a.engine) as s:
+        s.add(DividendHistory(symbol="BND", as_of=datetime.now(UTC),
+                              data=[list(x) for x in _vanguard_bond_history(today - timedelta(days=2))]))
+    d = a.dividends("inc")
+    ev = [e["ex_date"] for e in d["holdings"][0]["events"]]
+    assert [x for x in ev if x[5:7] == "01"] == []
+    second = {2026: "2026-12-18", 2027: "2027-12-20"}[today.year]  # 12-18-2027 is a Saturday
+    assert [x for x in ev if x[5:7] == "12"] == [f"{today.year}-12-01", second]
+    assert d["by_month"][11]["projected"] + d["by_month"][11]["received"] == pytest.approx(2 * 24.0)
