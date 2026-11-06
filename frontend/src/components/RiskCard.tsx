@@ -46,7 +46,8 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
 
   return (
     <section className="card stack" style={{ gap: 18 }}>
-      <h2 style={{ margin: 0 }}>Risk <span className="muted small">· today's holdings over the last {r.lookback_days} trading days, to {r.as_of}</span></h2>
+      <h2 style={{ margin: 0 }}>Risk <span className="muted small">· today's holdings over the last {r.lookback_days} trading days, to {r.as_of}
+        {r.closes_from_quotes && <span title={`Yahoo hasn't published ${r.closes_from_quotes.date}'s daily bar yet: closes from quotes for ${r.closes_from_quotes.symbols.join(", ")}`}> (last close from quotes)</span>}</span></h2>
 
       <div className="tiles">
         <div className="tile">
@@ -68,6 +69,13 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
           <div className="label">1-day VaR 99%</div>
           <div className="value">{money(-v99.var_value, { whole: true })}</div>
           <div className="delta muted">{v99.var_pct.toFixed(2)}% · CVaR {v99.cvar_pct.toFixed(2)}%</div>
+        </div>
+        <div className="tile" title="Today's holdings over the latest session, against the 99% VaR">
+          <div className="label">Last session ({r.last_day.date.slice(5)})</div>
+          <div className={`value ${tone(r.last_day.value)}`}>{money(r.last_day.value, { signed: true, whole: true })}</div>
+          <div className={`delta ${r.last_day.exceeds_var_99 ? "down" : "muted"}`}>
+            {pct(r.last_day.return_pct, 2)}{r.last_day.exceeds_var_99 ? " · exceeded 99% VaR" : ""}
+          </div>
         </div>
         <div className="tile">
           <div className="label">Max drawdown (1 year)</div>

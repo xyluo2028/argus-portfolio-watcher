@@ -1376,12 +1376,16 @@ class Argus:
         values = {r["symbol"]: r.get("market_value") or 0.0 for r in summ["positions"]}
         bench = summ["portfolio"]["benchmark"] or "SPY"
         closes = self.market.daily_closes_many(sorted(set(values) | {bench}), self.RISK_HISTORY_START)
+        # The same quote-filled last session as performance while Yahoo's bar is late (B-142).
+        end = date.fromisoformat(market_status()["last_session"])
+        from_quotes = self._fill_last_session(closes, end, live_quotes)
         try:
             factors = self.factors.daily()
         except ProviderError as e:
             log.warning("factor data: %s", e)
             factors = None
         return {"portfolio": summ["portfolio"]["name"], "fully_priced": summ["totals"]["fully_priced"],
+                "closes_from_quotes": {"date": end.isoformat(), "symbols": from_quotes} if from_quotes else None,
                 **risk_mod.analyze(values, closes, bench, factors)}
 
     def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
