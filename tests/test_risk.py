@@ -74,3 +74,66 @@ def test_factor_regression_recovers_loadings():
 def test_french_csv_parsing():
     text = "This file was created...\n\n,Mkt-RF,SMB,HML,RMW,CMA,RF\n20260828,  0.50, -0.10,  0.20, 0.00, 0.10, 0.01\n\nCopyright 2026\n"
     assert parse_csv(text) == {"2026-08-28": {"Mkt-RF": 0.005, "SMB": -0.001, "HML": 0.002, "RMW": 0.0, "CMA": 0.001, "RF": 0.0001}}
+
+
+# -- B-142: the last session's close from quotes while Yahoo lags its daily bar --------------------
+
+def _risk_argus(make_argus, monkeypatch, closes, last, quotes):
+    from datetime import datetime, time
+
+    import argus.app as app_mod
+    from argus.providers.base import ProviderError
+    from argus.market_calendar import NY
+    from argus.services.portfolio import TxnInput
+
+    class Provider:
+        name = "fake"
+
+        def get_quotes(self, symbols):
+            return {s: q for s, q in quotes.items() if s in symbols}
+
+    a = make_argus([Provider()])
+    a.portfolios.create_portfolio("p")
+    t0 = datetime.combine(min(closes["X"]), time(16), NY)
+    a.portfolios.add_transactions("p", [TxnInput("BUY", s, t0, 10, 100) for s in ("X", "Y")])
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": last.isoformat(), "session": "closed",
+                                                              "is_trading_day": False})
+    monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {s: dict(closes.get(s, {})) for s in syms})
+    monkeypatch.setattr(a.factors, "daily", lambda: (_ for _ in ()).throw(ProviderError("offline")))
+    return a
+
+
+def test_risk_values_the_last_session_from_quotes_until_its_bar_arrives(make_argus, monkeypatch):
+    """Yahoo's bars end a session before the quotes': risk takes that session's close from the quotes,
+    as performance does, says so, and flags a latest-day loss beyond the 99% VaR; once the real bar is
+    stored it wins, and the filled close is never stored."""
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    walks = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X", "Y"))}
+    last, hist = days[-1], days[:-1]
+    stored = {s: {d: c[d] for d in hist} for s, c in walks.items()}
+    prev = {s: c[hist[-1]] for s, c in stored.items()}
+    at_close = datetime.combine(last, time(16, 5), NY)
+    quotes = {s: Quote(s, prev[s] * k, prev[s], prev[s], prev[s] * k, prev[s], at_close, "fake")
+              for s, k in (("X", 0.9), ("Y", 0.9), ("SPY", 0.95))}
+
+    a = _risk_argus(make_argus, monkeypatch, stored, last, quotes)
+    r = a.risk("p")
+    assert r["as_of"] == last.isoformat()
+    assert r["closes_from_quotes"] == {"date": last.isoformat(), "symbols": ["SPY", "X", "Y"]}
+    ld = r["last_day"]
+    assert ld["date"] == last.isoformat() and ld["return_pct"] == pytest.approx(-10.0)
+    # In dollars of the value before the fall: today's value is 90% of it.
+    assert ld["value"] == pytest.approx(-r["total_value"] / 9) and ld["exceeds_var_99"]
+    assert all(last not in c for c in stored.values())  # computed from, never stored
+
+    # The real bar arrives (a smaller fall than the quote said): it's what risk uses.
+    for s, c in stored.items():
+        c[last] = prev[s] * 0.99
+    r = a.risk("p")
+    assert r["closes_from_quotes"] is None and r["as_of"] == last.isoformat()
+    assert r["last_day"]["return_pct"] == pytest.approx(-1.0) and not r["last_day"]["exceeds_var_99"]

@@ -79,6 +79,14 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         return {"var_pct": float(-cut * 100), "cvar_pct": float(-tail.mean() * 100),
                 "var_value": float(-cut * total), "cvar_value": float(-tail.mean() * total)}
 
+    var99 = var_cvar(0.99)
+    # Today's holdings over the latest session, in dollars of their value before it (as Day P&L
+    # counts it, trades aside), against the 99% VaR shown beside it.
+    last_r = filled[-1]
+    move = float(np.sum(w * total * last_r / (1 + last_r)))
+    last_day = {"date": days[-1].isoformat(), "return_pct": move / (total - move) * 100, "value": move,
+                "exceeds_var_99": bool(-move > var99["var_value"])}
+
     growth = np.cumprod(1 + rp)
     drawdown = float((growth / np.maximum.accumulate(growth) - 1).min() * 100)
 
@@ -128,7 +136,8 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         "volatility_pct": vol * 100,
         "benchmark_volatility_pct": float(np.std(rm, ddof=1) * np.sqrt(TRADING_DAYS) * 100),
         "max_drawdown_pct": drawdown,
-        "var": {"95": var_cvar(0.95), "99": var_cvar(0.99)},
+        "var": {"95": var_cvar(0.95), "99": var99},
+        "last_day": last_day,
         "positions": positions,
         "correlation": {"symbols": [syms[i] for i in top],
                         "matrix": [[None if np.isnan(x) else float(x) for x in row] for row in np.atleast_2d(corr)]},

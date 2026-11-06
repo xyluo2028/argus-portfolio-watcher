@@ -437,6 +437,8 @@ export interface RiskReport {
   as_of: string; lookback_days: number; benchmark: string; total_value: number;
   beta: number; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
   var: Record<"95" | "99", { var_pct: number; cvar_pct: number; var_value: number; cvar_value: number }>;
+  last_day: { date: string; return_pct: number; value: number; exceeds_var_99: boolean };
+  closes_from_quotes: { date: string; symbols: string[] } | null;
   positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; vol_pct: number; history_days: number; proxied: boolean }[];
   correlation: { symbols: string[]; matrix: (number | null)[][] };
   scenarios: { key: string; label: string; start: string | null; end: string | null; spy_pct: number; portfolio_pct: number; value: number; proxied: string[] }[];
