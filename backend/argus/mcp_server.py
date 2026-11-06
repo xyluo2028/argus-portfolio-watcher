@@ -140,7 +140,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def get_portfolio(portfolio: str, include_lots: bool = False, top: int | None = None) -> dict:
         """Positions with qty, avg_cost, price, day_pnl, market_value, weight_pct, unrealized P&L,
         plus totals and market session. `top` keeps only the N largest positions (totals still
-        cover everything). include_lots adds each open FIFO lot (OPENING = owned before import)."""
+        cover everything). include_lots adds each open FIFO lot (OPENING = owned before import).
+        `split_warnings` lists held symbols whose split no SPLIT transaction records (date, ratio,
+        the CLI command to record it); until recorded, that position and every weight are wrong."""
         out = argus.portfolio(portfolio, True, include_lots, quotes_now())
         if top:
             out["positions"] = out["positions"][:top]

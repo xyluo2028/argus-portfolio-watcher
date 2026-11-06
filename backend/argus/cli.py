@@ -13,6 +13,7 @@ from typing import Annotated, Callable
 import typer
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from argus.errors import ArgusError
@@ -347,6 +348,8 @@ def _render_portfolio(d):
                   f"({_pct(tot['day_pnl_pct'])})  Realized {_money(tot['realized_pnl'], True)}")
     if d.get("quote_errors"):
         console.print(f"[yellow]No quote for: {', '.join(d['quote_errors'])}[/yellow]")
+    for w in d.get("split_warnings") or []:
+        console.print(f"[yellow]{escape(w['message'])}[/yellow] Record it: {escape(w['record'])}")
 
 
 @portfolio_app.command("performance")

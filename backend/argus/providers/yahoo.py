@@ -199,7 +199,8 @@ class YahooProvider:
                 continue
             o, h, low = (_num(row.get(k)) for k in ("Open", "High", "Low"))
             bars.append(Bar(ts.to_pydatetime().astimezone(UTC), o if o is not None else c, h if h is not None else c,
-                            low if low is not None else c, c, _num(row.get("Volume")) or 0.0))
+                            low if low is not None else c, c, _num(row.get("Volume")) or 0.0,
+                            _num(row.get("Stock Splits")) or 0.0))
         return bars
 
     def get_dividends(self, symbol: str, years: int = 3) -> list[tuple[str, float]]:
