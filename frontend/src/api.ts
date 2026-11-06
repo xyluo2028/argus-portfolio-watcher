@@ -101,6 +101,13 @@ export interface Summary {
   };
   positions: Position[];
   quote_errors?: Record<string, string>;
+  split_warnings?: SplitWarning[];
+}
+
+/** A held symbol's split that no SPLIT transaction records (from Yahoo, or a quote's previous close). */
+export interface SplitWarning {
+  symbol: string; portfolio: string; date: string; ratio: number; label: string; source: "yahoo" | "quote";
+  qty_before: number; qty_after: number; message: string; record: string; hint: string;
 }
 
 export interface PortfolioRef { id: number; name: string; benchmark: string }

@@ -3,7 +3,9 @@
 Freshness rules:
 - Quotes: served from cache if fetched within `quote_max_age_s`, or if the market
   is closed and the cached quote already reflects the last session's close.
-- Daily bars: cached permanently; only bars after the last cached one are fetched.
+- Daily bars: cached permanently; only bars after the last cached one are fetched. When Yahoo's
+  fresh bars disagree with cached ones for the same session by a split-like factor (it re-based the
+  history after a split), the symbol's cached bars are replaced with Yahoo's whole adjusted history.
 - Fundamentals: cached for `fundamentals_max_age_s` (default 24h).
 """
 
@@ -15,16 +17,18 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert
 
 from argus.config import Settings
 from argus.db import session_scope, upsert
 from argus.errors import ArgusError
-from argus.market_calendar import NY, market_status, session_date
-from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
+from argus.market_calendar import NY, market_status, session_before, session_date
+from argus.models import (DividendHistory, ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog,
+                          StockSplit)
 from argus.providers.base import Bar, ProviderError, Quote
 from argus.providers.sec_edgar import freshness, ttm_figures, ttm_free_cash_flow
+from argus.services.splits import clean_ratio, rebased
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -107,6 +111,12 @@ def with_pe(metrics: dict, sources: dict, price: float | None) -> tuple[dict, di
     else:
         sources.pop("pe_ttm", None)
     return metrics, sources
+
+
+def with_range(metrics: dict, sources: dict, rng: tuple[float, float]) -> tuple[dict, dict]:
+    """The 52-week low/high replaced by the range of split-adjusted daily bars (post_split_ranges)."""
+    return ({**metrics, "low_52w": rng[0], "high_52w": rng[1]},
+            {**sources, "low_52w": "history", "high_52w": "history"})
 
 
 def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
@@ -334,7 +344,19 @@ class MarketService:
                 fetched = dict(zip(todo, pool.map(lambda kv: self._fetch_history(kv[0], kv[1], None, "1d"),
                                                   todo.items())))
         for sym, bars in fetched.items():
-            self._store_bars(sym, "1d", bars)
+            if sym in cov and self._rebased(sym, bars):
+                # Yahoo re-based the history (a split): every cached bar is on the old basis, so the
+                # symbol's whole range is downloaded again and replaces them.
+                try:
+                    bars = self._fetch_history(sym, min(_aware(cov[sym][0]), todo[sym]), None, "1d")
+                except ArgusError as e:  # keep the old bars; retried after BEHIND_RETRY_S
+                    log.warning("re-based history %s: %s", sym, e)
+                    self._behind[sym] = time.monotonic()
+                    continue
+                log.info("%s: Yahoo re-based its history (split); replacing the cached daily bars", sym)
+                self._store_bars(sym, "1d", bars, replace=True)
+            else:
+                self._store_bars(sym, "1d", bars)
             if not any(b.ts >= last_session and b.complete for b in bars):
                 self._behind[sym] = time.monotonic()
             else:
@@ -351,17 +373,71 @@ class MarketService:
         except ProviderError as e:
             raise ArgusError("PROVIDER_ERROR", str(e), hint="Yahoo may be rate limiting; retry shortly.") from e
 
-    def _store_bars(self, symbol: str, interval: str, bars: list[Bar]) -> None:
+    def _rebased(self, symbol: str, bars: list[Bar]) -> bool:
+        """True when fetched daily bars disagree with the cached closes for the same sessions by a
+        split-like factor: Yahoo has adjusted the history for a split the cache predates (B-140)."""
+        fresh = {b.ts.astimezone(NY).date(): b.c for b in bars if b.complete}
+        if not fresh:
+            return False
+        lo = min(b.ts for b in bars) - timedelta(days=1)
+        with session_scope(self.engine) as s:
+            for ts, c in s.execute(select(PriceBar.ts, PriceBar.c).where(
+                    PriceBar.symbol == symbol, PriceBar.interval == "1d", PriceBar.ts >= lo)):
+                d = _aware(ts).astimezone(NY).date()
+                if d in fresh and rebased(c, fresh[d]):
+                    return True
+        return False
+
+    def _store_bars(self, symbol: str, interval: str, bars: list[Bar], replace: bool = False) -> None:
+        """Upsert bars and record the splits they carry. `replace` drops the symbol's cached bars
+        first (a re-based history) and expires its cached dividend history, whose per-share amounts
+        were on the old basis too."""
         # An incomplete bar is skipped, never stored over a good one; the rest of the batch still lands.
         rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v)
                 for b in bars if b.complete]
         if not rows:
             return
+        splits = {b.ts.astimezone(NY).date(): b.split for b in bars if b.split and b.split > 0}
         with session_scope(self.engine) as s:
+            if replace:
+                s.execute(delete(PriceBar).where(PriceBar.symbol == symbol, PriceBar.interval == interval))
+                expired = datetime(1970, 1, 1, tzinfo=UTC)
+                s.execute(update(DividendHistory).where(DividendHistory.symbol == symbol).values(as_of=expired))
+            for d, ratio in splits.items():
+                upsert(s, StockSplit, symbol=symbol, d=d, ratio=ratio)
             for i in range(0, len(rows), 500):
                 stmt = insert(PriceBar).values(rows[i:i + 500])
                 s.execute(stmt.on_conflict_do_update(index_elements=["symbol", "interval", "ts"], set_={
                     c: stmt.excluded[c] for c in ("o", "h", "l", "c", "v")}))
+
+    def splits(self, symbols: list[str]) -> dict[str, list[tuple[date, float]]]:
+        """Splits Yahoo has reported for these symbols (as recorded from downloaded history), oldest first."""
+        out: dict[str, list[tuple[date, float]]] = {}
+        with session_scope(self.engine) as s:
+            for sym, d, ratio in s.execute(select(StockSplit.symbol, StockSplit.d, StockSplit.ratio)
+                                           .where(StockSplit.symbol.in_(symbols)).order_by(StockSplit.d)):
+                out.setdefault(sym, []).append((d, ratio))
+        return out
+
+    def split_suspects(self, quotes: dict[str, Quote]) -> dict[str, tuple[date, float]]:
+        """Symbols whose quote's previous close disagrees with the stored close of that same session by a
+        split-like factor: a split Yahoo's history hasn't caught up with (its quotes adjust first).
+        Maps symbol -> (the quote's session, likely ratio). Reads the cache only."""
+        prev = {sym: session_before(session_date(q.as_of)) for sym, q in quotes.items() if q.prev_close}
+        if not prev:
+            return {}
+        lo = datetime.combine(min(prev.values()) - timedelta(days=3), datetime.min.time(), UTC)
+        stored: dict[str, dict[date, float]] = {}
+        with session_scope(self.engine) as s:
+            for sym, ts, c in s.execute(select(PriceBar.symbol, PriceBar.ts, PriceBar.c).where(
+                    PriceBar.symbol.in_(list(prev)), PriceBar.interval == "1d", PriceBar.ts >= lo)):
+                stored.setdefault(sym, {})[_aware(ts).astimezone(NY).date()] = c
+        out = {}
+        for sym, d in prev.items():
+            c, pc = stored.get(sym, {}).get(d), quotes[sym].prev_close
+            if c and rebased(c, pc):
+                out[sym] = (session_date(quotes[sym].as_of), clean_ratio(c / pc))
+        return out
 
     # -- fundamentals ---------------------------------------------------------
     def get_fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
@@ -380,6 +456,8 @@ class MarketService:
             else:
                 raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
         metrics, sources = with_pe(metrics, sources, self.last_prices([symbol]).get(symbol))
+        if rng := self.post_split_ranges([symbol]).get(symbol):
+            metrics, sources = with_range(metrics, sources, rng)
         wanted = fields or list(METRIC_FIELDS)
         return {
             "symbol": symbol,
@@ -394,9 +472,27 @@ class MarketService:
         worked out from the latest price (with_pe)."""
         out = self._cached_rows(symbols)
         prices = self.last_prices(list(out))
+        ranges = self.post_split_ranges(list(out))
         for sym, c in out.items():
             c["metrics"], c["sources"] = with_pe(c["metrics"], c["sources"], prices.get(sym))
+            if sym in ranges:
+                c["metrics"], c["sources"] = with_range(c["metrics"], c["sources"], ranges[sym])
         return out
+
+    def post_split_ranges(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
+        """52-week (low, high) from the cached daily bars for symbols that split within the last year:
+        providers keep serving pre-split extremes for a while (Yahoo still gave QUAL 54.75-228.13 after
+        its 4:1), while the cached bars are on the post-split basis once the history is re-based."""
+        since = datetime.now(UTC) - timedelta(days=365)
+        recent = [sym for sym, ev in self.splits(symbols).items() if any(d > since.date() for d, _ in ev)]
+        if not recent:
+            return {}
+        with session_scope(self.engine) as s:
+            rows = s.execute(select(PriceBar.symbol, func.min(PriceBar.ts), func.min(PriceBar.l), func.max(PriceBar.h))
+                             .where(PriceBar.symbol.in_(recent), PriceBar.interval == "1d", PriceBar.ts >= since)
+                             .group_by(PriceBar.symbol)).all()
+        # Only a full year of bars gives the 52-week range.
+        return {sym: (lo, hi) for sym, first, lo, hi in rows if _aware(first) <= since + timedelta(days=7)}
 
     def last_prices(self, symbols: list[str]) -> dict[str, float]:
         """The latest price Argus holds for each symbol, without calling a provider: the cached quote or

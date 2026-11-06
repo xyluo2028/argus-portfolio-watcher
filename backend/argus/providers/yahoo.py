@@ -194,7 +194,8 @@ class YahooProvider:
             ohlc = [_num(row.get(k)) for k in ("Open", "High", "Low", "Close")]
             if None in ohlc:  # e.g. the latest session before Yahoo has its close; the next fetch picks it up
                 continue
-            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), *ohlc, _num(row.get("Volume")) or 0.0))
+            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), *ohlc, _num(row.get("Volume")) or 0.0,
+                            _num(row.get("Stock Splits")) or 0.0))
         return bars
 
     def get_dividends(self, symbol: str, years: int = 3) -> list[tuple[str, float]]:

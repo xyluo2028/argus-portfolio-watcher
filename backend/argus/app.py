@@ -33,6 +33,7 @@ from argus.services import dividends as dividends_mod
 from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
 from argus.services import screener as screener_mod
+from argus.services import splits as splits_mod
 from argus.services import risk as risk_mod
 from argus.providers.french import FrenchFactors
 from argus.providers.macro import MacroProvider
@@ -211,6 +212,11 @@ class Argus:
         out = self.portfolios.summary(ref, quotes if with_quotes else {}, include_lots=include_lots)
         out["quote_errors"] = errors
         try:
+            out["split_warnings"] = self.split_warnings(ref, quotes)
+        except Exception as e:  # never block the summary on the split check
+            log.warning("split check: %s", e)
+            out["split_warnings"] = []
+        try:
             accrued = sum(x["amount"] for x in self.accrued_dividends(ref))
         except Exception as e:  # never block the summary on dividend history
             log.warning("accrued dividends: %s", e)
@@ -220,6 +226,23 @@ class Argus:
         out["totals"]["dividends_accrued"] = accrued
         out["totals"]["dividends"] += accrued
         return out
+
+    def split_warnings(self, ref: str, quotes: dict[str, Quote] | None = None) -> list[dict]:
+        """Held positions with a split no SPLIT transaction records (B-140): Yahoo reported it, or the
+        quote's previous close says so before Yahoo does. Such a position is valued at post-split
+        prices with the pre-split share count, so each warning says how to record it. Never writes."""
+        p = self.portfolios.view(ref)
+        txns = self.portfolios.active_transactions(p.id if p.id is not None else ALL)
+        if not txns:
+            return []
+        known = self.market.splits(sorted({t.symbol for t in txns}))
+        possible = self.market.split_suspects(quotes or {})
+        names = {x["id"]: x["name"] for x in self.portfolios.list_portfolios()} if p.id is None else {p.id: p.name}
+        by_pf: dict = {}
+        for t in txns:
+            by_pf.setdefault(t.portfolio_id, []).append(t)
+        return [w for pid, group in sorted(by_pf.items())
+                for w in splits_mod.unrecorded(group, known, names.get(pid, str(pid)), possible)]
 
     def accrued_dividends(self, ref: str, txns: list | None = None) -> list[dict]:
         """Estimated dividends from ex-dates held through, per portfolio, that no DIVIDEND transaction
@@ -972,6 +995,7 @@ class Argus:
             "top_losers": [pick(p) for p in by_pct if p["change_pct"] < 0][:5],
             "largest_dollar_moves": [pick(p) for p in by_dollar[:5]],
             "near_52w_extremes": near,
+            "split_warnings": summ.get("split_warnings", []),
             "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings"],
             "earnings_recent": [e for e in events["recent"] if e["kind"] == "earnings"],
             "dividends_upcoming": [e for e in events["upcoming"] if e["kind"] != "earnings"],
@@ -1397,7 +1421,10 @@ class Argus:
               live_quotes: dict[str, Quote] | None = None, targets: dict[str, float] | None = None) -> dict:
         summ = self.portfolio(ref, True, False, live_quotes)
         tg = targets if targets is not None else self.targets(ref, level)
-        return {"portfolio": summ["portfolio"]["name"], **analysis.drift(summ["positions"], tg, level, tolerance_pp)}
+        out = {"portfolio": summ["portfolio"]["name"], **analysis.drift(summ["positions"], tg, level, tolerance_pp)}
+        # An unrecorded split misstates that position's value and so every weight (B-140).
+        out["warnings"] = [*out.get("warnings", []), *(w["message"] for w in summ.get("split_warnings", []))]
+        return out
 
     def simulate_trades(self, ref: str, trades: list[dict], live_quotes: dict[str, Quote] | None = None) -> dict:
         """What-if: apply hypothetical BUY/SELL trades (qty, or dollar `amount`) at `price` or the

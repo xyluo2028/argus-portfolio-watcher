@@ -77,6 +77,7 @@ class Bar:
     l: float  # noqa: E741
     c: float
     v: float
+    split: float = 0.0  # Yahoo's split ratio effective this session (new shares per old); 0 for none
 
     @property
     def complete(self) -> bool:

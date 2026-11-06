@@ -104,6 +104,21 @@ export function Dashboard({ portfolio, live }: Props) {
         <div className="error">No quote for {Object.keys(summary.quote_errors).join(", ")}; their value is missing from totals.</div>
       )}
 
+      {/* The pushed summary skips this check; the fetched one has it (B-140). */}
+      {initial?.split_warnings && initial.split_warnings.length > 0 && (
+        <div className="warn-box split-warn" role="status">
+          <strong>Unrecorded stock split</strong>
+          <ul>
+            {initial.split_warnings.map((w) => (
+              <li key={`${w.portfolio}-${w.symbol}-${w.date}`}>
+                {w.message}{" "}
+                {w.source === "yahoo" && <>Record it on <Link to="/transactions">Transactions</Link>: Split {w.symbol}, ratio {w.ratio}, dated <span className="nowrap">{w.date}</span>{initial.portfolio.name === ALL ? ` in ${w.portfolio}` : ""} ({w.qty_before} → {w.qty_after} shares), or <code>{w.record}</code>.</>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Refetch once per session day (and when the session changes), not on every tick. */}
       <Suspense fallback={<section className="card"><p className="muted">Loading chart…</p></section>}>
         <PerformanceCard portfolio={portfolio} refreshKey={`${summary.market.last_session}-${summary.market.session}`} />

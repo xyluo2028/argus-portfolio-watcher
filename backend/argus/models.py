@@ -301,6 +301,16 @@ class DividendHistory(Base):
     data: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class StockSplit(Base):
+    """Splits Yahoo reports in the daily history Argus downloads (the "Stock Splits" column)."""
+
+    __tablename__ = "stock_split"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    d: Mapped[date] = mapped_column(Date, primary_key=True)
+    ratio: Mapped[float] = mapped_column(Float)  # new shares per old share
+
+
 class PeerList(Base):
     """Your own peer list for a symbol; without one, the suggested peers are shown."""
 
@@ -342,6 +352,7 @@ __all__ = [
     "PriceBar",
     "RefreshLog",
     "SecurityMap",
+    "StockSplit",
     "Target",
     "QuoteCache",
     "Transaction",
