@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-04T02:52:15.593809+00:00",
+ "created_at": "2026-11-06T02:58:16.785602+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1293,6 +1293,70 @@
     "external_id": "loop-macro-r012-ief-buy",
     "deleted": false,
     "created_at": "2026-11-04T02:19:28.359173+00:00"
+   },
+   {
+    "id": 51,
+    "portfolio_id": 1,
+    "type": "SELL",
+    "symbol": "HRMY",
+    "qty": 205.0,
+    "price": 32.47,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-06T02:17:15.967694+00:00",
+    "note": "r013 exit: Q3 growth 12.3% and op margin 20.2% vs thesis 24%/24%",
+    "source": "cli",
+    "external_id": "r013-growth-hrmy-sell",
+    "deleted": false,
+    "created_at": "2026-11-06T02:17:16.193422+00:00"
+   },
+   {
+    "id": 52,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "TMDX",
+    "qty": 65.0,
+    "price": 77.0,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-06T02:17:17.100095+00:00",
+    "note": "r013 add on Q3 +41% revenue (post-market quote)",
+    "source": "cli",
+    "external_id": "r013-growth-tmdx-buy",
+    "deleted": false,
+    "created_at": "2026-11-06T02:17:17.333679+00:00"
+   },
+   {
+    "id": 53,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "LOAR",
+    "qty": 20.0,
+    "price": 72.02,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-06T02:17:18.247013+00:00",
+    "note": "r013 add on Q3 +39% revenue, op margin 26% (post-market quote)",
+    "source": "cli",
+    "external_id": "r013-growth-loar-buy",
+    "deleted": false,
+    "created_at": "2026-11-06T02:17:18.537088+00:00"
+   },
+   {
+    "id": 54,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "XOM",
+    "qty": 2.0,
+    "price": 165.75,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-06T02:18:04.888698+00:00",
+    "note": "r013: add to most-underweight target (XOM -0.44pp) with idle cash, post-market quote",
+    "source": "cli",
+    "external_id": "r013-income-xom-buy",
+    "deleted": false,
+    "created_at": "2026-11-06T02:18:05.123484+00:00"
    }
   ],
   "target": [
@@ -1625,6 +1689,16 @@
     "active": false,
     "created_by": "cli",
     "created_at": "2026-10-27T02:19:44.775758+00:00"
+   },
+   {
+    "id": 9,
+    "symbol": "JPM",
+    "kind": "day_loss_pct",
+    "threshold": 4.0,
+    "note": "loop-income r013: bank stress check after -4.19% on 11-05",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:19:39.839779+00:00"
    }
   ],
   "alert_event": [
@@ -1635,6 +1709,14 @@
     "ts": "2026-11-03T02:12:32.817594+00:00",
     "value": -4.048064085447267,
     "message": "XOM: -4.05% on the day"
+   },
+   {
+    "id": 2,
+    "alert_id": 9,
+    "session_date": "2026-11-05",
+    "ts": "2026-11-06T02:19:45.930751+00:00",
+    "value": -4.194711879810297,
+    "message": "JPM: -4.19% on the day"
    }
   ],
   "note": [
@@ -2396,6 +2478,127 @@
     "created_by": "cli",
     "created_at": "2026-11-04T02:19:51.925957+00:00",
     "updated_at": "2026-11-04T02:19:51.925962+00:00"
+   },
+   {
+    "id": 70,
+    "symbol": "HRMY",
+    "kind": "note",
+    "text": "[loop-growth] r013 EXIT 205 @ 32.47 (11-05 close; realized -1,324.30, -16.6%). Q3 (11-04 bmo, SEC 10-Q in Argus): revenue 268.9M +12.3% y/y (Q2 +30.3%, Q1 +16.6%), op margin 20.2% vs 27.3% a year ago, gross 70.0% vs 75.1%; EPS 0.81 vs 1.16 Finnhub est (-30%); 'higher costs' and CEO change per headlines. Above the hard <10% line, but both thesis pillars (24% growth, 24% op margin, note 34) failed in one quarter and this is a single-product franchise with generic risk: not a compounder. Proceeds to TMDX/LOAR.",
+    "review_on": null,
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:34.607994+00:00",
+    "updated_at": "2026-11-06T02:17:34.608001+00:00"
+   },
+   {
+    "id": 71,
+    "symbol": "TMDX",
+    "kind": "thesis",
+    "text": "[loop-growth] r013 ADD 65 @ 77.00 (post-market; close 68.98, +11.6% AH). Now 189 sh @ 73.87, cost 13,961.52 = 14.0% of capital (cap 15%, no more adds). Q3 (11-05 amc; SEC 10-Q already in Argus): revenue 203.0M +41.1% y/y (Q2 +20.7%: re-accelerated), op margin 13.9% (Q2 12.5%, Q3-25 16.2%), OCF 36.0M; EPS 0.46 GAAP vs 0.30 Finnhub est. Note 41 exit test (growth < 15% or margins compress again) passed. Thesis (note 32) intact. Break: growth < 20% or op margin < 10% for two quarters.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:35.765880+00:00",
+    "updated_at": "2026-11-06T02:17:35.765887+00:00"
+   },
+   {
+    "id": 72,
+    "symbol": "LOAR",
+    "kind": "thesis",
+    "text": "[loop-growth] r013 ADD 20 @ 72.02 (post-market; close 72.99, +4.7% on the report). Now 194 sh @ 63.89, cost 12,393.70 = 12.4% of capital. Q3 (11-05 bmo; SEC 10-Q in Argus): revenue 176.2M +39.0% y/y (Q2 +39.4%), op margin 26.2% (Q2 24.4%, Q1 21.5%) - expanding with scale; ~16% organic, 2026 guide raised and 2027 outlook given (headlines). Thesis (note 28) strengthened. Break: organic growth < 8% or op margin < 20%.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:36.959844+00:00",
+    "updated_at": "2026-11-06T02:17:36.959851+00:00"
+   },
+   {
+    "id": 73,
+    "symbol": "INOD",
+    "kind": "note",
+    "text": "[loop-growth] r013 Q3 (11-05 amc; SEC 10-Q in Argus): revenue 95.6M +52.9% y/y, FY26 growth guide raised to ~42%+ (headline): note 49 exit tests NOT triggered, hold 107 sh, no add. Watch: net margin 10.8% (Q2 15.6%), and Q3 operating cash flow -84.0M after Q2's +127.2M prepayment - the windfall is reversing. Close 38.62, AH 41.73 (+8.0%). Break: growth < 25% or a top-customer loss.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:38.116720+00:00",
+    "updated_at": "2026-11-06T02:17:38.116728+00:00"
+   },
+   {
+    "id": 74,
+    "symbol": "GRND",
+    "kind": "note",
+    "text": "[loop-growth] r013 Q3 (11-05 amc): headline says revenue +22% y/y (about 141M on SEC Q3-25 115.8M), 2026 guide raised, 2027 outlook given. Argus has no actuals yet (Finnhub row still open, no 10-Q). Growth down from +32.5% in Q2 but above the 20% break (note 37). Hold, re-check margins when the 10-Q lands.",
+    "review_on": "2026-11-13",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:39.419420+00:00",
+    "updated_at": "2026-11-06T02:17:39.419427+00:00"
+   },
+   {
+    "id": 75,
+    "symbol": "RMBS",
+    "kind": "note",
+    "text": "[loop-growth] r013 11-05 close 69.68, -15.9% (cost 92.98, -25%) on a semis rout: SMH -11.2%, SOXX -12.2%, MU -17.5%, AMD -17.3% (Argus quotes). No company news in Argus. Price move, not a thesis break (note 46: exit if growth < 12% or op margin < 32% for two quarters; Q3 +22.3%, 38.3%). Hold, no add (at 11.25% of capital at cost).",
+    "review_on": "2027-02-03",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:40.669044+00:00",
+    "updated_at": "2026-11-06T02:17:40.669050+00:00"
+   },
+   {
+    "id": 76,
+    "symbol": "PODD",
+    "kind": "note",
+    "text": "[loop-growth] r013 Q3 (11-04 bmo; SEC 10-Q in Argus): revenue 842.0M +19.2% y/y (Q2 +23.5%, Q1 +33.9%: decelerating), op margin 22.5% vs 16.7% a year ago (expanding). Reaction +6.6% on 11-04, -5.4% on 11-05 with the market. Above the <15% break (note 29). Hold, no add while growth slows.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:47.088689+00:00",
+    "updated_at": "2026-11-06T02:17:47.088696+00:00"
+   },
+   {
+    "id": 77,
+    "symbol": "BLLN",
+    "kind": "note",
+    "text": "[loop-growth] r013 Q3 (11-04 amc; SEC 10-Q in Argus): revenue 123.0M +47.2% y/y (Q2 +64.4%), op margin 9.0% (Q2 5.0%); FY guide raised to 460-470M, MRD test launch 12-15 (headlines). Above the <30% break (note 36). Hold.",
+    "review_on": "2027-02-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:17:48.221576+00:00",
+    "updated_at": "2026-11-06T02:17:48.221582+00:00"
+   },
+   {
+    "id": 78,
+    "symbol": "XOM",
+    "kind": "thesis",
+    "text": "loop-income r013: bought 2 XOM @165.75 (post-mkt 11-05) with idle cash; XOM was the largest underweight (3.56% vs 4% target, -0.44pp). Thesis: 2.5% yield, ex-div 11-16 (1.03/sh), energy diversifies a defensive book (beta to SPY -0.73). Thesis break: dividend cut/freeze or Q4 EPS below 3.50. Position now 24 sh, cost 175.28.",
+    "review_on": "2026-11-17",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:18:18.538438+00:00",
+    "updated_at": "2026-11-06T02:18:18.538445+00:00"
+   },
+   {
+    "id": 79,
+    "symbol": "QUAL",
+    "kind": "note",
+    "text": "loop-macro r013 (11-05 21:15 ET): QUAL split 4:1 effective 11-05 (Yahoo prev close 56.755 = 227.02/4). Argus still holds 53 sh @225.70, so value 2,903.87 vs true 212 x 54.79 = 11,615.48; unrealized -9,058 and drift 'buy 7,703' are phantom. NOT recording a SPLIT txn: Argus's stored history is unadjusted (227 to 11-04) and performance assumes adjusted closes, so a SPLIT makes day 1 +300% (checked with compute_series). Hold 12% target; true day -3.46%. Revisit when Argus/Yahoo adjust.",
+    "review_on": "2026-11-09",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:19:09.739025+00:00",
+    "updated_at": "2026-11-06T02:19:09.739032+00:00"
+   },
+   {
+    "id": 80,
+    "symbol": "SPY",
+    "kind": "note",
+    "text": "loop-macro r013 (11-05 21:15 ET): no trade. Tech/AI unwind: SPX -4.36%, NDX -6.36%, XLK -8.0%, SMH -11.2%, MTUM -8.2%; VIX 28.2 (+70%), VIX/VIX3M 1.10 inverted, F&G 22 (1.2 before breadth loaded). Credit did not confirm (HYG -0.31%, LQD +0.15%); 10Y -6bp 4.84%, 2s10s +38bp; claims 189K. Book true day -1.67% vs SPY -4.41% (incl. QUAL at 212 sh). Plan after NFP 11-06: if NFP > 0, HYG holds > 76.5 and VIX/VIX3M < 1.0 at the close, SELL 29 SGOV / BUY 4 SPY (sim 11-05: net cash -18.95, realized -4.63; SPY 10.8 -> 14.1%). If NFP negative or HYG breaks, stay. XLE->RSP (note 62/69) stays staged: RSP 20d corr to SPY 0.77, adds beta into the drawdown.",
+    "review_on": "2026-11-06",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-06T02:19:10.895328+00:00",
+    "updated_at": "2026-11-06T02:19:10.895335+00:00"
    }
   ],
   "peer_list": [],
@@ -5636,6 +5839,332 @@
      "created_by": "cli",
      "created_at": "2026-11-04T02:19:51.925957+00:00",
      "updated_at": "2026-11-04T02:19:51.925962+00:00"
+    }
+   },
+   {
+    "id": 160,
+    "ts": "2026-11-06T02:17:16.195628+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "51",
+    "before": null,
+    "after": {
+     "id": 51,
+     "type": "SELL",
+     "symbol": "HRMY",
+     "qty": 205.0,
+     "price": 32.47,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-06T02:17:15.967694+00:00",
+     "note": "r013 exit: Q3 growth 12.3% and op margin 20.2% vs thesis 24%/24%",
+     "source": "cli",
+     "external_id": "r013-growth-hrmy-sell",
+     "deleted": false
+    }
+   },
+   {
+    "id": 161,
+    "ts": "2026-11-06T02:17:17.335903+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "52",
+    "before": null,
+    "after": {
+     "id": 52,
+     "type": "BUY",
+     "symbol": "TMDX",
+     "qty": 65.0,
+     "price": 77.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-06T02:17:17.100095+00:00",
+     "note": "r013 add on Q3 +41% revenue (post-market quote)",
+     "source": "cli",
+     "external_id": "r013-growth-tmdx-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 162,
+    "ts": "2026-11-06T02:17:18.539654+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "53",
+    "before": null,
+    "after": {
+     "id": 53,
+     "type": "BUY",
+     "symbol": "LOAR",
+     "qty": 20.0,
+     "price": 72.02,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-06T02:17:18.247013+00:00",
+     "note": "r013 add on Q3 +39% revenue, op margin 26% (post-market quote)",
+     "source": "cli",
+     "external_id": "r013-growth-loar-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 163,
+    "ts": "2026-11-06T02:17:34.609403+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "70",
+    "before": null,
+    "after": {
+     "id": 70,
+     "symbol": "HRMY",
+     "kind": "note",
+     "text": "[loop-growth] r013 EXIT 205 @ 32.47 (11-05 close; realized -1,324.30, -16.6%). Q3 (11-04 bmo, SEC 10-Q in Argus): revenue 268.9M +12.3% y/y (Q2 +30.3%, Q1 +16.6%), op margin 20.2% vs 27.3% a year ago, gross 70.0% vs 75.1%; EPS 0.81 vs 1.16 Finnhub est (-30%); 'higher costs' and CEO change per headlines. Above the hard <10% line, but both thesis pillars (24% growth, 24% op margin, note 34) failed in one quarter and this is a single-product franchise with generic risk: not a compounder. Proceeds to TMDX/LOAR.",
+     "review_on": null,
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:34.607994+00:00",
+     "updated_at": "2026-11-06T02:17:34.608001+00:00"
+    }
+   },
+   {
+    "id": 164,
+    "ts": "2026-11-06T02:17:35.767288+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "71",
+    "before": null,
+    "after": {
+     "id": 71,
+     "symbol": "TMDX",
+     "kind": "thesis",
+     "text": "[loop-growth] r013 ADD 65 @ 77.00 (post-market; close 68.98, +11.6% AH). Now 189 sh @ 73.87, cost 13,961.52 = 14.0% of capital (cap 15%, no more adds). Q3 (11-05 amc; SEC 10-Q already in Argus): revenue 203.0M +41.1% y/y (Q2 +20.7%: re-accelerated), op margin 13.9% (Q2 12.5%, Q3-25 16.2%), OCF 36.0M; EPS 0.46 GAAP vs 0.30 Finnhub est. Note 41 exit test (growth < 15% or margins compress again) passed. Thesis (note 32) intact. Break: growth < 20% or op margin < 10% for two quarters.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:35.765880+00:00",
+     "updated_at": "2026-11-06T02:17:35.765887+00:00"
+    }
+   },
+   {
+    "id": 165,
+    "ts": "2026-11-06T02:17:36.961303+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "72",
+    "before": null,
+    "after": {
+     "id": 72,
+     "symbol": "LOAR",
+     "kind": "thesis",
+     "text": "[loop-growth] r013 ADD 20 @ 72.02 (post-market; close 72.99, +4.7% on the report). Now 194 sh @ 63.89, cost 12,393.70 = 12.4% of capital. Q3 (11-05 bmo; SEC 10-Q in Argus): revenue 176.2M +39.0% y/y (Q2 +39.4%), op margin 26.2% (Q2 24.4%, Q1 21.5%) - expanding with scale; ~16% organic, 2026 guide raised and 2027 outlook given (headlines). Thesis (note 28) strengthened. Break: organic growth < 8% or op margin < 20%.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:36.959844+00:00",
+     "updated_at": "2026-11-06T02:17:36.959851+00:00"
+    }
+   },
+   {
+    "id": 166,
+    "ts": "2026-11-06T02:17:38.118140+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "73",
+    "before": null,
+    "after": {
+     "id": 73,
+     "symbol": "INOD",
+     "kind": "note",
+     "text": "[loop-growth] r013 Q3 (11-05 amc; SEC 10-Q in Argus): revenue 95.6M +52.9% y/y, FY26 growth guide raised to ~42%+ (headline): note 49 exit tests NOT triggered, hold 107 sh, no add. Watch: net margin 10.8% (Q2 15.6%), and Q3 operating cash flow -84.0M after Q2's +127.2M prepayment - the windfall is reversing. Close 38.62, AH 41.73 (+8.0%). Break: growth < 25% or a top-customer loss.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:38.116720+00:00",
+     "updated_at": "2026-11-06T02:17:38.116728+00:00"
+    }
+   },
+   {
+    "id": 167,
+    "ts": "2026-11-06T02:17:39.420839+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "74",
+    "before": null,
+    "after": {
+     "id": 74,
+     "symbol": "GRND",
+     "kind": "note",
+     "text": "[loop-growth] r013 Q3 (11-05 amc): headline says revenue +22% y/y (about 141M on SEC Q3-25 115.8M), 2026 guide raised, 2027 outlook given. Argus has no actuals yet (Finnhub row still open, no 10-Q). Growth down from +32.5% in Q2 but above the 20% break (note 37). Hold, re-check margins when the 10-Q lands.",
+     "review_on": "2026-11-13",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:39.419420+00:00",
+     "updated_at": "2026-11-06T02:17:39.419427+00:00"
+    }
+   },
+   {
+    "id": 168,
+    "ts": "2026-11-06T02:17:40.670412+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "75",
+    "before": null,
+    "after": {
+     "id": 75,
+     "symbol": "RMBS",
+     "kind": "note",
+     "text": "[loop-growth] r013 11-05 close 69.68, -15.9% (cost 92.98, -25%) on a semis rout: SMH -11.2%, SOXX -12.2%, MU -17.5%, AMD -17.3% (Argus quotes). No company news in Argus. Price move, not a thesis break (note 46: exit if growth < 12% or op margin < 32% for two quarters; Q3 +22.3%, 38.3%). Hold, no add (at 11.25% of capital at cost).",
+     "review_on": "2027-02-03",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:40.669044+00:00",
+     "updated_at": "2026-11-06T02:17:40.669050+00:00"
+    }
+   },
+   {
+    "id": 169,
+    "ts": "2026-11-06T02:17:47.090037+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "76",
+    "before": null,
+    "after": {
+     "id": 76,
+     "symbol": "PODD",
+     "kind": "note",
+     "text": "[loop-growth] r013 Q3 (11-04 bmo; SEC 10-Q in Argus): revenue 842.0M +19.2% y/y (Q2 +23.5%, Q1 +33.9%: decelerating), op margin 22.5% vs 16.7% a year ago (expanding). Reaction +6.6% on 11-04, -5.4% on 11-05 with the market. Above the <15% break (note 29). Hold, no add while growth slows.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:47.088689+00:00",
+     "updated_at": "2026-11-06T02:17:47.088696+00:00"
+    }
+   },
+   {
+    "id": 170,
+    "ts": "2026-11-06T02:17:48.223018+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "77",
+    "before": null,
+    "after": {
+     "id": 77,
+     "symbol": "BLLN",
+     "kind": "note",
+     "text": "[loop-growth] r013 Q3 (11-04 amc; SEC 10-Q in Argus): revenue 123.0M +47.2% y/y (Q2 +64.4%), op margin 9.0% (Q2 5.0%); FY guide raised to 460-470M, MRD test launch 12-15 (headlines). Above the <30% break (note 36). Hold.",
+     "review_on": "2027-02-20",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:17:48.221576+00:00",
+     "updated_at": "2026-11-06T02:17:48.221582+00:00"
+    }
+   },
+   {
+    "id": 171,
+    "ts": "2026-11-06T02:18:05.125767+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "54",
+    "before": null,
+    "after": {
+     "id": 54,
+     "type": "BUY",
+     "symbol": "XOM",
+     "qty": 2.0,
+     "price": 165.75,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-06T02:18:04.888698+00:00",
+     "note": "r013: add to most-underweight target (XOM -0.44pp) with idle cash, post-market quote",
+     "source": "cli",
+     "external_id": "r013-income-xom-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 172,
+    "ts": "2026-11-06T02:18:18.539828+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "78",
+    "before": null,
+    "after": {
+     "id": 78,
+     "symbol": "XOM",
+     "kind": "thesis",
+     "text": "loop-income r013: bought 2 XOM @165.75 (post-mkt 11-05) with idle cash; XOM was the largest underweight (3.56% vs 4% target, -0.44pp). Thesis: 2.5% yield, ex-div 11-16 (1.03/sh), energy diversifies a defensive book (beta to SPY -0.73). Thesis break: dividend cut/freeze or Q4 EPS below 3.50. Position now 24 sh, cost 175.28.",
+     "review_on": "2026-11-17",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:18:18.538438+00:00",
+     "updated_at": "2026-11-06T02:18:18.538445+00:00"
+    }
+   },
+   {
+    "id": 173,
+    "ts": "2026-11-06T02:19:09.740415+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "79",
+    "before": null,
+    "after": {
+     "id": 79,
+     "symbol": "QUAL",
+     "kind": "note",
+     "text": "loop-macro r013 (11-05 21:15 ET): QUAL split 4:1 effective 11-05 (Yahoo prev close 56.755 = 227.02/4). Argus still holds 53 sh @225.70, so value 2,903.87 vs true 212 x 54.79 = 11,615.48; unrealized -9,058 and drift 'buy 7,703' are phantom. NOT recording a SPLIT txn: Argus's stored history is unadjusted (227 to 11-04) and performance assumes adjusted closes, so a SPLIT makes day 1 +300% (checked with compute_series). Hold 12% target; true day -3.46%. Revisit when Argus/Yahoo adjust.",
+     "review_on": "2026-11-09",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:19:09.739025+00:00",
+     "updated_at": "2026-11-06T02:19:09.739032+00:00"
+    }
+   },
+   {
+    "id": 174,
+    "ts": "2026-11-06T02:19:10.896704+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "80",
+    "before": null,
+    "after": {
+     "id": 80,
+     "symbol": "SPY",
+     "kind": "note",
+     "text": "loop-macro r013 (11-05 21:15 ET): no trade. Tech/AI unwind: SPX -4.36%, NDX -6.36%, XLK -8.0%, SMH -11.2%, MTUM -8.2%; VIX 28.2 (+70%), VIX/VIX3M 1.10 inverted, F&G 22 (1.2 before breadth loaded). Credit did not confirm (HYG -0.31%, LQD +0.15%); 10Y -6bp 4.84%, 2s10s +38bp; claims 189K. Book true day -1.67% vs SPY -4.41% (incl. QUAL at 212 sh). Plan after NFP 11-06: if NFP > 0, HYG holds > 76.5 and VIX/VIX3M < 1.0 at the close, SELL 29 SGOV / BUY 4 SPY (sim 11-05: net cash -18.95, realized -4.63; SPY 10.8 -> 14.1%). If NFP negative or HYG breaks, stay. XLE->RSP (note 62/69) stays staged: RSP 20d corr to SPY 0.77, adds beta into the drawdown.",
+     "review_on": "2026-11-06",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-06T02:19:10.895328+00:00",
+     "updated_at": "2026-11-06T02:19:10.895335+00:00"
+    }
+   },
+   {
+    "id": 175,
+    "ts": "2026-11-06T02:19:39.841196+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "9",
+    "before": null,
+    "after": {
+     "symbol": "JPM",
+     "kind": "day_loss_pct",
+     "threshold": 4.0
     }
    }
   ]
