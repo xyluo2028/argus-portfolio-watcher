@@ -6,7 +6,8 @@ Sign-in is on once any account exists (argus.services.accounts) or `ARGUS_TOKEN`
 - the `argus_session` cookie the UI gets from signing in with a username and password;
 - the `argus_token` cookie the UI gets from signing in with the server token.
 The server token acts as the oldest account. The UI's static files, `/api/health` and the auth
-endpoints stay public: they hold no portfolio data. With neither accounts nor a token, everything is
+endpoints stay public: they hold no portfolio data. (`/api/auth/setup` makes the first account only,
+and asks for the token when one is set.) With neither accounts nor a token, everything is
 open, which is only acceptable while the server listens on loopback (see `serve`).
 
 The middleware leaves who the request acts as in `scope["state"]["principal"]`, and runs the request
@@ -28,7 +29,7 @@ from argus.services.accounts import AccountService, Principal
 TOKEN_COOKIE = "argus_token"
 SESSION_COOKIE = "argus_session"
 COOKIE_MAX_AGE = 90 * 24 * 3600
-PUBLIC_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+PUBLIC_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout", "/api/auth/setup"}
 OPEN = Principal(None, None, "open")
 
 

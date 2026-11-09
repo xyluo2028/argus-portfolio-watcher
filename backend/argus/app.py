@@ -47,7 +47,7 @@ from argus.services import performance as performance_mod
 from argus.services.market import MarketService, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
-from argus.services.snapshot import SnapshotService
+from argus.services.snapshot import AccountSnapshots, SnapshotService
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
@@ -126,6 +126,7 @@ class Argus:
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
+        self.account_snapshots = AccountSnapshots(self.engine, on_change=self._records_replaced)
         self.accounts = AccountService(self.engine)
         self.factors = FrenchFactors(self.settings.cache_dir)
         self.macro = MacroProvider(cache_dir=self.settings.cache_dir)
@@ -136,6 +137,11 @@ class Argus:
         self._research: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, bundle)
         self._valuation: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, DCF inputs)
         self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
+
+    def _records_replaced(self) -> None:
+        """An account's records were swapped wholesale: drop what is cached on their revisions."""
+        self.portfolios.revision += 1
+        self.watchlists.revision += 1
 
     def run_background(self, name: str, fn: Callable[[], object]) -> bool:
         """Run `fn` on a daemon thread unless a job with this name is already running."""

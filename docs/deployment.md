@@ -118,7 +118,10 @@ inside WSL: both connect outbound, which avoids Windows' localhost forwarding.
 
 ## Accounts and API keys
 
-There is one kind of account; a bot is an account you create for it. Manage them on the server:
+There is one kind of account; a bot is an account you create for it. The first one can be made in
+the web UI's first-run setup (it asks for `ARGUS_TOKEN` when one is set); after that the owner, the
+oldest account, manages the rest on the Account page, signed in with its password or the token (never
+an API key). Or manage them on the server:
 
 ```bash
 uv run argus user add me                       # asks for a password; make your own account first
@@ -150,7 +153,9 @@ uv run argus user disable trader-bot           # sessions and keys stop working 
 | Portfolios (transactions, targets, performance history) | The account that created it, plus accounts it's shared with (read-only) |
 | Watchlists, alerts, notes, peer lists, saved DCF models | Only the account that created them |
 | Market data, the screener, market context, the events calendar | Everyone |
-| Snapshot dump and restore | Only the CLI (a snapshot holds every account's records) |
+| Whole-server snapshot (`argus snapshot dump/load`) | Only the CLI: it holds every account's records |
+| Back up / Restore on the Data page | Each account, its own records only; a restore replaces only those |
+| Creating accounts, their keys and passwords | The CLI; in the web UI the first-run setup, then the owner |
 
 - **The first account takes over** everything recorded before any account existed (and, when you
   upgrade to this version with accounts already set up, the oldest account does).

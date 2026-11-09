@@ -32,7 +32,7 @@ def test_api_and_mcp_need_the_token(client):
 def test_public_paths_stay_open(client):
     assert client.get("/api/health").status_code == 200
     assert client.get("/api/auth/status").json() == {"required": True, "authenticated": False, "methods": ["token"],
-                                                     "account": None}
+                                                     "account": None, "setup": True, "owner": False}
     assert client.get("/").status_code == 200  # UI shell (or the "not built" note): no data in it
 
 

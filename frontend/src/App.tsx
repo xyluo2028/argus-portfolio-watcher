@@ -1,13 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type AuthStatus, type PortfolioRef, type SignInMethod } from "./api";
+import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type AuthStatus, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
+import { NewPasswordFields, passwordReady } from "./components/PasswordFields";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
 import { useLive } from "./useLive";
 
 // Every page but the dashboard loads on first visit, so the first screen downloads less.
+const Account = lazy(() => import("./pages/Account").then((m) => ({ default: m.Account })));
 const Alerts = lazy(() => import("./pages/Alerts").then((m) => ({ default: m.Alerts })));
 const Screener = lazy(() => import("./pages/Screener").then((m) => ({ default: m.Screener })));
 const Markets = lazy(() => import("./pages/Markets").then((m) => ({ default: m.Markets })));
@@ -32,24 +34,20 @@ export function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
   if (auth === null) return null;
-  if (!auth.authenticated) return <SignIn methods={auth.methods} onDone={() => window.location.reload()} />;
+  if (!auth.authenticated) return <SignIn auth={auth} onDone={() => window.location.reload()} />;
   return <Main auth={auth} />;
 }
 
-function SignIn({ methods, onDone }: { methods: SignInMethod[]; onDone: () => void }) {
-  const [method, setMethod] = useState<SignInMethod>(methods.includes("password") ? "password" : "token");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
+/** A form that calls `action` and reports its error; used by both sign-in sections. */
+function useSubmit(action: () => Promise<unknown>, onDone: () => void) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ready = method === "password" ? username.trim() !== "" && password !== "" : token.trim() !== "";
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api.login(method === "password" ? { username: username.trim(), password } : { token: token.trim() });
+      await action();
       onDone();
     } catch (err) {
       setError((err as ApiError).message);
@@ -57,41 +55,94 @@ function SignIn({ methods, onDone }: { methods: SignInMethod[]; onDone: () => vo
       setBusy(false);
     }
   };
-  const other: SignInMethod = method === "password" ? "token" : "password";
+  return { error, setError, busy, submit };
+}
+
+/** Two ways in, side by side: an account (or, before there is one, making it), and the server token. */
+function SignIn({ auth, onDone }: { auth: AuthStatus; onDone: () => void }) {
+  const hasToken = auth.methods.includes("token");
   return (
-    <main style={{ maxWidth: 420, margin: "12vh auto 0", padding: "0 16px" }}>
-      <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
-        <div className="brand"><span className="brand-dot" aria-hidden />Argus</div>
-        {method === "password" ? (
-          <>
-            <label className="field">Username
-              <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus
-                     value={username} onChange={(e) => setUsername(e.target.value)} />
-            </label>
-            <label className="field">Password
-              <input className="input" type="password" autoComplete="current-password" value={password}
-                     onChange={(e) => setPassword(e.target.value)} />
-            </label>
-          </>
-        ) : (
-          <>
-            <label className="field">Access token
-              <input className="input" type="password" autoComplete="current-password" autoFocus value={token}
-                     onChange={(e) => setToken(e.target.value)} />
-            </label>
-            <p className="small muted" style={{ margin: 0 }}>The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>.</p>
-          </>
-        )}
-        <p className="small muted" style={{ margin: 0 }}>You stay signed in on this browser for 90 days.</p>
-        {error && <div className="error">{error}</div>}
-        <button className="btn primary" disabled={busy || !ready}>{busy ? "Signing in…" : "Sign in"}</button>
-        {methods.includes(other) && (
-          <button type="button" className="btn" onClick={() => { setMethod(other); setError(null); }}>
-            {other === "token" ? "Use the server token instead" : "Use a username and password"}
-          </button>
-        )}
-      </form>
+    <main style={{ maxWidth: 760, margin: "10vh auto 0", padding: "0 16px" }}>
+      <div className="brand" style={{ marginBottom: 16 }}><span className="brand-dot" aria-hidden />Argus</div>
+      <div className="grid-2" style={{ alignItems: "start" }}>
+        {auth.setup ? <CreateFirstAccount needsToken={hasToken} onDone={onDone} /> : <PasswordSignIn onDone={onDone} />}
+        {hasToken && <TokenSignIn hasAccounts={!auth.setup} onDone={onDone} />}
+      </div>
+      <p className="small muted">You stay signed in on this browser for 90 days.</p>
     </main>
+  );
+}
+
+function PasswordSignIn({ onDone }: { onDone: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const { error, busy, submit } = useSubmit(() => api.login({ username: username.trim(), password }), onDone);
+  return (
+    <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
+      <h2 style={{ margin: 0 }}>Account</h2>
+      <label className="field">Username
+        <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus
+               value={username} onChange={(e) => setUsername(e.target.value)} />
+      </label>
+      <label className="field">Password
+        <input className="input" type="password" autoComplete="current-password" value={password}
+               onChange={(e) => setPassword(e.target.value)} />
+      </label>
+      {error && <div className="error">{error}</div>}
+      <button className="btn primary" disabled={busy || !username.trim() || !password}>{busy ? "Signing in…" : "Sign in"}</button>
+    </form>
+  );
+}
+
+function CreateFirstAccount({ needsToken, onDone }: { needsToken: boolean; onDone: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [token, setToken] = useState("");
+  const { error, busy, submit } = useSubmit(
+    () => api.setup({ username: username.trim(), password, token: needsToken ? token.trim() : undefined }), onDone);
+  const ready = username.trim() !== "" && passwordReady(password, confirm) && (!needsToken || token.trim() !== "");
+  return (
+    <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
+      <h2 style={{ margin: 0 }}>Create your account</h2>
+      <p className="small muted" style={{ margin: 0 }}>
+        Argus has no accounts yet. The first one is the owner: it takes over every portfolio, watchlist, alert and
+        note recorded so far, and can add accounts for bots or other people later.
+      </p>
+      <label className="field">Username
+        <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus
+               value={username} onChange={(e) => setUsername(e.target.value)} />
+      </label>
+      <NewPasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
+      {needsToken && (
+        <label className="field">Access token
+          <input className="input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
+          <span className="small muted">The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>, to show it's your server.</span>
+        </label>
+      )}
+      {error && <div className="error">{error}</div>}
+      <button className="btn primary" disabled={busy || !ready}>{busy ? "Creating…" : "Create account and sign in"}</button>
+    </form>
+  );
+}
+
+function TokenSignIn({ hasAccounts, onDone }: { hasAccounts: boolean; onDone: () => void }) {
+  const [token, setToken] = useState("");
+  const { error, busy, submit } = useSubmit(() => api.login({ token: token.trim() }), onDone);
+  return (
+    <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
+      <h2 style={{ margin: 0 }}>Server token</h2>
+      <label className="field">Access token
+        <input className="input" type="password" autoComplete="current-password" value={token}
+               onChange={(e) => setToken(e.target.value)} />
+      </label>
+      <p className="small muted" style={{ margin: 0 }}>
+        The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>.
+        {hasAccounts ? " It signs you in as the owner (the oldest account)." : ""}
+      </p>
+      {error && <div className="error">{error}</div>}
+      <button className="btn primary" disabled={busy || !token.trim()}>{busy ? "Signing in…" : "Sign in"}</button>
+    </form>
   );
 }
 
@@ -160,6 +211,7 @@ function Main({ auth }: { auth: AuthStatus }) {
           <NavLink to="/dcf">DCF</NavLink>
           <NavLink to="/alerts">Alerts{live?.alerts_fired?.length ? ` · ${live.alerts_fired.length}` : ""}</NavLink>
           <NavLink to="/data">Data</NavLink>
+          <NavLink to="/account">Account</NavLink>
           {auth.required && <button className="nav-sign-out" title={signedInAs} onClick={signOut}>{signOutLabel}</button>}
         </nav>
         {portfolios && portfolios.length > 0 && (
@@ -182,6 +234,7 @@ function Main({ auth }: { auth: AuthStatus }) {
           : portfolios.length === 0 ? (
             <Routes>
               <Route path="/data" element={<Data onPortfoliosChanged={loadPortfolios} />} />
+              <Route path="/account" element={<Account auth={auth} />} />
               <Route path="*" element={
                 <div className="card">
                   <h2>No portfolios yet</h2>
@@ -204,6 +257,7 @@ function Main({ auth }: { auth: AuthStatus }) {
               <Route path="/screener" element={<Screener />} />
               <Route path="/alerts" element={<Alerts live={live} />} />
               <Route path="/data" element={<Data onPortfoliosChanged={loadPortfolios} />} />
+              <Route path="/account" element={<Account auth={auth} />} />
             </Routes>
           )}
         </Suspense>

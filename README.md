@@ -60,8 +60,14 @@ development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite prox
 ## Accounts and bots
 
 Argus starts without sign-in, for use on your own machine. Create an account to turn sign-in on for
-every request: the web UI asks for a username and password, and bots, scripts and MCP clients send
-an account's API key.
+every request: the web UI asks for a username and password (or the server token), and bots, scripts
+and MCP clients send an account's API key.
+
+In the web UI: until an account exists, the sign-in page (or, without `ARGUS_TOKEN`, the **Account**
+page) offers **Create your account**, which asks for `ARGUS_TOKEN` when one is set. That first
+account is the owner: its Account page adds accounts for bots or people, makes their API keys,
+resets passwords and disables accounts. Every account changes its own password and manages its own
+keys there. Or from the terminal:
 
 ```bash
 uv run argus user add me                                  # asks for a password
@@ -130,7 +136,8 @@ Every command accepts `--json` and returns `{"ok": true, "data": ...}` or
 `{"ok": false, "error": {"code", "message", "hint"}}`, which is the format agents use.
 
 The web UI's **Data** page does the same: choose a CSV, pick the "already owned through" date from
-the lot dates, check the preview, then import.
+the lot dates, check the preview, then import. It also backs up and restores your own account's
+records (below).
 
 ## Back up and move your data
 
@@ -141,10 +148,15 @@ uv run argus snapshot load backup.json           # restore into an empty instanc
 uv run argus snapshot load backup.json --replace # wipe existing records first (backed up automatically)
 ```
 
-A snapshot holds every account's records: portfolios, transactions (including deleted ones),
-watchlists, notes, alerts, targets, shares and the audit log, plus the accounts and API keys (as
-hashes). That's why it's CLI only. Market data caches are not included; they refill on use. A
-snapshot from before accounts existed loads into the oldest account.
+That snapshot is the whole server: every account's portfolios, transactions (including deleted
+ones), watchlists, notes, alerts, targets, shares and the audit log, plus the accounts and API keys
+(as hashes). That's why it's CLI only. A snapshot from before accounts existed loads into the oldest
+account.
+
+The web UI's **Data** page backs up and restores only your own account: your portfolios,
+transactions, targets, watchlists, notes, alerts, peer lists and DCF models. Restoring replaces only
+your records (saved to `data/snapshots/` first) and never touches another account; the file loads
+into any account on any instance. Market data caches are in neither; they refill on use.
 
 ## Running it always-on
 

@@ -295,6 +295,41 @@ def test_a_snapshot_from_before_accounts_goes_to_the_oldest_account(argus, two, 
         assert argus.valuation_models()[0]["symbol"] == "AAA"
 
 
+def test_restoring_your_snapshot_never_touches_another_account(argus, two, tmp_path):
+    with access.acting_as(two["me"]):
+        mine = argus.account_snapshots.export("me")
+    assert {t: len(v) for t, v in mine["tables"].items() if v} == {
+        "portfolio": 1, "txn": 1, "target": 1, "watchlist": 1, "watchlist_item": 1, "alert": 1, "alert_event": 1,
+        "note": 1, "peer_list": 1, "valuation_model": 1, "instrument": 2}
+    with access.acting_as(two["bot"]):
+        assert argus.account_snapshots.export("bot")["tables"]["portfolio"] == []
+        argus.account_snapshots.restore(mine, dry_run=False)  # a copy, with new ids, owned by the bot
+        assert [p["name"] for p in argus.portfolios.list_portfolios()] == ["growth"]
+        assert argus.portfolios.get_portfolio("growth").id != two["pid"]
+        assert list(argus.portfolios.positions("growth")) == ["AAA"] and len(argus.notes.list()) == 1
+        empty = {"format": "argus-account-snapshot", "version": 1, "tables": {}}
+        report = argus.account_snapshots.restore(empty, replace=True, dry_run=False, backup_dir=tmp_path, username="bot")
+        assert report["will_remove"]["portfolio"] == 1 and report["backup"].endswith(".json")
+        assert argus.portfolios.list_portfolios() == [] and argus.notes.list() == []
+    with access.acting_as(two["me"]):  # mine are all still there, under the same ids
+        assert argus.portfolios.get_portfolio("growth").id == two["pid"]
+        assert argus.account_snapshots.export("me")["tables"] == mine["tables"]
+
+
+def test_an_old_whole_instance_snapshot_loads_into_your_account(argus, two):
+    doc = argus.snapshots.export()
+    doc["version"] = 1
+    for t in ("account", "api_key", "portfolio_share"):
+        doc["tables"].pop(t)
+    with access.acting_as(two["bot"]):
+        argus.account_snapshots.restore(doc, dry_run=False)
+        assert [p["name"] for p in argus.portfolios.list_portfolios()] == ["growth"]
+    with access.acting_as(two["bot"]):
+        doc["version"] = 2
+        with pytest.raises(ArgusError, match="whole-instance"):
+            argus.account_snapshots.restore(doc)
+
+
 # -- leak tests: every API route and MCP tool as a second account --------------------------------
 @pytest.fixture
 def leak(argus, two):
@@ -330,6 +365,11 @@ NOT_PER_ACCOUNT = {
     ("GET", "/api/compare/history"), ("GET", "/api/health"), ("GET", "/api/auth/status"),
     ("POST", "/api/auth/login"), ("POST", "/api/auth/logout"), ("GET", "/api/account"),
     ("PUT", "/api/account/password"), ("POST", "/api/account/keys"), ("DELETE", "/api/account/keys/{key_id}"),
+    ("POST", "/api/auth/setup"),
+    # The owner's account management: refused to anyone else (tests/test_accounts.py).
+    ("GET", "/api/accounts"), ("POST", "/api/accounts"), ("PATCH", "/api/accounts/{username}"),
+    ("PUT", "/api/accounts/{username}/password"), ("POST", "/api/accounts/{username}/keys"),
+    ("DELETE", "/api/accounts/keys/{key_id}"),
 }
 
 
@@ -393,6 +433,9 @@ def test_every_api_route_refuses_or_hides_another_accounts_records(leak):
         ("GET", "/api/peers/{symbol}"): ("GET", "/api/peers/AAA?metrics=false", None),
         ("PUT", "/api/peers/{symbol}"): ("PUT", "/api/peers/AAA", {"peers": None}),
         ("GET", "/api/search"): ("GET", "/api/search?q=AAA", None),
+        ("GET", "/api/snapshot"): ("GET", "/api/snapshot", None),
+        ("POST", "/api/snapshot/restore"): ("POST", "/api/snapshot/restore?dry_run=false&replace=true",
+                                            {"format": "argus-account-snapshot", "version": 1, "tables": {}}),
         ("POST", "/api/import/investing"): ("POST", "/api/import/investing", {
             "filename": "x.csv", "portfolio": "bot-import", "opening_through": "2026-01-02",
             "content": (FIXTURES / "sample_Holdings_01152026.csv").read_text(encoding="utf-8-sig")}),

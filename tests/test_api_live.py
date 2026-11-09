@@ -91,10 +91,22 @@ def test_edit_transaction_endpoint_and_all_view_listing(client):
     assert client.patch(f"/api/transactions/{txn_id}", json={"qty": 1}).status_code == 404  # replaced row
 
 
-def test_snapshots_are_cli_only(client):
-    """A snapshot holds every account's records, so no signed-in account may download or load one."""
-    assert client.get("/api/snapshot").status_code == 404
-    assert client.post("/api/snapshot/restore", json={}).status_code in (404, 405)
+def test_snapshot_download_and_restore_your_own_records(client):
+    client.post("/api/portfolios/growth/transactions",
+                json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
+    r = client.get("/api/snapshot")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    doc = r.json()
+    assert doc["format"] == "argus-account-snapshot" and "account" not in doc["tables"]
+    preview = client.post("/api/snapshot/restore", json=doc).json()  # dry run by default
+    assert preview["dry_run"] and preview["will_remove"] == {"portfolio": 1, "txn": 1}
+    assert client.post("/api/snapshot/restore?dry_run=false", json=doc).status_code == 409
+    done = client.post("/api/snapshot/restore?dry_run=false&replace=true", json=doc).json()
+    assert done["backup"].endswith(".json")
+    assert client.get("/api/portfolios/growth").json()["totals"]["position_count"] == 1
+    assert client.post("/api/snapshot/restore", json={"nope": 1}).status_code == 400
+    whole = {"format": "argus-snapshot", "version": 2, "tables": {"account": []}}
+    assert "argus snapshot load" in client.post("/api/snapshot/restore", json=whole).json()["error"]["hint"]
     assert client.get("/api/no-such-route").json()["error"]["code"] == "NOT_FOUND"  # not the web UI's page
 
 

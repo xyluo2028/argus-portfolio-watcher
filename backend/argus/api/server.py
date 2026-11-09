@@ -9,10 +9,10 @@ import asyncio
 import os
 import json
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path, PureWindowsPath
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Body, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -132,6 +132,25 @@ class LoginBody(BaseModel):
 class PasswordBody(BaseModel):
     current_password: str
     new_password: str
+
+
+class SetupBody(BaseModel):
+    username: str
+    password: str
+    token: str | None = None  # required when ARGUS_TOKEN is set (or send it as the cookie / Bearer)
+
+
+class NewAccountBody(BaseModel):
+    username: str
+    password: str | None = None  # None: API keys only
+
+
+class AccountPatch(BaseModel):
+    disabled: bool
+
+
+class ResetPasswordBody(BaseModel):
+    password: str
 
 
 class KeyBody(BaseModel):
@@ -511,7 +530,20 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         name = Path(PureWindowsPath(body.filename).name)  # drop any folders (/ or \\); the name may hold the portfolio
         return await run(argus.import_investing, name, body.portfolio or None, cutoff, body.dry_run, True, body.content)
 
-    # Snapshots (dump/restore) cover every account's records, so they are CLI only: `argus snapshot`.
+    # -- snapshot: your own records only (the whole instance is `argus snapshot`, CLI only) --------
+    @app.get("/api/snapshot")
+    async def snapshot_download(request: Request):
+        who = getattr(request.state, "principal", OPEN).username
+        doc = await run(argus.account_snapshots.export, who)
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in who or "argus")
+        name = f"argus-{safe}-{datetime.now():%Y%m%d-%H%M%S}.json"
+        return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/api/snapshot/restore")
+    async def snapshot_restore(request: Request, doc: dict = Body(...), replace: bool = False, dry_run: bool = True):
+        who = getattr(request.state, "principal", OPEN).username
+        return await run(argus.account_snapshots.restore, doc, replace, dry_run,
+                         argus.settings.data_dir / "snapshots", who)
 
     @app.get("/api/health")
     async def health():
@@ -525,7 +557,11 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
             has_accounts = argus.accounts.exist()
             return {"required": has_accounts or bool(settings.token), "authenticated": p is not None,
                     "methods": [m for m, on in (("password", has_accounts), ("token", bool(settings.token))) if on],
-                    "account": {"id": p.account_id, "username": p.username} if p and p.account_id else None}
+                    "account": {"id": p.account_id, "username": p.username} if p and p.account_id else None,
+                    # No account yet: the UI offers to make the first one (asking for the token, if set).
+                    "setup": not has_accounts,
+                    # The oldest account manages the others (not over an API key).
+                    "owner": bool(p and p.via != "key" and argus.accounts.is_owner(p.account_id))}
         return await run(status)
 
     def _cookie(resp: JSONResponse, request: Request, name: str, value: str) -> None:
@@ -558,6 +594,25 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         throttle.succeeded(key)
         resp = JSONResponse({"ok": True, "required": True, "account": {"id": p.account_id, "username": p.username}})
         _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, p.account_id))
+        return resp
+
+    @app.post("/api/auth/setup", status_code=201)
+    async def setup(body: SetupBody, request: Request):
+        """First run: make the first account and sign in with it. It takes over every record so far."""
+        if await run(argus.accounts.exist):
+            raise ArgusError("ALREADY_EXISTS", "Argus already has an account.",
+                             hint="Sign in with it; its owner can add more on the Account page.")
+        if settings.token:  # whoever reaches the server must prove they hold the server's secret
+            bearer, _, cookie = credentials(dict(request.headers))
+            if throttle.blocked("token"):
+                raise ArgusError("TOO_MANY_ATTEMPTS", "Too many failed sign-ins.", hint="Wait 15 minutes.")
+            if not any(token_ok(settings.token, (t or "").strip()) for t in (body.token, bearer, cookie)):
+                await _refuse("token", "Wrong token.")
+            throttle.succeeded("token")
+        a = await run(argus.accounts.create, body.username, body.password, "ui", True)
+        resp = JSONResponse({"ok": True, "account": {"id": a["id"], "username": a["username"]},
+                             "claimed": a["claimed"]}, status_code=201)
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, a["id"]))
         return resp
 
     @app.post("/api/auth/logout")
@@ -593,6 +648,49 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def revoke_key(key_id: int, request: Request):
         p = own_account(request, signed_in=True)
         return await run(argus.accounts.revoke_key, key_id, p.account_id, "ui")
+
+    # -- everyone's accounts: the owner (oldest account) only ------------------------------
+    def owner(request: Request) -> Principal:
+        p = own_account(request, signed_in=True)
+        if not argus.accounts.is_owner(p.account_id):
+            raise ArgusError("FORBIDDEN", "Only Argus's owner (its oldest account) can manage accounts.",
+                             hint="Or use `argus user` / `argus key` on the server.")
+        return p
+
+    @app.get("/api/accounts")
+    async def accounts(request: Request):
+        await run(owner, request)
+        return await run(lambda: {"accounts": argus.accounts.list_accounts(),
+                                  "keys": argus.accounts.list_keys(include_revoked=False)})
+
+    @app.post("/api/accounts", status_code=201)
+    async def create_account(body: NewAccountBody, request: Request):
+        await run(owner, request)
+        return await run(argus.accounts.create, body.username, body.password, "ui")
+
+    @app.patch("/api/accounts/{username}")
+    async def update_account(username: str, body: AccountPatch, request: Request):
+        p = await run(owner, request)
+        if body.disabled and username.strip().lower() == p.username:
+            raise ArgusError("INVALID_ARG", "You can't disable your own account here.")
+        return await run(argus.accounts.set_disabled, username, body.disabled, "ui")
+
+    @app.put("/api/accounts/{username}/password")
+    async def reset_password(username: str, body: ResetPasswordBody, request: Request):
+        p = await run(owner, request)
+        if username.strip().lower() == p.username:
+            raise ArgusError("INVALID_ARG", "Change your own password with your current one.")
+        return await run(argus.accounts.set_password, username, body.password, None, "ui")
+
+    @app.post("/api/accounts/{username}/keys", status_code=201)
+    async def create_account_key(username: str, body: KeyBody, request: Request):
+        await run(owner, request)
+        return await run(argus.accounts.create_key, username, body.name, body.expires_days, "ui")
+
+    @app.delete("/api/accounts/keys/{key_id}")
+    async def revoke_any_key(key_id: int, request: Request):
+        await run(owner, request)
+        return await run(argus.accounts.revoke_key, key_id, None, "ui")
 
     app.mount("/mcp", mcp_app)
 
