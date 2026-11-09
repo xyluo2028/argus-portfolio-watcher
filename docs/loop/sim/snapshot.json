@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-06T02:58:16.785602+00:00",
+ "created_at": "2026-11-09T02:45:46.782063+00:00",
  "tables": {
   "portfolio": [
    {
@@ -320,6 +320,15 @@
     "sector": "ETF",
     "industry": "Large Blend",
     "updated_at": "2026-10-20T15:22:59.074775+00:00"
+   },
+   {
+    "symbol": "RDDT",
+    "name": "REDDIT INC-CL A",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Communication Services",
+    "industry": "Internet Content & Information",
+    "updated_at": "2026-11-09T02:19:45.036462+00:00"
    },
    {
     "symbol": "RMBS",
@@ -1357,6 +1366,54 @@
     "external_id": "r013-income-xom-buy",
     "deleted": false,
     "created_at": "2026-11-06T02:18:05.123484+00:00"
+   },
+   {
+    "id": 55,
+    "portfolio_id": 3,
+    "type": "SPLIT",
+    "symbol": "QUAL",
+    "qty": 4.0,
+    "price": 0.0,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-05T14:30:00+00:00",
+    "note": null,
+    "source": "cli",
+    "external_id": null,
+    "deleted": false,
+    "created_at": "2026-11-09T02:14:52.490087+00:00"
+   },
+   {
+    "id": 56,
+    "portfolio_id": 1,
+    "type": "SELL",
+    "symbol": "GRND",
+    "qty": 487.0,
+    "price": 13.41,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-09T02:19:42.113145+00:00",
+    "note": "r014 exit: Q3 op margin 2.9% (39.1% a yr ago), GAAP EPS -0.04, FY26 EPS est cut 0.53->0.32, shelf filed, chairman selling; Fri post-market quote",
+    "source": "cli",
+    "external_id": "r014-growth-grnd-sell",
+    "deleted": false,
+    "created_at": "2026-11-09T02:19:42.378684+00:00"
+   },
+   {
+    "id": 57,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "RDDT",
+    "qty": 72.0,
+    "price": 95.65,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-09T02:19:43.233943+00:00",
+    "note": "r014 starter: Q3 rev +53% y/y, op margin 29%, P/E 19 at bottom of own range; Fri post-market quote",
+    "source": "cli",
+    "external_id": "r014-growth-rddt-buy",
+    "deleted": false,
+    "created_at": "2026-11-09T02:19:43.476652+00:00"
    }
   ],
   "target": [
@@ -2599,6 +2656,50 @@
     "created_by": "cli",
     "created_at": "2026-11-06T02:19:10.895328+00:00",
     "updated_at": "2026-11-06T02:19:10.895335+00:00"
+   },
+   {
+    "id": 81,
+    "symbol": "BND",
+    "kind": "note",
+    "text": "loop-income r014 (11-08 21:15 ET, 11-06 close): no trade. Payrolls 165K vs 65K, AHE 0.4% hot, 10y 4.86% (trigger 5.1% not hit). All drift within +/-0.38pp of a 2pp band. Bond sleeve 34.5%, empirical duration ~5 (BND 5.4, VCIT 5.7, VGIT 4.8, SCHP 4.0 from Argus 1y history vs ^TNX) = ~$900 per +50bp. Hold through CPI 11-10; add bonds only if 10y >5.1% and drift calls for it. Cash $49.70.",
+    "review_on": "2026-11-13",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-09T02:18:26.824449+00:00",
+    "updated_at": "2026-11-09T02:18:26.824455+00:00"
+   },
+   {
+    "id": 82,
+    "symbol": "SPY",
+    "kind": "note",
+    "text": "loop-macro r014 (11-08 21:15 ET): recorded QUAL SPLIT 4:1 (txn 55): book now 96,993.64, TWR -1.67% vs SPY -4.39% (+2.72 pp), no 11-05 jump. NFP 165K vs 65K, UR 4.1%, AHE +0.4% m/m; Fri SPX +0.31%, NDX +1.35%, VIX 25.6, VIX/VIX3M 1.04 (still inverted), HYG 77.23, 10Y 4.86 (+2bp), 2s10s 35bp; WTI 90.6 (wk -6%), XLE wk -12%. No trades: note 80 SPY add fails its VIX/VIX3M<1 leg; XLE->RSP (note 62) passes its WTI<98/ISM-prices legs but hot wages + CPI 11-10 (prev 3.7% y/y) argue for keeping the inflation hedge through the print. Plan after CPI: core CPI <=0.2% m/m and VIX/VIX3M<1 -> SELL 29 SGOV/BUY 4 SPY; core <=0.2% and WTI<90 -> SELL 30 XLE/BUY 9 RSP (sim 11-06: net cash -95.85, realized -174.30, XLE 7.5%, RSP 2.0%). Hot core (>=0.4%) -> stay, review duration (IEF 11.9%).",
+    "review_on": "2026-11-11",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-09T02:19:55.127283+00:00",
+    "updated_at": "2026-11-09T02:19:55.127288+00:00"
+   },
+   {
+    "id": 83,
+    "symbol": "GRND",
+    "kind": "note",
+    "text": "[loop-growth] r014 EXIT 487 @ 13.41 (Fri post-market; realized -457.78). 10-Q now in Argus: Q3 revenue 141.4M +22.1% y/y (Q2 +32.5%, Q1 +38.3%), operating margin 2.9% vs 39.1% a year ago, net loss -6.6M (GAAP EPS -0.04). FY26 EPS consensus cut 0.53 -> 0.32 in 7 days, FY27 0.69 -> 0.60. Shelf prospectus filed 11-06; chairman Zage sold ~1.0M sh ($13.5M) 10-16..11-03. Formal break is margin <20% for two quarters, but alignment (insider ownership) and margin pillars both weakened at once while growth halves - not a compounder at this point.",
+    "review_on": null,
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-09T02:19:55.826146+00:00",
+    "updated_at": "2026-11-09T02:19:55.826152+00:00"
+   },
+   {
+    "id": 84,
+    "symbol": "RDDT",
+    "kind": "thesis",
+    "text": "[loop-growth] Starter 72 @ 95.65 (r014, Fri post-market). Thesis: ad + data-licensing platform still compounding: SEC revenue Q1-Q3'26 +69%/+61%/+53% y/y (Q3 895.0M), operating margin 29.2% (23.7% a yr ago), Q3 FCF 362.6M (TTM 1.20B, ~6.5% FCF yield), no debt, ROE 31%. Stock -58.6% YTD and -29.2% on Q3 (10-29 amc) despite beat; P/E 19.4 and P/S 5.9 at the bottom of its own history (0th pct), about META's multiples at 2x the growth. Consensus FY27 EPS 6.86 (-3.5% in 7d), mean target 151. Risks: search-traffic dependence (Google/AI answers), decelerating growth, insiders net sellers ($235M, own 0.7%), short interest 14.8% of float, beta 2.2. Break: revenue growth < 30% y/y or operating margin < 20%. Size: 7% of capital, add after Q4 if growth holds >40%.",
+    "review_on": "2027-02-04",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-09T02:19:56.916954+00:00",
+    "updated_at": "2026-11-09T02:19:56.916960+00:00"
    }
   ],
   "peer_list": [],
@@ -6165,6 +6266,155 @@
      "symbol": "JPM",
      "kind": "day_loss_pct",
      "threshold": 4.0
+    }
+   },
+   {
+    "id": 176,
+    "ts": "2026-11-09T02:14:52.492265+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "55",
+    "before": null,
+    "after": {
+     "id": 55,
+     "type": "SPLIT",
+     "symbol": "QUAL",
+     "qty": 4.0,
+     "price": 0.0,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-05T14:30:00+00:00",
+     "note": null,
+     "source": "cli",
+     "external_id": null,
+     "deleted": false
+    }
+   },
+   {
+    "id": 177,
+    "ts": "2026-11-09T02:18:26.825805+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "81",
+    "before": null,
+    "after": {
+     "id": 81,
+     "symbol": "BND",
+     "kind": "note",
+     "text": "loop-income r014 (11-08 21:15 ET, 11-06 close): no trade. Payrolls 165K vs 65K, AHE 0.4% hot, 10y 4.86% (trigger 5.1% not hit). All drift within +/-0.38pp of a 2pp band. Bond sleeve 34.5%, empirical duration ~5 (BND 5.4, VCIT 5.7, VGIT 4.8, SCHP 4.0 from Argus 1y history vs ^TNX) = ~$900 per +50bp. Hold through CPI 11-10; add bonds only if 10y >5.1% and drift calls for it. Cash $49.70.",
+     "review_on": "2026-11-13",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-09T02:18:26.824449+00:00",
+     "updated_at": "2026-11-09T02:18:26.824455+00:00"
+    }
+   },
+   {
+    "id": 178,
+    "ts": "2026-11-09T02:19:42.380919+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "56",
+    "before": null,
+    "after": {
+     "id": 56,
+     "type": "SELL",
+     "symbol": "GRND",
+     "qty": 487.0,
+     "price": 13.41,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-09T02:19:42.113145+00:00",
+     "note": "r014 exit: Q3 op margin 2.9% (39.1% a yr ago), GAAP EPS -0.04, FY26 EPS est cut 0.53->0.32, shelf filed, chairman selling; Fri post-market quote",
+     "source": "cli",
+     "external_id": "r014-growth-grnd-sell",
+     "deleted": false
+    }
+   },
+   {
+    "id": 179,
+    "ts": "2026-11-09T02:19:43.480197+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "57",
+    "before": null,
+    "after": {
+     "id": 57,
+     "type": "BUY",
+     "symbol": "RDDT",
+     "qty": 72.0,
+     "price": 95.65,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-09T02:19:43.233943+00:00",
+     "note": "r014 starter: Q3 rev +53% y/y, op margin 29%, P/E 19 at bottom of own range; Fri post-market quote",
+     "source": "cli",
+     "external_id": "r014-growth-rddt-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 180,
+    "ts": "2026-11-09T02:19:55.128585+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "82",
+    "before": null,
+    "after": {
+     "id": 82,
+     "symbol": "SPY",
+     "kind": "note",
+     "text": "loop-macro r014 (11-08 21:15 ET): recorded QUAL SPLIT 4:1 (txn 55): book now 96,993.64, TWR -1.67% vs SPY -4.39% (+2.72 pp), no 11-05 jump. NFP 165K vs 65K, UR 4.1%, AHE +0.4% m/m; Fri SPX +0.31%, NDX +1.35%, VIX 25.6, VIX/VIX3M 1.04 (still inverted), HYG 77.23, 10Y 4.86 (+2bp), 2s10s 35bp; WTI 90.6 (wk -6%), XLE wk -12%. No trades: note 80 SPY add fails its VIX/VIX3M<1 leg; XLE->RSP (note 62) passes its WTI<98/ISM-prices legs but hot wages + CPI 11-10 (prev 3.7% y/y) argue for keeping the inflation hedge through the print. Plan after CPI: core CPI <=0.2% m/m and VIX/VIX3M<1 -> SELL 29 SGOV/BUY 4 SPY; core <=0.2% and WTI<90 -> SELL 30 XLE/BUY 9 RSP (sim 11-06: net cash -95.85, realized -174.30, XLE 7.5%, RSP 2.0%). Hot core (>=0.4%) -> stay, review duration (IEF 11.9%).",
+     "review_on": "2026-11-11",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-09T02:19:55.127283+00:00",
+     "updated_at": "2026-11-09T02:19:55.127288+00:00"
+    }
+   },
+   {
+    "id": 181,
+    "ts": "2026-11-09T02:19:55.827497+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "83",
+    "before": null,
+    "after": {
+     "id": 83,
+     "symbol": "GRND",
+     "kind": "note",
+     "text": "[loop-growth] r014 EXIT 487 @ 13.41 (Fri post-market; realized -457.78). 10-Q now in Argus: Q3 revenue 141.4M +22.1% y/y (Q2 +32.5%, Q1 +38.3%), operating margin 2.9% vs 39.1% a year ago, net loss -6.6M (GAAP EPS -0.04). FY26 EPS consensus cut 0.53 -> 0.32 in 7 days, FY27 0.69 -> 0.60. Shelf prospectus filed 11-06; chairman Zage sold ~1.0M sh ($13.5M) 10-16..11-03. Formal break is margin <20% for two quarters, but alignment (insider ownership) and margin pillars both weakened at once while growth halves - not a compounder at this point.",
+     "review_on": null,
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-09T02:19:55.826146+00:00",
+     "updated_at": "2026-11-09T02:19:55.826152+00:00"
+    }
+   },
+   {
+    "id": 182,
+    "ts": "2026-11-09T02:19:56.918175+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "84",
+    "before": null,
+    "after": {
+     "id": 84,
+     "symbol": "RDDT",
+     "kind": "thesis",
+     "text": "[loop-growth] Starter 72 @ 95.65 (r014, Fri post-market). Thesis: ad + data-licensing platform still compounding: SEC revenue Q1-Q3'26 +69%/+61%/+53% y/y (Q3 895.0M), operating margin 29.2% (23.7% a yr ago), Q3 FCF 362.6M (TTM 1.20B, ~6.5% FCF yield), no debt, ROE 31%. Stock -58.6% YTD and -29.2% on Q3 (10-29 amc) despite beat; P/E 19.4 and P/S 5.9 at the bottom of its own history (0th pct), about META's multiples at 2x the growth. Consensus FY27 EPS 6.86 (-3.5% in 7d), mean target 151. Risks: search-traffic dependence (Google/AI answers), decelerating growth, insiders net sellers ($235M, own 0.7%), short interest 14.8% of float, beta 2.2. Break: revenue growth < 30% y/y or operating margin < 20%. Size: 7% of capital, add after Q4 if growth holds >40%.",
+     "review_on": "2027-02-04",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-09T02:19:56.916954+00:00",
+     "updated_at": "2026-11-09T02:19:56.916960+00:00"
     }
    }
   ]
