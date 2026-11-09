@@ -185,7 +185,7 @@ function Main({ auth }: { auth: AuthStatus }) {
               <Route path="*" element={
                 <div className="card">
                   <h2>No portfolios yet</h2>
-                  <p><Link to="/data">Import an Investing.com CSV</Link>, or restore a snapshot from another machine on the same page.</p>
+                  <p><Link to="/data">Import an Investing.com CSV</Link>, or restore a snapshot on the server (<code>argus snapshot load</code>).</p>
                   <p className="small muted">From the terminal: <code>uv run argus import investing data/&lt;name&gt;_Holdings_MMDDYYYY.csv --opening-through YYYY-MM-DD</code></p>
                 </div>
               } />

@@ -9,6 +9,8 @@
   fills extended prices for everything tracked; they are dropped at the open.
 - While closed, it serves the settled close and does not poll.
 - WebSocket prices are flushed to the quote cache so the CLI and MCP see them too.
+- It works for every account at once (argus.access.SYSTEM); `snapshot` gives each viewer
+  only the alerts their account owns.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ import json
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime
+
+from argus import access
 
 from sqlalchemy import select
 
@@ -85,13 +89,16 @@ class LiveHub:
                 pass
             return self.version
 
-    def snapshot(self) -> dict:
+    def snapshot(self, account_id: int | None = None, symbols: set[str] | None = None) -> dict:
+        """What one viewer sees: prices of `symbols` only (the hub tracks every account's, and which
+        symbols those are is theirs; None = all), and only `account_id`'s fired alerts (None: open mode)."""
+        mine = [a for a in self.fired_alerts if a.get("account_id") == (account_id or access.NOBODY)]
         return {
             "version": self.version,
             "market": self.status,
             "stream": {"state": self.ws_state, "symbols": len(self.streamed)},
-            "quotes": {s: q.to_dict() for s, q in self.quotes.items()},
-            "alerts_fired": self.fired_alerts[:20],
+            "quotes": {s: q.to_dict() for s, q in self.quotes.items() if symbols is None or s in symbols},
+            "alerts_fired": mine[:20],
         }
 
     # -- what to track --------------------------------------------------------
@@ -118,7 +125,7 @@ class LiveHub:
         while True:
             try:
                 self.status = market_status()
-                symbols = await asyncio.to_thread(self.tracked_symbols)
+                symbols = await asyncio.to_thread(access.as_(access.SYSTEM, self.tracked_symbols))
                 in_session = self.status["session"] != "closed"
                 due = loop.time() - last_rest >= self.rest_interval_s
                 if symbols and (due or not self.quotes or set(symbols) - set(self.quotes)):
@@ -166,7 +173,7 @@ class LiveHub:
             log.warning("no quotes for %s", ", ".join(sorted(errors)))
 
     async def _check_alerts(self) -> None:
-        fired = await asyncio.to_thread(self.argus.evaluate_alerts, dict(self.quotes))
+        fired = await asyncio.to_thread(access.as_(access.SYSTEM, self.argus.evaluate_alerts), dict(self.quotes))
         if fired:
             log.info("alerts fired: %s", "; ".join(f["message"] for f in fired))
             self.fired_alerts = fired + self.fired_alerts
@@ -175,7 +182,7 @@ class LiveHub:
         """Keep the earnings/dividend calendar fresh (each symbol refreshes at most daily)."""
         while True:
             try:
-                await asyncio.to_thread(self.argus.upcoming_events)
+                await asyncio.to_thread(access.as_(access.SYSTEM, self.argus.upcoming_events))
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - provider hiccups: try again next cycle
@@ -191,7 +198,7 @@ class LiveHub:
                 due = self.warmed_for is None or (status["session"] == "closed"
                                                   and self.warmed_for != status["last_session"])
                 if due:
-                    await asyncio.to_thread(self.argus.warm_caches)
+                    await asyncio.to_thread(access.as_(access.SYSTEM, self.argus.warm_caches))
                     self.warmed_for = status["last_session"]
             except asyncio.CancelledError:
                 raise

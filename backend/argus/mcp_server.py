@@ -11,6 +11,9 @@ Conventions every tool follows (so agents don't have to guess):
 - Writes default to dry_run=True and return a before/after preview; call again with
   dry_run=False to commit. Pass idempotency_key so a retry can't double-book a trade.
 - Errors are "CODE: message (hint: ...)" with stable codes, e.g. INSUFFICIENT_SHARES.
+
+Every tool acts as one account (argus.access): over HTTP, whoever signed in that request (checked on
+each call, not once per MCP session); over stdio, the oldest account, or `argus --as <user> mcp`.
 """
 
 from __future__ import annotations
@@ -23,8 +26,9 @@ from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from argus import access
 from argus.app import Argus
 from argus.errors import ArgusError
 from argus.market_calendar import parse_ny_datetime
@@ -74,10 +78,47 @@ def _tool(fn: Callable) -> Callable:
     return wrapper
 
 
-def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | None = None) -> MCPServer:
+class _AccountMCP(MCPServer):
+    """Runs each tool call and resource read as an account. Over HTTP that is the principal the auth
+    middleware left on the request that carried the call; a call without one is refused. `default`
+    (stdio only) is who calls without an HTTP request act as."""
+
+    def __init__(self, *args, default: int | str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._default = default
+
+    def _account(self, ctx) -> int | str | None:
+        request = getattr(ctx, "request", None)
+        if request is None:
+            if self._default is None:
+                raise ToolError("UNAUTHORIZED: no signed-in account for this call.")
+            return self._default
+        principal = request.scope.get("state", {}).get("principal")
+        if principal is None:
+            raise ToolError("UNAUTHORIZED: no signed-in account for this call.")
+        return principal.account_id
+
+    async def _handle_call_tool(self, ctx, params):
+        try:
+            who = self._account(ctx)
+        except ToolError as e:
+            return CallToolResult(content=[TextContent(type="text", text=str(e))], is_error=True)
+        with access.acting_as(who):
+            return await super()._handle_call_tool(ctx, params)
+
+    async def _handle_read_resource(self, ctx, params):
+        with access.acting_as(self._account(ctx)):
+            return await super()._handle_read_resource(ctx, params)
+
+
+def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | None = None,
+               default_account: int | str | None = None) -> MCPServer:
+    """`default_account`: who stdio calls act as (access.DEFAULT, or an account id). Leave it None for
+    HTTP, where every call must come with a signed-in request."""
     argus = argus or Argus()
     quotes_now = live_quotes or (lambda: None)
-    mcp = MCPServer("argus", instructions=INSTRUCTIONS, version="0.1.0", log_level="WARNING")
+    mcp = _AccountMCP("argus", instructions=INSTRUCTIONS, version="0.1.0", log_level="WARNING",
+                      default=default_account)
 
     # -- read -----------------------------------------------------------------
     @mcp.tool(annotations=READ)
@@ -90,7 +131,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @mcp.tool(annotations=READ)
     @_tool
     def list_portfolios() -> list[dict]:
-        """All portfolios with id, name and benchmark symbol."""
+        """Your portfolios with id, name, benchmark symbol and the accounts each is shared with, then the
+        portfolios other accounts share with you (`shared`: true, `owner`), which are read-only."""
         return argus.portfolios.list_portfolios()
 
     @mcp.tool(annotations=READ)
@@ -438,6 +480,15 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Create an empty portfolio with a benchmark for performance comparison."""
         return argus.portfolios.create_portfolio(name, benchmark, actor="mcp")
 
+    @mcp.tool(annotations=WRITE)
+    @_tool
+    def share_portfolio(portfolio: str, username: str, unshare: bool = False) -> dict:
+        """Let another Argus account see one of your portfolios, read-only (unshare=True stops it).
+        They can view positions, performance and analysis, but not change anything."""
+        if unshare:
+            return argus.portfolios.unshare(portfolio, username, actor="mcp")
+        return argus.portfolios.share(portfolio, username, actor="mcp")
+
     # -- resources & prompts ---------------------------------------------------
     @mcp.resource("portfolio://{name}/summary", mime_type="application/json")
     def portfolio_resource(name: str) -> dict:
@@ -466,5 +517,5 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     return mcp
 
 
-def run_stdio() -> None:
-    create_mcp().run("stdio")
+def run_stdio(account: int | str = access.DEFAULT) -> None:
+    create_mcp(default_account=account).run("stdio")

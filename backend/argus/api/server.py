@@ -9,10 +9,10 @@ import asyncio
 import os
 import json
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path, PureWindowsPath
 
-from fastapi import Body, FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -36,7 +36,8 @@ STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
 LOGIN_FAIL_DELAY_S = 1.0  # slows guessing; the throttle caps it
 
-_STATUS = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "WRONG_PASSWORD": 403, "NOT_FOUND": 404, "ALREADY_EXISTS": 409,
+_STATUS = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "WRONG_PASSWORD": 403, "READ_ONLY": 403, "NOT_FOUND": 404,
+           "ALREADY_EXISTS": 409,
            "TOO_MANY_ATTEMPTS": 429, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
 
 
@@ -292,6 +293,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def create_portfolio(body: PortfolioBody):
         return await run(argus.portfolios.create_portfolio, body.name, body.benchmark, "ui")
 
+    @app.get("/api/portfolios/{ref}/shares")
+    async def portfolio_shares(ref: str):
+        return await run(argus.portfolios.shares, ref)
+
+    @app.put("/api/portfolios/{ref}/shares/{username}")
+    async def share_portfolio(ref: str, username: str):
+        return await run(argus.portfolios.share, ref, username, "ui")
+
+    @app.delete("/api/portfolios/{ref}/shares/{username}")
+    async def unshare_portfolio(ref: str, username: str):
+        return await run(argus.portfolios.unshare, ref, username, "ui")
+
     @app.get("/api/portfolios/{ref}")
     async def portfolio(ref: str, lots: bool = False):
         return await run(argus.portfolio, ref, True, lots, hub.quotes)
@@ -430,21 +443,36 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.simulate_trades, ref, body.trades, dict(hub.quotes))
 
     # -- live stream -------------------------------------------------------------
-    # Every open tab/device on the same portfolio gets the same summary per hub update: compute it once.
-    summaries: dict[str, tuple[tuple[int, int], dict]] = {}
+    # Every open tab/device of one account on the same portfolio gets the same summary per hub update:
+    # compute it once. Keyed by account too, since a name means each account's own portfolio.
+    summaries: dict[tuple[int | None, str], tuple[tuple[int, int], dict]] = {}
+    # Which prices each account's stream carries: its holdings, watchlists and benchmarks.
+    visible: dict[int | None, tuple[tuple[int, int], set[str]]] = {}
 
-    async def summary_at(portfolio: str, version: int) -> dict:
+    async def visible_symbols(account_id: int | None) -> set[str]:
+        key = (argus.portfolios.revision, argus.watchlists.revision)
+        hit = visible.get(account_id)
+        if hit and hit[0] == key:
+            return hit[1]
+        syms = set(await run(argus.tracked_symbols))
+        syms |= {p["benchmark"] for p in await run(argus.portfolios.list_portfolios)}
+        visible[account_id] = (key, syms)
+        return syms
+
+    async def summary_at(account_id: int | None, portfolio: str, version: int) -> dict:
         key = (version, argus.portfolios.revision)  # new prices or a new trade both invalidate
-        hit = summaries.get(portfolio)
+        hit = summaries.get((account_id, portfolio))
         if hit and hit[0] == key:
             return hit[1]
         summary = await run(argus.portfolios.summary, portfolio, dict(hub.quotes))
-        summaries[portfolio] = (key, summary)
+        summaries[(account_id, portfolio)] = (key, summary)
         return summary
 
     @app.get("/api/stream")
     async def stream(request: Request, portfolio: str | None = None):
         """SSE: an `update` event at most once per second while prices change."""
+        account_id = getattr(request.state, "principal", OPEN).account_id
+
         async def events():
             seen = -1
             while not await request.is_disconnected():
@@ -453,12 +481,20 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                     yield ": keepalive\n\n"
                     continue
                 seen = version
-                payload = hub.snapshot()
+                syms = await visible_symbols(account_id)
+                summary = None
                 if portfolio:
                     try:
-                        payload["portfolio"] = await summary_at(portfolio, version)
+                        summary = await summary_at(account_id, portfolio, version)
                     except ArgusError as e:
-                        payload["portfolio_error"] = e.to_dict()
+                        summary = e
+                if isinstance(summary, dict):  # a portfolio shared with you: its holdings' prices too
+                    syms = syms | {r["symbol"] for r in summary["positions"]} | {summary["portfolio"]["benchmark"]}
+                payload = hub.snapshot(account_id, syms)
+                if isinstance(summary, dict):
+                    payload["portfolio"] = summary
+                elif summary is not None:
+                    payload["portfolio_error"] = summary.to_dict()
                 yield f"event: update\ndata: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(STREAM_MIN_INTERVAL_S)
 
@@ -475,16 +511,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         name = Path(PureWindowsPath(body.filename).name)  # drop any folders (/ or \\); the name may hold the portfolio
         return await run(argus.import_investing, name, body.portfolio or None, cutoff, body.dry_run, True, body.content)
 
-    # -- snapshot ------------------------------------------------------------------
-    @app.get("/api/snapshot")
-    async def snapshot_download():
-        doc = await run(argus.snapshots.export)
-        name = f"argus-snapshot-{datetime.now():%Y%m%d-%H%M%S}.json"
-        return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
-
-    @app.post("/api/snapshot/restore")
-    async def snapshot_restore(doc: dict = Body(...), replace: bool = False, dry_run: bool = True):
-        return await run(argus.snapshots.restore, doc, replace, dry_run, argus.settings.data_dir / "snapshots")
+    # Snapshots (dump/restore) cover every account's records, so they are CLI only: `argus snapshot`.
 
     @app.get("/api/health")
     async def health():
@@ -577,6 +604,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str):
+            if path == "api" or path.startswith("api/"):
+                raise ArgusError("NOT_FOUND", f"No API route /{path}.")
             f = (root / path).resolve()
             # Only files inside dist/ (an encoded "../" must not reach .env or data/).
             if path and f.is_relative_to(root) and f.is_file():

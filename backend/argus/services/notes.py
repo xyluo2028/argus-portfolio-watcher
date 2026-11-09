@@ -1,4 +1,4 @@
-"""Thesis and free-form notes per symbol, with optional review dates."""
+"""Thesis and free-form notes per symbol, with optional review dates. Each account has its own."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import date
 
 from sqlalchemy import Engine, select
 
+from argus import access
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.models import AuditLog, Note
@@ -33,7 +34,7 @@ class NoteService:
         if not text.strip():
             raise ArgusError("INVALID_ARG", "Note text is empty.")
         with session_scope(self.engine) as s:
-            n = Note(symbol=sym, kind=kind, text=text.strip(), review_on=review_on, created_by=actor)
+            n = Note(account_id=access.owner(s), symbol=sym, kind=kind, text=text.strip(), review_on=review_on, created_by=actor)
             s.add(n)
             s.flush()
             s.add(AuditLog(actor=actor, action="create", entity="note", entity_id=str(n.id), after=_row(n)))
@@ -43,7 +44,7 @@ class NoteService:
                clear_review: bool = False, archived: bool | None = None, actor: str = "cli") -> dict:
         with session_scope(self.engine) as s:
             n = s.get(Note, note_id)
-            if n is None:
+            if n is None or not access.is_mine(s, n.account_id):
                 raise ArgusError("NOT_FOUND", f"No note {note_id}.")
             before = _row(n)
             if text is not None:
@@ -61,7 +62,7 @@ class NoteService:
     def list(self, symbol: str | None = None, include_archived: bool = False,
              due_by: date | None = None) -> list[dict]:
         with session_scope(self.engine) as s:
-            q = select(Note)
+            q = select(Note).where(access.owned(s, Note.account_id))
             if symbol:
                 q = q.where(Note.symbol == normalize_symbol(symbol))
             if not include_archived:

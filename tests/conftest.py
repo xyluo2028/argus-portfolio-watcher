@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from argus import access
 from argus.app import Argus
 from argus.config import Settings
 from argus.providers.base import Bar, ProviderError, Quote
@@ -41,6 +42,13 @@ class FakeHistory:
     def get_history(self, symbol, start, end, interval):
         self.calls += 1
         return [b for b in self.bars if b.ts >= start]
+
+
+@pytest.fixture(autouse=True)
+def default_account():
+    """Tests call services directly, like the CLI: as the oldest account (argus.access)."""
+    with access.acting_as(access.DEFAULT):
+        yield
 
 
 @pytest.fixture

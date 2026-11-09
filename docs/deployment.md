@@ -137,10 +137,35 @@ uv run argus user disable trader-bot           # sessions and keys stop working 
 - Passwords are stored as scrypt hashes, session ids and API keys as SHA-256; no secret is stored as given.
 - An API key can read and write like its account, but can't create keys or change the password.
 - Ten failed sign-ins for a name within 15 minutes block it for the rest of that window.
-- The CLI and `argus mcp` (stdio) open the database file directly and need no sign-in: give a bot
-  only an API key for the HTTP MCP endpoint, never a shell on the server.
-- Accounts and keys are in `argus backup` (the database copy) but not in JSON snapshots; recreate
-  them after `argus snapshot load` on a new machine.
+- The CLI and `argus mcp` (stdio) open the database file directly and need no sign-in. They act as
+  the oldest account, or as `argus --as <user> ...`: give a bot only an API key for the HTTP MCP
+  endpoint, never a shell on the server.
+- Accounts and keys are in `argus backup` and in JSON snapshots (hashes only). Web sessions aren't,
+  so everyone signs in again after `argus snapshot load`.
+
+### Whose records are whose
+
+| | Who sees it |
+|---|---|
+| Portfolios (transactions, targets, performance history) | The account that created it, plus accounts it's shared with (read-only) |
+| Watchlists, alerts, notes, peer lists, saved DCF models | Only the account that created them |
+| Market data, the screener, market context, the events calendar | Everyone |
+| Snapshot dump and restore | Only the CLI (a snapshot holds every account's records) |
+
+- **The first account takes over** everything recorded before any account existed (and, when you
+  upgrade to this version with accounts already set up, the oldest account does).
+- **Names are per account:** a bot can have its own `growth` portfolio or `Watchlist`. Anyone
+  else's portfolio is "not found", so its existence doesn't leak.
+- **"All portfolios"** (`all`) combines only your own portfolios, never ones shared with you.
+- **Sharing:** the owner shares a portfolio read-only with `argus portfolio share <portfolio> --with <user>`
+  (a bot's: `argus --as <bot> portfolio share ...`), the `share_portfolio` MCP tool, or
+  `PUT /api/portfolios/<portfolio>/shares/<user>`. The other account can view positions,
+  performance and analysis, but changing anything returns `READ_ONLY`. `unshare`, or deleting
+  the portfolio, ends it. A shared portfolio whose name matches one of yours is reached by its id.
+- **Live updates:** the price stream carries only the symbols in your own holdings, watchlists and
+  benchmarks (and those of a shared portfolio you open), and a fired alert reaches only its owner.
+  Cost alerts compare with the owner's own average cost.
+- **Audit log:** each entry records the account that made the change.
 
 ## Claude (MCP) against the deployed server
 

@@ -103,7 +103,11 @@ export interface Summary {
   quote_errors?: Record<string, string>;
 }
 
-export interface PortfolioRef { id: number; name: string; benchmark: string }
+export interface PortfolioRef {
+  id: number; name: string; benchmark: string;
+  shared_with?: string[];  // your portfolio: the accounts it's shared with
+  shared?: boolean; owner?: string;  // shared with you by `owner`, read-only
+}
 
 export interface HistoryResponse {
   symbol: string;
@@ -279,11 +283,6 @@ export interface ImportReport {
   checks: { check: string; ok: boolean; detail: string }[];
   lot_preview: { symbol: string; type: string; date: string; qty: number; price: number }[];
   status: "ok" | "blocked"; creates_portfolio?: boolean; inserted?: number; skipped_existing?: number;
-}
-
-export interface RestoreReport {
-  created_at: string | null; dry_run: boolean; replace: boolean;
-  will_remove: Record<string, number>; counts: Record<string, number>; backup?: string;
 }
 
 export interface TxnEdit { qty?: number; price?: number; fee?: number; date?: string; note?: string; dry_run: boolean }
@@ -514,9 +513,6 @@ export const api = {
   login: (creds: { username: string; password: string } | { token: string }) =>
     send<{ ok: boolean }>("POST", "/api/auth/login", creds),
   logout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
-  snapshotUrl: "/api/snapshot",
-  restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>
-    send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),

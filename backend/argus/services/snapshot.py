@@ -2,6 +2,11 @@
 
 Caches (quotes, price bars, fundamentals, events, fund profiles, NAV) are left out; they refill
 on their own. Rows keep their ids, so audit-log and alert-history references stay intact.
+
+A snapshot holds every account's records, with the accounts and their API keys (hashes only; web
+sessions are left out, so everyone signs in again after a load). That is why it is CLI only. A
+version 1 snapshot predates accounts: loading it keeps the accounts here, and the oldest one gets
+its records.
 """
 
 from __future__ import annotations
@@ -15,15 +20,17 @@ from sqlalchemy.dialects.sqlite import insert
 
 from argus.db import session_scope
 from argus.errors import ArgusError
-from argus.models import Base
+from argus.models import Base, LoginSession
+from argus.services.accounts import claim_unowned
 
 FORMAT = "argus-snapshot"
-VERSION = 1
+VERSION = 2  # 2: accounts, API keys, portfolio shares and per-account owners
 # Insert order respects foreign keys; deletes run in reverse.
-TABLES = ["portfolio", "instrument", "txn", "target", "watchlist", "watchlist_item",
-          "alert", "alert_event", "note", "peer_list", "valuation_model", "audit_log"]
+ACCOUNT_TABLES = ["account", "api_key"]
+TABLES = [*ACCOUNT_TABLES, "portfolio", "instrument", "txn", "target", "portfolio_share", "watchlist",
+          "watchlist_item", "alert", "alert_event", "note", "peer_list", "valuation_model", "audit_log"]
 # Already holding any of these means the instance has records a load would clash with.
-USER_TABLES = ["portfolio", "txn", "watchlist_item", "alert", "note"]
+USER_TABLES = ["account", "portfolio", "txn", "watchlist_item", "alert", "note"]
 
 
 def _table(name: str) -> Table:
@@ -90,7 +97,10 @@ class SnapshotService:
             raise ArgusError("INVALID_ARG", f"Snapshot version {doc['version']} is newer than this Argus supports.",
                              hint="Update Argus, then load it again.")
 
-        occupied = {t: n for t, n in self.counts().items() if t in USER_TABLES and n}
+        # A snapshot from before accounts leaves the accounts here alone (and they don't block it).
+        with_accounts = "account" in doc["tables"]
+        tables = TABLES if with_accounts else [t for t in TABLES if t not in ACCOUNT_TABLES]
+        occupied = {t: n for t, n in self.counts().items() if t in USER_TABLES and n and t in tables}
         report = {"created_at": doc.get("created_at"), "dry_run": dry_run, "replace": replace,
                   "will_remove": occupied, "counts": {t: len(doc["tables"].get(t) or []) for t in TABLES}}
         if dry_run:
@@ -104,10 +114,12 @@ class SnapshotService:
 
         with session_scope(self.engine) as s:
             if replace:
-                for name in reversed(TABLES):
+                if with_accounts:
+                    s.execute(LoginSession.__table__.delete())  # its accounts are about to be replaced
+                for name in reversed(tables):
                     if name != "instrument":  # metadata cache too; upserted below
                         s.execute(_table(name).delete())
-            for name in TABLES:
+            for name in tables:
                 t = _table(name)
                 rows = [_decode(t, r) for r in doc["tables"].get(name) or []]
                 if not rows:
@@ -118,4 +130,7 @@ class SnapshotService:
                     s.execute(stmt.on_conflict_do_update(index_elements=["symbol"], set_=cols), rows)
                 else:
                     s.execute(t.insert(), rows)
+            first = s.scalar(select(func.min(_table("account").c.id)))
+            if first:  # records with no owner (from a version 1 snapshot) go to the oldest account
+                claim_unowned(s, first)
         return report

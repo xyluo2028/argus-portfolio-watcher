@@ -4,7 +4,8 @@ There is one kind of account; a bot is an account you create for it. No secret i
 passwords as scrypt hashes, session ids and API keys as SHA-256 (they are long and random, so a fast
 hash is enough to make a stolen database useless for signing in). Once any account exists, every
 request has to sign in, from this machine too (see argus.api.auth). Accounts are created from the
-CLI: whoever has a shell here can read the database anyway.
+CLI: whoever has a shell here can read the database anyway. Each account sees only its own records
+(argus.access); the first one takes over what was recorded before it.
 """
 
 from __future__ import annotations
@@ -18,11 +19,12 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Engine, delete, func, select
+from sqlalchemy import Engine, delete, func, select, update
 
 from argus.db import session_scope
 from argus.errors import ArgusError
-from argus.models import Account, ApiKey, AuditLog, LoginSession
+from argus.access import NOBODY
+from argus.models import OWNED, Account, ApiKey, AuditLog, LoginSession
 
 USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 MIN_PASSWORD = 8
@@ -93,6 +95,16 @@ def key_to_dict(k: ApiKey, now: datetime | None = None) -> dict:
             "active": k.revoked_at is None and not expired}
 
 
+def claim_unowned(s, account_id: int) -> dict[str, int]:
+    """Give `account_id` everything recorded while no account existed (owner 0)."""
+    out = {}
+    for model in OWNED:
+        n = s.execute(update(model).where(model.account_id == NOBODY).values(account_id=account_id)).rowcount
+        if n:
+            out[model.__tablename__] = n
+    return out
+
+
 def normalize_username(username: str) -> str:
     name = (username or "").strip().lower()
     if not USERNAME.match(name):
@@ -141,9 +153,10 @@ class AccountService:
             a = Account(username=name, password_hash=hash_password(password) if password is not None else None)
             s.add(a)
             s.flush()
+            claimed = claim_unowned(s, a.id) if first else {}
             s.add(AuditLog(actor=actor, action="create", entity="account", entity_id=str(a.id),
-                           after={"username": name, "has_password": password is not None}))
-            return account_to_dict(a) | {"first": first}
+                           after={"username": name, "has_password": password is not None, "claimed": claimed}))
+            return account_to_dict(a) | {"first": first, "claimed": claimed}
 
     def list_accounts(self) -> list[dict]:
         with session_scope(self.engine) as s:

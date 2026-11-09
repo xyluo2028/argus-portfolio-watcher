@@ -15,6 +15,7 @@ from typing import Callable
 
 from sqlalchemy import Engine, select
 
+from argus import access
 from argus.config import Settings, load_settings
 from argus.db import make_engine, session_scope, upsert
 from argus.errors import ArgusError
@@ -555,7 +556,7 @@ class Argus:
         """Your peer list for `symbol` (or the suggested one) with a side-by-side comparison."""
         sym = normalize_symbol(symbol)
         with session_scope(self.engine) as s:
-            row = s.get(PeerList, sym)
+            row = s.get(PeerList, (access.owner(s), sym))
             custom = list(row.peers) if row else None
         profile = self.company_profile(sym)
         fund = profile.get("quote_type") in self.FUND_TYPES
@@ -770,11 +771,12 @@ class Argus:
         """Save your peer list (unknown tickers are refused); None goes back to the suggestions."""
         sym = normalize_symbol(symbol)
         with session_scope(self.engine) as s:
-            before = s.get(PeerList, sym)
+            me = access.owner(s)
+            before = s.get(PeerList, (me, sym))
             before_peers = list(before.peers) if before else None
         if peers is None:
             with session_scope(self.engine) as s:
-                if (row := s.get(PeerList, sym)) is not None:
+                if (row := s.get(PeerList, (me, sym))) is not None:
                     s.delete(row)
                     s.add(AuditLog(actor=actor, action="reset_peers", entity="peers", entity_id=sym,
                                    before={"peers": before_peers}))
@@ -789,7 +791,7 @@ class Argus:
             raise ArgusError("UNKNOWN_SYMBOL", f"No quote found for: {', '.join(sorted({*bad, *unknown}))}",
                              hint="Check the ticker; only US-listed stocks and ETFs are supported.")
         with session_scope(self.engine) as s:
-            s.merge(PeerList(symbol=sym, peers=clean))
+            s.merge(PeerList(account_id=me, symbol=sym, peers=clean))
             s.add(AuditLog(actor=actor, action="set_peers", entity="peers", entity_id=sym,
                            before={"peers": before_peers}, after={"peers": clean}))
         return self.peers(sym, with_metrics=False)
@@ -932,9 +934,11 @@ class Argus:
                 "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()}}
 
     def held_positions(self) -> dict[str, tuple[float, float]]:
-        """symbol -> (total shares, weighted average cost) across all portfolios."""
+        """symbol -> (total shares, weighted average cost) across your portfolios (every account's, for SYSTEM)."""
         agg: dict[str, list[float]] = {}
         for p in self.portfolios.list_portfolios():
+            if p.get("shared"):
+                continue
             for sym, pos in self.portfolios.positions(p["id"]).items():
                 if pos.is_open:
                     a = agg.setdefault(sym, [0.0, 0.0])
@@ -1039,7 +1043,14 @@ class Argus:
         missing = [s for s in syms if s not in quotes]
         if missing:
             quotes |= self.market.get_quotes(missing)[0]
-        costs = {s: c for s, (_, c) in self.held_positions().items()}
+        cost_by_account: dict[int, dict[str, float]] = {}
+
+        def costs(account_id: int) -> dict[str, float]:
+            """An alert's own account's average costs (background checks see every account's alerts)."""
+            if account_id not in cost_by_account:
+                with access.acting_as(account_id):
+                    cost_by_account[account_id] = {s: c for s, (_, c) in self.held_positions().items()}
+            return cost_by_account[account_id]
         today = datetime.now(NY).date()
 
         def metrics(sym: str) -> dict:
@@ -1214,7 +1225,7 @@ class Argus:
     def delete_portfolio(self, ref: str, confirm: str | None = None, dry_run: bool = True, actor: str = "cli") -> dict:
         """Delete a portfolio and everything recorded in it. `confirm` must repeat its exact name; all
         records are saved to a snapshot in data/snapshots/ first, so it can be restored."""
-        p = self.portfolios.get_portfolio(ref)
+        p = self.portfolios.get_portfolio(ref, write=True)
         if not dry_run:
             if confirm != p.name:
                 raise ArgusError("INVALID_ARG", f"Confirm by giving the portfolio's exact name, '{p.name}'.")
@@ -1471,7 +1482,7 @@ class Argus:
             data = self._build_valuation(sym)
             self._valuation[sym] = (time.monotonic(), data)
         with session_scope(self.engine) as s:
-            row = s.get(ValuationModel, sym)
+            row = s.get(ValuationModel, (access.owner(s), sym))
             saved = {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()} if row else None
         if price and data["market_cap"] and data["price"]:  # the cap moves with the live price
             data = data | {"market_cap": data["market_cap"] * price / data["price"]}
@@ -1512,25 +1523,27 @@ class Argus:
         sym = normalize_symbol(symbol)
         clean = valuation_mod.clean_inputs(inputs) if inputs is not None else None
         with session_scope(self.engine) as s:
-            before = s.get(ValuationModel, sym)
+            me = access.owner(s)
+            before = s.get(ValuationModel, (me, sym))
             before_inputs = dict(before.inputs) if before else None
             if clean is None:
                 if before is not None:
                     s.delete(before)
             else:
-                s.merge(ValuationModel(symbol=sym, inputs=clean, updated_at=datetime.now(UTC)))
+                s.merge(ValuationModel(account_id=me, symbol=sym, inputs=clean, updated_at=datetime.now(UTC)))
             s.add(AuditLog(actor=actor, action="save_valuation" if clean else "delete_valuation", entity="valuation",
                            entity_id=sym, before=before_inputs, after=clean))
         if clean is None:
             return None
         with session_scope(self.engine) as s:
-            row = s.get(ValuationModel, sym)
+            row = s.get(ValuationModel, (me, sym))
             return {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()}
 
     def valuation_models(self) -> list[dict]:
         """Your saved DCF models, most recently saved first."""
         with session_scope(self.engine) as s:
-            rows = s.scalars(select(ValuationModel).order_by(ValuationModel.updated_at.desc())).all()
+            rows = s.scalars(select(ValuationModel).where(access.owned(s, ValuationModel.account_id))
+                             .order_by(ValuationModel.updated_at.desc())).all()
             return [{"symbol": r.symbol, "metric": r.inputs.get("metric"), "updated_at": r.updated_at.isoformat()} for r in rows]
 
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
@@ -1570,7 +1583,7 @@ class Argus:
         if any(w < 0 or w > 100 for w in weights.values()):
             raise ArgusError("INVALID_ARG", "Each target must be between 0 and 100 (percent).")
         clean = {(normalize_symbol(k) if level == "symbol" else k.strip()): float(w) for k, w in weights.items()}
-        p = self.portfolios.get_portfolio(ref)
+        p = self.portfolios.get_portfolio(ref, write=True)
         preview = self.drift(ref, level, targets=clean)
         preview["dry_run"] = dry_run
         if not dry_run:
@@ -1768,7 +1781,7 @@ class Argus:
                                  hint="; ".join(c["detail"] for c in checks if not c["ok"]))
             return report
 
-        existing = {p["name"] for p in self.portfolios.list_portfolios()}
+        existing = {p["name"] for p in self.portfolios.list_portfolios() if not p.get("shared")}
         if name not in existing:
             report["creates_portfolio"] = True
             if dry_run:

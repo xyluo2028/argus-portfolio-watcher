@@ -9,7 +9,8 @@ The server token acts as the oldest account. The UI's static files, `/api/health
 endpoints stay public: they hold no portfolio data. With neither accounts nor a token, everything is
 open, which is only acceptable while the server listens on loopback (see `serve`).
 
-The middleware leaves who the request acts as in `scope["state"]["principal"]`.
+The middleware leaves who the request acts as in `scope["state"]["principal"]`, and runs the request
+as that account (argus.access), so it sees only that account's records.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import threading
 import time
 from http.cookies import SimpleCookie
 
+from argus import access
 from argus.services.accounts import AccountService, Principal
 
 TOKEN_COOKIE = "argus_token"
@@ -118,7 +120,8 @@ class AuthMiddleware:
         principal = await asyncio.to_thread(self.auth.check, headers)
         if principal is not None:
             scope.setdefault("state", {})["principal"] = principal
-            return await self.app(scope, receive, send)
+            with access.acting_as(principal.account_id):
+                return await self.app(scope, receive, send)
         if scope["type"] == "websocket":
             return await send({"type": "websocket.close", "code": 4401})
         body = json.dumps({"error": {"code": "UNAUTHORIZED", "message": "Sign in to Argus.",

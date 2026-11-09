@@ -69,14 +69,23 @@ uv run argus user add trader-bot --no-password            # a bot is just anothe
 uv run argus key create trader-bot --name "sim routine"   # shown once: Authorization: Bearer <key>
 ```
 
+Each account has its own portfolios, watchlists, alerts, notes, peer lists and saved DCF models;
+market data is shared. The first account takes over everything recorded before it, so make it
+yours. To watch a bot's portfolio, have it share the portfolio with you, read-only:
+
+```bash
+uv run argus --as trader-bot portfolio share "Bot sim" --with me   # or the bot's share_portfolio MCP tool
+```
+
+The CLI and `argus mcp` act as the oldest account; `argus --as <user> ...` acts as another.
 `ARGUS_TOKEN`, if set, keeps working and acts as the oldest account. More in
 [docs/deployment.md](docs/deployment.md#accounts-and-api-keys).
 
 ## Use it from Claude (MCP)
 
-Argus exposes 37 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
+Argus exposes 38 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
 financials, compare, performance, transactions (add, edit, delete), watchlist, events, alerts, notes, exposure,
-drift/targets, what-if (`simulate_trades`), and
+drift/targets, what-if (`simulate_trades`), sharing a portfolio, and
 `get_daily_brief_data`, which gathers everything for a brief in one call. Write tools default
 to `dry_run=true` and accept an `idempotency_key`. The prompts `daily_brief` and
 `position_review` package common routines.
@@ -121,7 +130,7 @@ Every command accepts `--json` and returns `{"ok": true, "data": ...}` or
 `{"ok": false, "error": {"code", "message", "hint"}}`, which is the format agents use.
 
 The web UI's **Data** page does the same: choose a CSV, pick the "already owned through" date from
-the lot dates, check the preview, then import. It also downloads and restores snapshots.
+the lot dates, check the preview, then import.
 
 ## Back up and move your data
 
@@ -132,8 +141,10 @@ uv run argus snapshot load backup.json           # restore into an empty instanc
 uv run argus snapshot load backup.json --replace # wipe existing records first (backed up automatically)
 ```
 
-A snapshot holds your records: portfolios, transactions (including deleted ones), watchlists,
-notes, alerts, targets and the audit log. Market data caches are not included; they refill on use.
+A snapshot holds every account's records: portfolios, transactions (including deleted ones),
+watchlists, notes, alerts, targets, shares and the audit log, plus the accounts and API keys (as
+hashes). That's why it's CLI only. Market data caches are not included; they refill on use. A
+snapshot from before accounts existed loads into the oldest account.
 
 ## Running it always-on
 
