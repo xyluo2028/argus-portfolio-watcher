@@ -63,14 +63,20 @@ def test_a_small_correction_only_updates_the_refetched_bars(make_argus):
     assert hist.calls == 2 and a.market.splits(["AAA"]) == {}
 
 
-def test_52_week_range_comes_from_adjusted_bars_after_a_recent_split(make_argus):
+@pytest.mark.parametrize("day", [None, "2026-11-09", "2026-11-27", "2026-11-28", "2027-01-01", "2027-01-03",
+                                 "2027-06-30"])
+def test_52_week_range_comes_from_adjusted_bars_after_a_recent_split(make_argus, freeze_today, day):
     """Yahoo's info kept QUAL's pre-split 52-week high (228.13) after the split."""
-    last = _last_close()
+    if day:
+        freeze_today(date.fromisoformat(day))
+    # Bar i is i days before now, the instant the 52-week window counts back from (not the last close,
+    # which is days earlier over a weekend): bar 364 is the oldest inside it, bar 365 just outside.
+    now = datetime.now(UTC)
     a = make_argus()
-    a.market._store_bars("QUAL", "1d", [Bar(last - timedelta(days=i), 55, 57 + i / 100, 54 - i / 1000, 56, 1e6,
+    a.market._store_bars("QUAL", "1d", [Bar(now - timedelta(days=i), 55, 57 + i / 100, 54 - i / 1000, 56, 1e6,
                                             split=4.0 if i == 0 else 0.0) for i in range(400, -1, -1)])
     lo, hi = a.market.post_split_ranges(["QUAL", "SPY"])["QUAL"]
-    assert hi == pytest.approx(57 + 365 / 100, abs=0.02) and lo == pytest.approx(54 - 365 / 1000, abs=0.002)
+    assert hi == pytest.approx(57 + 364 / 100) and lo == pytest.approx(54 - 364 / 1000)
     m, src = market.with_range({"high_52w": 228.13, "low_52w": 54.75}, {}, (lo, hi))
     assert m["high_52w"] == hi and src["high_52w"] == "history"
 

@@ -252,10 +252,17 @@ def test_momentum_returns_null_beyond_the_history(make_argus, monkeypatch):
     assert m["return_1w_pct"] == pytest.approx(((100 + len(days) - 1) / (100 + len(days) - 6) - 1) * 100)
 
 
-def test_single_symbol_fundamentals_add_price_cagr_and_fcf_margin(make_argus):
+@pytest.mark.parametrize("day", [None, "2026-11-09", "2026-11-27", "2026-11-28", "2027-01-01", "2027-01-03",
+                                 "2027-06-30"])
+def test_single_symbol_fundamentals_add_price_cagr_and_fcf_margin(make_argus, freeze_today, day):
     from datetime import date
 
-    days = [date.today() - timedelta(days=i) for i in range(4 * 365, -1, -1)]
+    from argus.market_calendar import NY
+
+    if day:
+        freeze_today(date.fromisoformat(day))
+    today = datetime.now(NY).date()
+    days = [today - timedelta(days=i) for i in range(4 * 365, -1, -1)]
     bars = [Bar(datetime(d.year, d.month, d.day, 21, tzinfo=UTC), 1, 1, 1, 100 * 1.0002 ** i, 1) for i, d in enumerate(days)]
     a = make_argus(history=PerSymbolHistory({"X": bars}),
                    fundamentals=[SlowFund("finnhub", {"fcf_ttm": 20.0, "revenue_ttm": 80.0, "pe_ttm": 30.0}, delay=0)])
