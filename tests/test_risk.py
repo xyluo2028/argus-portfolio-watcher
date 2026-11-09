@@ -75,10 +75,56 @@ def test_french_csv_parsing():
     text = "This file was created...\n\n,Mkt-RF,SMB,HML,RMW,CMA,RF\n20260828,  0.50, -0.10,  0.20, 0.00, 0.10, 0.01\n\nCopyright 2026\n"
     assert parse_csv(text) == {"2026-08-28": {"Mkt-RF": 0.005, "SMB": -0.001, "HML": 0.002, "RMW": 0.0, "CMA": 0.001, "RF": 0.0001}}
 
+# -- B-146: one holding (np.cov returns a scalar) and none -----------------------------------------
+
+def test_single_holding_carries_all_the_risk():
+    days, rm = _walk(1, 400, start=date(2025, 1, 1))
+    _, ra = _walk(2, 400, beta_to=rm, beta=2.0)
+    out = risk.analyze({"A": 100.0}, {"SPY": _closes(days, rm), "A": _closes(days, ra)})
+    assert out["available"]
+    [pos] = out["positions"]
+    assert pos["symbol"] == "A" and pos["weight_pct"] == pytest.approx(100) and pos["risk_pct"] == pytest.approx(100)
+    assert out["beta"] == pytest.approx(pos["beta"]) and pos["beta"] == pytest.approx(2.0, abs=0.15)
+    assert out["volatility_pct"] == pytest.approx(pos["vol_pct"]) and pos["vol_pct"] > 0
+    assert out["var"]["99"]["var_pct"] > out["var"]["95"]["var_pct"] > 0
+    assert out["correlation"] == {"symbols": ["A"], "matrix": [[1.0]]}
+
+
+def test_no_holdings_is_a_clear_empty_result():
+    days, rm = _walk(1, 400, start=date(2025, 1, 1))
+    for values in ({}, {"A": 0.0}):
+        out = risk.analyze(values, {"SPY": _closes(days, rm)})
+        assert out == {"available": False, "reason": "No holdings with a market value to analyze."}
+
+
+def test_risk_endpoint_with_one_holding_and_with_none(make_argus, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from argus.api.server import create_app
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X"))}
+    at_close = datetime.combine(days[-1], time(16, 5), NY)
+    quotes = {s: Quote(s, c[days[-1]], c[days[-2]], c[days[-2]], c[days[-1]], c[days[-2]], at_close, "fake")
+              for s, c in closes.items()}
+    a = _risk_argus(make_argus, monkeypatch, closes, days[-1], quotes, held=("X",))
+    a.portfolios.create_portfolio("empty")
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        r = c.get("/api/portfolios/p/risk")
+        assert r.status_code == 200 and r.json()["available"], r.json()
+        assert [(p["symbol"], round(p["risk_pct"], 6)) for p in r.json()["positions"]] == [("X", 100.0)]
+        r = c.get("/api/portfolios/empty/risk")
+        assert r.status_code == 200 and not r.json()["available"] and "No holdings" in r.json()["reason"]
+
 
 # -- B-142: the last session's close from quotes while Yahoo lags its daily bar --------------------
 
-def _risk_argus(make_argus, monkeypatch, closes, last, quotes):
+def _risk_argus(make_argus, monkeypatch, closes, last, quotes, held=("X", "Y")):
     from datetime import datetime, time
 
     import argus.app as app_mod
@@ -95,7 +141,7 @@ def _risk_argus(make_argus, monkeypatch, closes, last, quotes):
     a = make_argus([Provider()])
     a.portfolios.create_portfolio("p")
     t0 = datetime.combine(min(closes["X"]), time(16), NY)
-    a.portfolios.add_transactions("p", [TxnInput("BUY", s, t0, 10, 100) for s in ("X", "Y")])
+    a.portfolios.add_transactions("p", [TxnInput("BUY", s, t0, 10, 100) for s in held])
     monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": last.isoformat(), "session": "closed",
                                                               "is_trading_day": False})
     monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {s: dict(closes.get(s, {})) for s in syms})

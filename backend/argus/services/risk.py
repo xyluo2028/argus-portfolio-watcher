@@ -43,6 +43,8 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
     (with enough history for the stress windows)."""
     total = sum(v for v in values.values() if v and v > 0)
     syms = [s for s, v in values.items() if v and v > 0]
+    if not syms:
+        return {"available": False, "reason": "No holdings with a market value to analyze."}
     if total <= 0 or bench not in closes or len(closes[bench]) < MIN_OBS + 1:
         return {"available": False, "reason": "Not enough price history yet."}
     w = np.array([values[s] / total for s in syms])
@@ -68,7 +70,7 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
 
     vol = float(np.std(rp, ddof=1) * np.sqrt(TRADING_DAYS))
     beta = float(np.cov(rp, rm)[0, 1] / np.var(rm, ddof=1)) if np.var(rm, ddof=1) > 0 else float(w @ betas)
-    cov = np.cov(filled, rowvar=False) * TRADING_DAYS
+    cov = np.atleast_2d(np.cov(filled, rowvar=False)) * TRADING_DAYS  # one holding: np.cov gives a scalar
     port_var = float(w @ cov @ w)
     risk_share = (w * (cov @ w)) / port_var if port_var > 0 else np.zeros(len(syms))
     asset_vol = np.sqrt(np.diag(cov))
