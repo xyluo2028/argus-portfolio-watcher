@@ -37,6 +37,16 @@ def test_errors_map_to_http_status(client):
     assert r.status_code == 400 and r.json()["error"]["code"] == "INSUFFICIENT_SHARES"
 
 
+def test_simulate_takes_type_and_rejects_a_trade_without_side(client):
+    client.post("/api/portfolios/growth/transactions",
+                json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
+    r = client.post("/api/portfolios/growth/simulate", json={"trades": [{"symbol": "AAA", "type": "SELL", "qty": 5}]})
+    assert r.status_code == 200 and r.json()["net_cash"] == 550
+    r = client.post("/api/portfolios/growth/simulate", json={"trades": [{"symbol": "AAA", "qty": 5}]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_ARG"
+    assert r.json()["error"]["message"].startswith("Trade 1 (AAA)")
+
+
 def test_ws_trade_updates_quote_and_keeps_prev_close(make_argus):
     a = make_argus()
     hub = LiveHub(a)

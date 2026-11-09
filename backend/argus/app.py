@@ -112,6 +112,23 @@ def _event_happened(e: dict, now: datetime) -> bool:
     return (e.get("hour") == "bmo" and hm >= (9, 30)) or (e.get("hour") == "amc" and hm >= (16, 0))
 
 
+def _trade_side(i: int, t: dict) -> str:
+    """A what-if trade's BUY/SELL from `side`, or `type` as transactions name it. Never defaulted:
+    a sell that silently became a buy reported new buying instead of the sale (B-147)."""
+    label = f"Trade {i + 1}" + (f" ({t['symbol']})" if isinstance(t, dict) and t.get("symbol") else "")
+    if not isinstance(t, dict) or not t.get("symbol"):
+        raise ArgusError("INVALID_ARG", f"{label}: give a symbol.")
+    given = {str(t[k]).strip().upper() for k in ("side", "type") if t.get(k) is not None}
+    if not given:
+        raise ArgusError("INVALID_ARG", f"{label}: give side (or type) BUY or SELL.")
+    if len(given) > 1:
+        raise ArgusError("INVALID_ARG", f"{label}: side and type disagree ({' vs '.join(sorted(given))}).")
+    side = given.pop()
+    if side not in ("BUY", "SELL"):
+        raise ArgusError("INVALID_ARG", f"{label}: side must be BUY or SELL, not {side!r}.")
+    return side
+
+
 class Argus:
     def __init__(self, settings: Settings | None = None,
                  market_factory: Callable[[Engine, Settings], MarketService] | None = None):
@@ -1431,9 +1448,10 @@ class Argus:
         return out
 
     def simulate_trades(self, ref: str, trades: list[dict], live_quotes: dict[str, Quote] | None = None) -> dict:
-        """What-if: apply hypothetical BUY/SELL trades (qty, or dollar `amount`) at `price` or the
-        current quote; nothing is saved. Returns before/after weights, exposure and realized P&L."""
+        """What-if: apply hypothetical BUY/SELL trades (`side`, or `type`; qty, or dollar `amount`) at
+        `price` or the current quote; nothing is saved. Returns before/after weights, exposure and realized P&L."""
         p = self.portfolios.get_portfolio(ref)
+        sides = [_trade_side(i, t) for i, t in enumerate(trades)]
         before = self.portfolio(ref, True, False, live_quotes)
         now = datetime.now(UTC)
         syms = sorted({normalize_symbol(t["symbol"]) for t in trades})
@@ -1445,9 +1463,7 @@ class Argus:
         cash = 0.0
         for i, t in enumerate(trades):
             sym = normalize_symbol(t["symbol"])
-            side = str(t.get("side", "BUY")).upper()
-            if side not in ("BUY", "SELL"):
-                raise ArgusError("INVALID_ARG", f"Trade {i + 1}: side must be BUY or SELL.")
+            side = sides[i]
             price = t.get("price") or (quotes[sym].price if sym in quotes else None)
             if not price:
                 raise ArgusError("NO_PRICE", f"No price for {sym}; pass price explicitly.")

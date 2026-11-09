@@ -348,6 +348,7 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     def simulate_trades(portfolio: str, trades: list[dict]) -> dict:
         """What-if, nothing is saved. trades: [{"symbol": "NVDA", "side": "SELL", "qty": 5},
         {"symbol": "VOO", "side": "BUY", "amount": 1000}] (price defaults to the current quote).
+        side (or `type`, as transactions call it) is required on every trade: BUY or SELL.
         Returns net cash (+ freed / - needed), FIFO realized P&L, weights before/after for the traded
         symbols, concentration before/after and look-through sector weights after."""
         return argus.simulate_trades(portfolio, trades, quotes_now())

@@ -52,7 +52,7 @@ def argus(make_argus):
 
 
 def test_simulate_trades_does_not_save(argus):
-    sim = argus.simulate_trades("p", [{"symbol": "AAA", "side": "SELL", "qty": 5}, {"symbol": "BBB", "amount": 550}])
+    sim = argus.simulate_trades("p", [{"symbol": "AAA", "side": "SELL", "qty": 5}, {"symbol": "BBB", "side": "BUY", "amount": 550}])
     assert sim["net_cash"] == pytest.approx(0)  # sell 5 x 110 funds the 550 buy
     assert sim["realized_pnl_from_trades"] == pytest.approx(50)
     changed = {c["symbol"]: c for c in sim["positions_changed"]}
@@ -63,6 +63,32 @@ def test_simulate_trades_does_not_save(argus):
 def test_simulate_oversell_is_rejected(argus):
     with pytest.raises(ArgusError):
         argus.simulate_trades("p", [{"symbol": "AAA", "side": "SELL", "qty": 11}])
+
+
+@pytest.mark.parametrize("trade", [{"symbol": "AAA", "type": "SELL", "qty": 5},
+                                   {"symbol": "AAA", "type": "sell", "qty": 5},
+                                   {"symbol": "AAA", "side": " Sell ", "qty": 5},
+                                   {"symbol": "AAA", "side": "SELL", "type": "sell", "qty": 5}])
+def test_simulate_sell_via_side_or_type(argus, trade):
+    # B-147: `type` (the transactions field name) used to be ignored and the sell became a buy.
+    sim = argus.simulate_trades("p", [trade])
+    assert sim["trades"][0]["side"] == "SELL" and sim["net_cash"] == pytest.approx(550)
+    assert sim["positions_changed"][0]["qty_after"] == 5
+
+
+@pytest.mark.parametrize(("trade", "msg"), [
+    ({"symbol": "AAA", "qty": 5}, "give side (or type)"),
+    ({"symbol": "AAA", "side": "SHORT", "qty": 5}, "not 'SHORT'"),
+    ({"symbol": "AAA", "type": "DIVIDEND", "qty": 5}, "not 'DIVIDEND'"),
+    ({"symbol": "AAA", "side": "BUY", "type": "SELL", "qty": 5}, "disagree"),
+    ({"side": "BUY", "qty": 5}, "give a symbol"),
+])
+def test_simulate_rejects_missing_or_unknown_side(argus, trade, msg):
+    with pytest.raises(ArgusError) as e:
+        argus.simulate_trades("p", [{"symbol": "BBB", "side": "BUY", "qty": 1}, trade])
+    assert e.value.code == "INVALID_ARG" and e.value.message.startswith("Trade 2") and msg in e.value.message
+    if trade.get("symbol"):
+        assert "(AAA)" in e.value.message
 
 
 def test_set_targets_preview_then_save(argus):
