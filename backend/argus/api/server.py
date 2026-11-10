@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import json
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -35,6 +36,7 @@ UI_DIST = REPO_ROOT / "frontend" / "dist"
 STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
 LOGIN_FAIL_DELAY_S = 1.0  # slows guessing; the throttle caps it
+SIGNUP_LIMIT, SIGNUP_WINDOW_S = 10, 3600.0  # accounts the sign-in page may create per hour
 
 _STATUS = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "WRONG_PASSWORD": 403, "READ_ONLY": 403, "NOT_FOUND": 404,
            "ALREADY_EXISTS": 409,
@@ -140,16 +142,8 @@ class SetupBody(BaseModel):
     token: str | None = None  # required when ARGUS_TOKEN is set (or send it as the cookie / Bearer)
 
 
-class NewAccountBody(BaseModel):
+class SignupBody(BaseModel):
     username: str
-    password: str | None = None  # None: API keys only
-
-
-class AccountPatch(BaseModel):
-    disabled: bool
-
-
-class ResetPasswordBody(BaseModel):
     password: str
 
 
@@ -558,10 +552,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
             return {"required": has_accounts or bool(settings.token), "authenticated": p is not None,
                     "methods": [m for m, on in (("password", has_accounts), ("token", bool(settings.token))) if on],
                     "account": {"id": p.account_id, "username": p.username} if p and p.account_id else None,
-                    # No account yet: the UI offers to make the first one (asking for the token, if set).
+                    # No account yet: the first one is made on the Account page, once signed in with the token.
                     "setup": not has_accounts,
-                    # The oldest account manages the others (not over an API key).
-                    "owner": bool(p and p.via != "key" and argus.accounts.is_owner(p.account_id))}
+                    # Whether the sign-in page offers "Create account" (ARGUS_SIGNUP; needs a first account).
+                    "signup": has_accounts and settings.signup}
         return await run(status)
 
     def _cookie(resp: JSONResponse, request: Request, name: str, value: str) -> None:
@@ -601,7 +595,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         """First run: make the first account and sign in with it. It takes over every record so far."""
         if await run(argus.accounts.exist):
             raise ArgusError("ALREADY_EXISTS", "Argus already has an account.",
-                             hint="Sign in with it; its owner can add more on the Account page.")
+                             hint="Sign in with it, or create your own on the sign-in page.")
         if settings.token:  # whoever reaches the server must prove they hold the server's secret
             bearer, _, cookie = credentials(dict(request.headers))
             if throttle.blocked("token"):
@@ -612,6 +606,29 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         a = await run(argus.accounts.create, body.username, body.password, "ui", True)
         resp = JSONResponse({"ok": True, "account": {"id": a["id"], "username": a["username"]},
                              "claimed": a["claimed"]}, status_code=201)
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, a["id"]))
+        return resp
+
+    signups: list[float] = []  # times of recent sign-ups, to cap them
+
+    @app.post("/api/auth/signup", status_code=201)
+    async def signup(body: SignupBody, request: Request):
+        """Anyone who reaches the server can make an account: all accounts are the same kind, and a new
+        one starts empty. Not the first one, though: that takes over the existing records (`setup`)."""
+        if not settings.signup:
+            raise ArgusError("FORBIDDEN", "Creating accounts here is switched off (ARGUS_SIGNUP=off).",
+                             hint="Ask whoever runs this server: `argus user add <name>`.")
+        if not await run(argus.accounts.exist):
+            raise ArgusError("FORBIDDEN", "The first account is made on the Account page.",
+                             hint="Sign in with the server token first: it takes over the existing records.")
+        cutoff = time.monotonic() - SIGNUP_WINDOW_S
+        signups[:] = [t for t in signups if t > cutoff]
+        if len(signups) >= SIGNUP_LIMIT:
+            raise ArgusError("TOO_MANY_ATTEMPTS", "Too many accounts were created in the last hour.",
+                             hint="Try later, or use `argus user add <name>` on the server.")
+        a = await run(argus.accounts.create, body.username, body.password, "ui")
+        signups.append(time.monotonic())
+        resp = JSONResponse({"ok": True, "account": {"id": a["id"], "username": a["username"]}}, status_code=201)
         _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, a["id"]))
         return resp
 
@@ -648,49 +665,6 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def revoke_key(key_id: int, request: Request):
         p = own_account(request, signed_in=True)
         return await run(argus.accounts.revoke_key, key_id, p.account_id, "ui")
-
-    # -- everyone's accounts: the owner (oldest account) only ------------------------------
-    def owner(request: Request) -> Principal:
-        p = own_account(request, signed_in=True)
-        if not argus.accounts.is_owner(p.account_id):
-            raise ArgusError("FORBIDDEN", "Only Argus's owner (its oldest account) can manage accounts.",
-                             hint="Or use `argus user` / `argus key` on the server.")
-        return p
-
-    @app.get("/api/accounts")
-    async def accounts(request: Request):
-        await run(owner, request)
-        return await run(lambda: {"accounts": argus.accounts.list_accounts(),
-                                  "keys": argus.accounts.list_keys(include_revoked=False)})
-
-    @app.post("/api/accounts", status_code=201)
-    async def create_account(body: NewAccountBody, request: Request):
-        await run(owner, request)
-        return await run(argus.accounts.create, body.username, body.password, "ui")
-
-    @app.patch("/api/accounts/{username}")
-    async def update_account(username: str, body: AccountPatch, request: Request):
-        p = await run(owner, request)
-        if body.disabled and username.strip().lower() == p.username:
-            raise ArgusError("INVALID_ARG", "You can't disable your own account here.")
-        return await run(argus.accounts.set_disabled, username, body.disabled, "ui")
-
-    @app.put("/api/accounts/{username}/password")
-    async def reset_password(username: str, body: ResetPasswordBody, request: Request):
-        p = await run(owner, request)
-        if username.strip().lower() == p.username:
-            raise ArgusError("INVALID_ARG", "Change your own password with your current one.")
-        return await run(argus.accounts.set_password, username, body.password, None, "ui")
-
-    @app.post("/api/accounts/{username}/keys", status_code=201)
-    async def create_account_key(username: str, body: KeyBody, request: Request):
-        await run(owner, request)
-        return await run(argus.accounts.create_key, username, body.name, body.expires_days, "ui")
-
-    @app.delete("/api/accounts/keys/{key_id}")
-    async def revoke_any_key(key_id: int, request: Request):
-        await run(owner, request)
-        return await run(argus.accounts.revoke_key, key_id, None, "ui")
 
     app.mount("/mcp", mcp_app)
 

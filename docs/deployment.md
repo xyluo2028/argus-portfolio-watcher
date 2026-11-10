@@ -61,6 +61,7 @@ Settings come from environment variables or the repo-root `.env` (see `.env.exam
 | `ARGUS_INSECURE_BIND` | – | `1` allows a non-loopback `ARGUS_HOST` with sign-in off; only for a container published on the host's loopback (`compose.yaml` sets it) |
 | `ARGUS_DATA_DIR` | `./data` | Database, caches, snapshots, backups |
 | `ARGUS_BACKUP_KEEP` | `14` | Backup sets kept by `argus backup` |
+| `ARGUS_SIGNUP` | `on` | `off` = no Create an account on the sign-in page; accounts come from `argus user add` only |
 | `ARGUS_STREAM` | `on` | `off` = no live WebSocket, REST polling only (for a second instance sharing the Finnhub key) |
 
 ## Setup on a Linux host (systemd)
@@ -118,11 +119,12 @@ inside WSL: both connect outbound, which avoids Windows' localhost forwarding.
 
 ## Accounts and API keys
 
-There is one kind of account; a bot is an account you create for it. The first one can be made on
-the web UI's Account page once you're in (signed in with `ARGUS_TOKEN`, or with no token set, the
-UI is open), so nobody who merely reaches the server can claim it; after that the owner, the
-oldest account, manages the rest on the Account page, signed in with its password or the token (never
-an API key). Or manage them on the server:
+There is one kind of account, whether a person or a bot uses it, and none manages another. The first
+one is made on the web UI's Account page once you're in (signed in with `ARGUS_TOKEN`, or with no
+token set, the UI is open), because it takes over the existing records. After that, anyone who can
+reach the server creates their own on the sign-in page (at most 10 an hour); it starts empty. Set
+`ARGUS_SIGNUP=off` if the server is reachable by people you don't want accounts for. The CLI makes
+accounts too, and is the only place to disable one or reset its password:
 
 ```bash
 uv run argus user add me                       # asks for a password; make your own account first
@@ -156,7 +158,8 @@ uv run argus user disable trader-bot           # sessions and keys stop working 
 | Market data, the screener, market context, the events calendar | Everyone |
 | Whole-server snapshot (`argus snapshot dump/load`) | Only the CLI: it holds every account's records |
 | Back up / Restore on the Data page | Each account, its own records only; a restore replaces only those |
-| Creating accounts, their keys and passwords | The CLI; in the web UI the first account (once you're in with the token), then the owner |
+| Creating an account | Anyone, on the sign-in page (unless `ARGUS_SIGNUP=off`); the first one needs the token sign-in; the CLI |
+| An account's password and API keys | That account only (and the CLI) |
 
 - **The first account takes over** everything recorded before any account existed (and, when you
   upgrade to this version with accounts already set up, the oldest account does).

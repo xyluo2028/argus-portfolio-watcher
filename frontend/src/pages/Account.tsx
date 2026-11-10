@@ -7,15 +7,14 @@ const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "–");
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") : "never");
 const message = (e: unknown) => (e instanceof ApiError ? e.message : String(e));
 
-/** Your account (password, API keys); the owner also manages everyone's. Before any account exists,
- * this is where you make the first one. */
+/** Your account: password, API keys, sharing. Every account is the same kind and manages only itself;
+ * others are created on the sign-in page. Before any account exists, this is where the first one is made. */
 export function Account({ auth }: { auth: AuthStatus }) {
   if (!auth.account) return <FirstAccount />;
   return (
     <div className="stack">
-      <MyAccount owner={!!auth.owner} />
+      <MyAccount />
       <Sharing me={auth.account.username} />
-      {auth.owner && <AllAccounts me={auth.account.username} />}
     </div>
   );
 }
@@ -43,13 +42,12 @@ function FirstAccount() {
     <form className="card stack" style={{ gap: 12, maxWidth: 520 }} onSubmit={submit}>
       <h2 style={{ margin: 0 }}>Create your account</h2>
       <p style={{ margin: 0 }}>
-        Argus has no accounts yet. This first account becomes the owner: it takes over every portfolio, watchlist, alert
-        and note recorded so far, and manages the other accounts. Sign-in then turns on for everyone, this machine
-        included.
+        Argus has no accounts yet. This first account takes over every portfolio, watchlist, alert and note recorded
+        so far. Sign-in then turns on for everyone, this machine included.
       </p>
       <div className="warn-box small">
-        Make it <strong>your</strong> account, not a bot's. Once it exists, add bots (and other people) from this page;
-        they start with nothing of yours.
+        Make it <strong>your</strong> account, not a bot's. After that, anyone (a bot too) creates their own account on
+        the sign-in page; those start empty, with nothing of yours.
       </div>
       <label className="field">Username
         <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false}
@@ -141,7 +139,7 @@ function KeyForm({ onCreate, label = "New key" }: { onCreate: (name: string, day
   );
 }
 
-function MyAccount({ owner }: { owner: boolean }) {
+function MyAccount() {
   const [data, setData] = useState<{ account: AccountInfo; via: string; keys: ApiKeyInfo[] } | null>(null);
   const [made, setMade] = useState<NewApiKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,12 +154,12 @@ function MyAccount({ owner }: { owner: boolean }) {
         <h2 style={{ margin: 0 }}>Your account</h2>
         <div className="row">
           <strong>{data.account.username}</strong>
-          {owner && <span className="tag agent">Owner</span>}
           <span className="small muted">signed in with {how} · created {day(data.account.created_at)}</span>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
           Your portfolios, watchlists, alerts, notes and DCF models are yours alone; other accounts see a portfolio only
-          when you share it.
+          when you share it. Another account (for a bot, say) is created on the sign-in page: sign out, then Create an
+          account.
         </p>
       </section>
       {!viaKey && data.account.has_password && <ChangePassword />}
@@ -206,7 +204,7 @@ function ChangePassword() {
   return (
     <form className="card stack" style={{ gap: 12 }} onSubmit={submit}>
       <h2 style={{ margin: 0 }}>Change password</h2>
-      <div className="grid-2">
+      <div className="grid-2" style={{ alignItems: "start" }}>
         <label className="field">Current password
           <input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
         </label>
@@ -215,147 +213,6 @@ function ChangePassword() {
       </div>
       {note && <div className={note.ok ? "preview" : "error"} style={{ marginTop: 0 }}>{note.text}</div>}
       <div className="row"><button className="btn primary" disabled={busy || !current || !passwordReady(password, confirm)}>Change password</button></div>
-    </form>
-  );
-}
-
-type Action = { username: string; kind: "key" | "password" } | null;
-
-function AllAccounts({ me }: { me: string }) {
-  const [data, setData] = useState<{ accounts: AccountInfo[]; keys: ApiKeyInfo[] } | null>(null);
-  const [made, setMade] = useState<NewApiKey | null>(null);
-  const [action, setAction] = useState<Action>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const load = useCallback(() => { api.accounts().then(setData, (e) => setError(message(e))); }, []);
-  useEffect(load, [load]);
-  const run = async (fn: () => Promise<unknown>, done?: string) => {
-    setError(null);
-    setNotice(null);
-    try {
-      await fn();
-      if (done) setNotice(done);
-      load();
-      return true;
-    } catch (e) {
-      setError(message(e));
-      return false;
-    }
-  };
-  if (!data) return error ? <div className="error">{error}</div> : null;
-  return (
-    <section className="card stack" style={{ gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Accounts</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        Everyone who can sign in. Each account sees only its own records. A bot is an account too: give it no password
-        and an API key. Only you, as the owner, can manage these.
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr><th style={{ textAlign: "left" }}>Username</th><th>Web sign-in</th><th>Keys</th><th>Status</th><th>Created</th><th /></tr>
-          </thead>
-          <tbody>
-            {data.accounts.map((a) => {
-              const self = a.username === me;
-              return (
-                <tr key={a.id} style={{ cursor: "default", opacity: a.disabled ? 0.5 : 1 }}>
-                  <td style={{ textAlign: "left" }}><strong>{a.username}</strong>{self && <span className="muted"> (you)</span>}</td>
-                  <td>{a.has_password ? "password" : "keys only"}</td>
-                  <td>{a.keys ?? 0}</td>
-                  <td>{a.disabled ? "disabled" : "active"}</td>
-                  <td>{day(a.created_at)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button className="btn ghost" onClick={() => setAction({ username: a.username, kind: "key" })}>New key</button>
-                    {!self && <button className="btn ghost" onClick={() => setAction({ username: a.username, kind: "password" })}>
-                      {a.has_password ? "Reset password" : "Set password"}</button>}
-                    {!self && <button className="btn ghost" onClick={() => {
-                      if (!a.disabled && !window.confirm(`Disable ${a.username}? Its sign-ins and keys stop working until you enable it.`)) return;
-                      run(() => api.setAccountDisabled(a.username, !a.disabled));
-                    }}>{a.disabled ? "Enable" : "Disable"}</button>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {action?.kind === "key" && (
-        <div className="stack" style={{ gap: 8 }}>
-          <KeyForm label={`New key for ${action.username}`} onCreate={async (name, days) => {
-            await run(async () => { setMade(await api.createAccountKey(action.username, name, days)); setAction(null); });
-          }} />
-          <div><button className="btn ghost" onClick={() => setAction(null)}>Cancel</button></div>
-        </div>
-      )}
-      {action?.kind === "password" && <ResetPassword username={action.username} onCancel={() => setAction(null)}
-        onSave={(pw) => run(() => api.resetPassword(action.username, pw), `New password set for ${action.username}; their browsers were signed out.`)
-          .then((ok) => { if (ok) setAction(null); })} />}
-      {made && <NewKey made={made} onClose={() => setMade(null)} />}
-      {notice && <div className="preview" style={{ marginTop: 0 }}>{notice}</div>}
-
-      <AddAccount onAdd={(username, password) => run(() => api.createAccount(username, password),
-        `Created ${username}.${password ? "" : " Make it a key with New key."}`)} />
-
-      <h2 style={{ margin: "8px 0 0" }}>Everyone's API keys</h2>
-      <KeyTable keys={data.keys} showAccount onRevoke={(k) => {
-        if (!window.confirm(`Revoke ${k.username}'s key "${k.name}"? Whatever uses it stops working at once.`)) return;
-        run(() => api.revokeAnyKey(k.id));
-      }} />
-      {error && <div className="error">{error}</div>}
-    </section>
-  );
-}
-
-function ResetPassword({ username, onSave, onCancel }: { username: string; onSave: (pw: string) => void; onCancel: () => void }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  return (
-    <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); onSave(password); }}>
-      <div className="grid-2">
-        <NewPasswordFields label={`New password for ${username}`} password={password} confirm={confirm}
-                           onPassword={setPassword} onConfirm={setConfirm} />
-      </div>
-      <div className="row">
-        <button className="btn primary" disabled={!passwordReady(password, confirm)}>Set password</button>
-        <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
-      </div>
-    </form>
-  );
-}
-
-function AddAccount({ onAdd }: { onAdd: (username: string, password: string | null) => Promise<boolean> }) {
-  const [username, setUsername] = useState("");
-  const [withPassword, setWithPassword] = useState(false);
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const ready = username.trim() !== "" && (!withPassword || passwordReady(password, confirm));
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    if (await onAdd(username.trim(), withPassword ? password : null)) {
-      setUsername(""); setPassword(""); setConfirm("");
-    }
-    setBusy(false);
-  };
-  return (
-    <form className="stack" style={{ gap: 8, borderTop: "1px solid var(--border)", paddingTop: 12 }} onSubmit={submit}>
-      <h2 style={{ margin: 0 }}>Add an account</h2>
-      <div className="grid-2">
-        <label className="field">Username
-          <input className="input" autoCapitalize="none" spellCheck={false} placeholder="e.g. trader-bot" autoComplete="off"
-                 value={username} onChange={(e) => setUsername(e.target.value)} />
-        </label>
-        <label className="row small" style={{ alignSelf: "end", minHeight: 30 }}>
-          <input type="checkbox" checked={withPassword} onChange={(e) => setWithPassword(e.target.checked)} />
-          Can sign in to the web UI (needs a password)
-        </label>
-        {withPassword && <NewPasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />}
-      </div>
-      <p className="small muted" style={{ margin: 0 }}>Without a password it signs in with API keys only, which suits a bot.</p>
-      <div className="row"><button className="btn primary" disabled={busy || !ready}>Add account</button></div>
     </form>
   );
 }

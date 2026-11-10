@@ -365,11 +365,7 @@ NOT_PER_ACCOUNT = {
     ("GET", "/api/compare/history"), ("GET", "/api/health"), ("GET", "/api/auth/status"),
     ("POST", "/api/auth/login"), ("POST", "/api/auth/logout"), ("GET", "/api/account"),
     ("PUT", "/api/account/password"), ("POST", "/api/account/keys"), ("DELETE", "/api/account/keys/{key_id}"),
-    ("POST", "/api/auth/setup"),
-    # The owner's account management: refused to anyone else (tests/test_accounts.py).
-    ("GET", "/api/accounts"), ("POST", "/api/accounts"), ("PATCH", "/api/accounts/{username}"),
-    ("PUT", "/api/accounts/{username}/password"), ("POST", "/api/accounts/{username}/keys"),
-    ("DELETE", "/api/accounts/keys/{key_id}"),
+    ("POST", "/api/auth/setup"), ("POST", "/api/auth/signup"),
 }
 
 

@@ -225,7 +225,7 @@ export interface AuthStatus {
   methods: SignInMethod[];
   account: { id: number; username: string } | null;
   setup?: boolean;  // no account yet: the first one can be made from the UI (with the token, when one is set)
-  owner?: boolean;  // the oldest account, signed in with a password or the token: manages the others
+  signup?: boolean;  // the sign-in page offers Create account (every account is the same kind)
 }
 
 export interface AccountInfo { id: number; username: string; has_password: boolean; disabled: boolean; created_at: string; keys?: number }
@@ -537,21 +537,13 @@ export const api = {
     send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),
   setup: (body: { username: string; password: string; token?: string }) =>
     send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/setup", body),
+  signup: (username: string, password: string) =>
+    send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/signup", { username, password }),
   account: () => get<{ account: AccountInfo; via: string; keys: ApiKeyInfo[] }>("/api/account"),
   changePassword: (current_password: string, new_password: string) =>
     send<AccountInfo>("PUT", "/api/account/password", { current_password, new_password }),
   createKey: (name: string, expires_days?: number) => send<NewApiKey>("POST", "/api/account/keys", { name, expires_days }),
   revokeKey: (id: number) => send<ApiKeyInfo>("DELETE", `/api/account/keys/${id}`),
-  accounts: () => get<{ accounts: AccountInfo[]; keys: ApiKeyInfo[] }>("/api/accounts"),
-  createAccount: (username: string, password: string | null) =>
-    send<AccountInfo>("POST", "/api/accounts", { username, password }),
-  setAccountDisabled: (username: string, disabled: boolean) =>
-    send<AccountInfo>("PATCH", `/api/accounts/${enc(username)}`, { disabled }),
-  resetPassword: (username: string, password: string) =>
-    send<AccountInfo>("PUT", `/api/accounts/${enc(username)}/password`, { password }),
-  createAccountKey: (username: string, name: string, expires_days?: number) =>
-    send<NewApiKey>("POST", `/api/accounts/${enc(username)}/keys`, { name, expires_days }),
-  revokeAnyKey: (id: number) => send<ApiKeyInfo>("DELETE", `/api/accounts/keys/${id}`),
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),

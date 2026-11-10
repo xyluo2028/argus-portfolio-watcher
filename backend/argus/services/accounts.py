@@ -6,9 +6,11 @@ hash is enough to make a stolen database useless for signing in). Once any accou
 request has to sign in, from this machine too (see argus.api.auth). Each account sees only its own
 records (argus.access); the first one takes over what was recorded before it.
 
-Who can make accounts: the CLI (whoever has a shell here can read the database anyway); the web
-UI's first-run setup while there are none (with ARGUS_TOKEN when it is set); and after that the
-owner, the oldest account, signed in with its password or the token (never an API key).
+Every account is the same kind, whoever uses it: a person or a bot. Who can make one: the CLI; the
+web UI's first-run setup while there are none (signed in with ARGUS_TOKEN when it is set, because
+the first account takes over the existing records); and after that anyone on the sign-in page,
+unless ARGUS_SIGNUP=off. No account manages another: disabling one or resetting its password is
+for the CLI.
 """
 
 from __future__ import annotations
@@ -145,10 +147,6 @@ class AccountService:
             return Principal(a.id, a.username, "token") if a else Principal(None, None, "token")
 
     # -- accounts ---------------------------------------------------------------------
-    def is_owner(self, account_id: int | None) -> bool:
-        """The oldest account: the one that can manage the others from the web UI."""
-        return account_id is not None and self.first().account_id == account_id
-
     def create(self, username: str, password: str | None, actor: str = "cli", only_first: bool = False) -> dict:
         """Make an account. `only_first`: refuse once any exists (the web UI's first-run setup)."""
         name = normalize_username(username)
@@ -158,7 +156,7 @@ class AccountService:
             first = s.scalar(select(Account.id).limit(1)) is None
             if only_first and not first:
                 raise ArgusError("ALREADY_EXISTS", "Argus already has an account.",
-                                 hint="Sign in with it; its owner can add more on the Account page.")
+                                 hint="Sign in with it, or create your own on the sign-in page.")
             if s.scalar(select(Account).where(Account.username == name)):
                 raise ArgusError("ALREADY_EXISTS", f"Account '{name}' already exists.")
             a = Account(username=name, password_hash=hash_password(password) if password is not None else None)

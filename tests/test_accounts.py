@@ -142,7 +142,7 @@ def test_expired_sessions_are_refused_and_cleaned_up(argus):
 def test_no_accounts_and_no_token_stays_open(client):
     assert client.get("/api/portfolios").status_code == 200
     assert client.get("/api/auth/status").json() == {"required": False, "authenticated": True, "methods": [],
-                                                     "account": None, "setup": True, "owner": False}
+                                                     "account": None, "setup": True, "signup": False}
 
 
 def test_an_account_turns_sign_in_on_even_from_localhost(argus, client):
@@ -152,7 +152,7 @@ def test_an_account_turns_sign_in_on_even_from_localhost(argus, client):
     assert client.get("/api/stream").status_code == 401
     assert client.get("/api/auth/status").json() == {"required": True, "authenticated": False,
                                                      "methods": ["password"], "account": None, "setup": False,
-                                                     "owner": False}
+                                                     "signup": True}
 
 
 def test_password_sign_in_sets_a_session_cookie(argus, client):
@@ -267,7 +267,7 @@ def test_first_run_setup_makes_the_first_account_once_and_signs_in(argus, client
     r = client.post("/api/auth/setup", json={"username": "Me", "password": PW})
     assert r.status_code == 201 and r.json()["claimed"] == {"portfolio": 1}
     status = client.get("/api/auth/status").json()
-    assert status["account"]["username"] == "me" and status["owner"] and not status["setup"]
+    assert status["account"]["username"] == "me" and status["signup"] and not status["setup"]
     assert [p["name"] for p in client.get("/api/portfolios").json()] == ["growth"]
     again = client.post("/api/auth/setup", json={"username": "intruder", "password": PW})
     assert again.status_code == 409 and len(argus.accounts.list_accounts()) == 1
@@ -283,32 +283,33 @@ def test_setup_asks_for_the_server_token_when_one_is_set(token_client):
     assert c.get("/api/account").json()["account"]["username"] == "me"
 
 
-def test_only_the_owner_manages_accounts_and_never_with_a_key(argus, client):
+def test_anyone_can_create_an_account_on_the_sign_in_page_and_it_starts_empty(argus, client):
+    """Accounts are all the same kind: no account creates or manages another."""
+    body = {"username": "trader-bot", "password": PW}
+    assert client.post("/api/auth/signup", json=body).status_code == 403  # the first one is `setup`
     argus.accounts.create("me", PW)
-    _login(client)
-    made = client.post("/api/accounts", json={"username": "trader-bot"}).json()
-    assert made["username"] == "trader-bot" and not made["has_password"]
-    key = client.post("/api/accounts/trader-bot/keys", json={"name": "sim"}).json()
-    assert key["key"].startswith("argus_")
-    listed = client.get("/api/accounts").json()
-    assert [x["username"] for x in listed["accounts"]] == ["me", "trader-bot"] and len(listed["keys"]) == 1
-    assert "key" not in listed["keys"][0] and "key_hash" not in listed["keys"][0]
-    assert client.post("/api/accounts", json={"username": "friend", "password": PW}).status_code == 201
-    assert client.put("/api/accounts/friend/password", json={"password": PW + "2"}).status_code == 200
-    assert client.patch("/api/accounts/friend", json={"disabled": True}).json()["disabled"]
-    assert client.patch("/api/accounts/me", json={"disabled": True}).status_code == 400  # not yourself
-    assert client.put("/api/accounts/me/password", json={"password": PW + "2"}).status_code == 400
+    argus.portfolios.create_portfolio("growth")  # mine (DEFAULT is the oldest account)
+    r = client.post("/api/auth/signup", json=body)
+    assert r.status_code == 201 and "argus_session" in r.headers["set-cookie"]
+    assert client.get("/api/account").json()["account"]["username"] == "trader-bot"
+    assert client.get("/api/portfolios").json() == []  # nothing of mine
+    key = client.post("/api/account/keys", json={"name": "sim"}).json()["key"]  # it makes its own key
+    assert client.get("/api/portfolios", headers={"Authorization": f"Bearer {key}"}).status_code == 200
+    assert client.post("/api/auth/signup", json=body).status_code == 409  # the name is taken
+    assert client.post("/api/auth/signup", json={"username": "x", "password": "short"}).status_code == 400
+    for path in ("/api/accounts", "/api/accounts/me/keys"):  # no route manages other accounts
+        assert client.get(path).status_code == 404
 
-    # A Bearer key is checked before the cookie, so these act as the bot.
-    bot = {"Authorization": f"Bearer {key['key']}"}
-    assert client.get("/api/auth/status", headers=bot).json()["owner"] is False
-    for method, path, body in [("GET", "/api/accounts", None), ("POST", "/api/accounts", {"username": "x"}),
-                               ("PATCH", "/api/accounts/me", {"disabled": True}),
-                               ("PUT", "/api/accounts/me/password", {"password": PW + "3"}),
-                               ("POST", "/api/accounts/me/keys", {"name": "steal"}),
-                               ("DELETE", f"/api/accounts/keys/{key['id']}", None)]:
-        assert client.request(method, path, json=body, headers=bot).status_code == 403, path
-    # Even the owner's own API key can't: a leaked key mustn't be able to make accounts.
-    mine = argus.accounts.create_key("me", "script")["key"]
-    assert client.get("/api/accounts", headers={"Authorization": f"Bearer {mine}"}).status_code == 403
-    assert client.delete(f"/api/accounts/keys/{key['id']}").json()["active"] is False
+
+def test_sign_up_can_be_switched_off_and_is_capped(settings, monkeypatch):
+    a = Argus(replace(settings, signup=False))
+    a.accounts.create("me", PW)
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        assert c.get("/api/auth/status").json()["signup"] is False
+        assert c.post("/api/auth/signup", json={"username": "x", "password": PW}).status_code == 403
+    monkeypatch.setattr(server, "SIGNUP_LIMIT", 2)
+    b = Argus(replace(settings, db_path=settings.data_dir / "b.sqlite"))
+    b.accounts.create("me", PW)
+    with TestClient(create_app(b, start_hub=False), base_url="http://localhost") as c:
+        codes = [c.post("/api/auth/signup", json={"username": f"u{i}", "password": PW}).status_code for i in range(3)]
+        assert codes == [201, 201, 429]

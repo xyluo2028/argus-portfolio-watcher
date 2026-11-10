@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type AuthStatus, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
+import { NewPasswordFields, passwordReady } from "./components/PasswordFields";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
@@ -67,7 +68,7 @@ function SignIn({ auth, onDone }: { auth: AuthStatus; onDone: () => void }) {
     <main style={{ maxWidth: 760, margin: "10vh auto 0", padding: "0 16px" }}>
       <div className="brand" style={{ marginBottom: 16 }}><span className="brand-dot" aria-hidden />Argus</div>
       <div className="grid-2" style={{ alignItems: "start" }}>
-        <PasswordSignIn noAccounts={!!auth.setup} onDone={onDone} />
+        <PasswordSignIn noAccounts={!!auth.setup} canSignUp={!!auth.signup} onDone={onDone} />
         {hasToken && <TokenSignIn hasAccounts={!auth.setup}
                                   onDone={auth.setup ? () => window.location.assign("/account") : onDone} />}
       </div>
@@ -76,21 +77,36 @@ function SignIn({ auth, onDone }: { auth: AuthStatus; onDone: () => void }) {
   );
 }
 
-function PasswordSignIn({ noAccounts, onDone }: { noAccounts: boolean; onDone: () => void }) {
+/** Sign in with an account, or (when the server allows it) create one: every account is the same
+ * kind, whether a person or a bot uses it, and a new one starts with no records. */
+function PasswordSignIn({ noAccounts, canSignUp, onDone }: { noAccounts: boolean; canSignUp: boolean; onDone: () => void }) {
+  const [creating, setCreating] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const { error, busy, submit } = useSubmit(() => api.login({ username: username.trim(), password }), onDone);
+  const [confirm, setConfirm] = useState("");
+  const { error, setError, busy, submit } = useSubmit(
+    () => (creating ? api.signup(username.trim(), password) : api.login({ username: username.trim(), password })), onDone);
+  const ready = username.trim() !== "" && (creating ? passwordReady(password, confirm) : password !== "");
+  const switchTo = (create: boolean) => { setCreating(create); setError(null); setPassword(""); setConfirm(""); };
   return (
     <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Account</h2>
+      <h2 style={{ margin: 0 }}>{creating ? "Create account" : "Account"}</h2>
       <label className="field">Username
         <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus={!noAccounts}
                value={username} onChange={(e) => setUsername(e.target.value)} disabled={noAccounts} />
       </label>
-      <label className="field">Password
-        <input className="input" type="password" autoComplete="current-password" value={password}
-               onChange={(e) => setPassword(e.target.value)} disabled={noAccounts} />
-      </label>
+      {creating ? <NewPasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} /> : (
+        <label className="field">Password
+          <input className="input" type="password" autoComplete="current-password" value={password}
+                 onChange={(e) => setPassword(e.target.value)} disabled={noAccounts} />
+        </label>
+      )}
+      {creating && (
+        <p className="small muted" style={{ margin: 0 }}>
+          A new account starts empty, with its own portfolios, watchlists, alerts and notes. For a bot, create its
+          account here, then make it an API key on its Account page.
+        </p>
+      )}
       {noAccounts && (
         <div className="warn-box small">
           There are no accounts yet. Sign in with the server token, and you'll go to the Account page to create
@@ -98,7 +114,14 @@ function PasswordSignIn({ noAccounts, onDone }: { noAccounts: boolean; onDone: (
         </div>
       )}
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" disabled={noAccounts || busy || !username.trim() || !password}>{busy ? "Signing in…" : "Sign in"}</button>
+      <button className="btn primary" disabled={noAccounts || busy || !ready}>
+        {creating ? (busy ? "Creating…" : "Create account") : (busy ? "Signing in…" : "Sign in")}
+      </button>
+      {canSignUp && (
+        <button type="button" className="btn" onClick={() => switchTo(!creating)}>
+          {creating ? "I have an account: sign in" : "Create an account"}
+        </button>
+      )}
     </form>
   );
 }
@@ -115,7 +138,7 @@ function TokenSignIn({ hasAccounts, onDone }: { hasAccounts: boolean; onDone: ()
       </label>
       <p className="small muted" style={{ margin: 0 }}>
         The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>.
-        {hasAccounts ? " It signs you in as the owner (the oldest account)." : " Then create your account."}
+        {hasAccounts ? " It signs you in as the oldest account." : " Then create your account."}
       </p>
       {error && <div className="error">{error}</div>}
       <button className="btn primary" disabled={busy || !token.trim()}>{busy ? "Signing in…" : "Sign in"}</button>
