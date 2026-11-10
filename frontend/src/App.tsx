@@ -6,6 +6,7 @@ import { NewPasswordFields, passwordReady } from "./components/PasswordFields";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
+import { SharedBy, portfolioKey } from "./portfolioAccess";
 import { useLive } from "./useLive";
 
 // Every page but the dashboard loads on first visit, so the first screen downloads less.
@@ -156,6 +157,18 @@ function Main({ auth }: { auth: AuthStatus }) {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [pathname]);
 
+  // Escape closes the phone menu wherever focus is: Safari doesn't focus a button you tap.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButton.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   const [portfolios, setPortfolios] = useState<PortfolioRef[] | null>(null);
   const [current, setCurrent] = useState<string>(() => {
     try {
@@ -169,7 +182,9 @@ function Main({ auth }: { auth: AuthStatus }) {
   const loadPortfolios = useCallback(() => {
     api.portfolios().then((ps) => {
       setPortfolios(ps);
-      setCurrent((c) => (ps.some((p) => p.name === c) || (c === ALL && ps.length > 1) ? c : ps[0]?.name ?? ""));
+      const own = ps.filter((p) => !p.shared);
+      setCurrent((c) => (ps.some((p) => portfolioKey(p) === c) || (c === ALL && own.length > 1) ? c
+        : (own[0] ?? ps[0]) ? portfolioKey(own[0] ?? ps[0]) : ""));
     }, () => setPortfolios([]));
   }, []);
   useEffect(loadPortfolios, [loadPortfolios]);
@@ -183,6 +198,9 @@ function Main({ auth }: { auth: AuthStatus }) {
   }, [current]);
 
   const { data: live, connected } = useLive(current || undefined);
+  const own = (portfolios ?? []).filter((p) => !p.shared);
+  const shared = (portfolios ?? []).filter((p) => p.shared);
+  const sharedBy = shared.find((p) => portfolioKey(p) === current)?.owner ?? null;
   const signOut = () => { api.logout().finally(() => window.location.reload()); };
   const signedInAs = auth.account ? `Signed in as ${auth.account.username}` : "Signed in with the server token";
   const signOutLabel = `Sign out${auth.account ? ` ${auth.account.username}` : ""}`;
@@ -190,12 +208,7 @@ function Main({ auth }: { auth: AuthStatus }) {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <header className="topbar" onKeyDown={(e) => {
-        if (e.key === "Escape" && menuOpen) {
-          setMenuOpen(false);
-          menuButton.current?.focus();
-        }
-      }}>
+      <header className="topbar">
         <div className="brand"><span className="brand-dot" aria-hidden />Argus</div>
         <button ref={menuButton} className="btn menu-toggle" aria-expanded={menuOpen} aria-controls="primary-nav"
                 onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? "Close" : "Menu"}</button>
@@ -216,8 +229,24 @@ function Main({ auth }: { auth: AuthStatus }) {
         </nav>
         {portfolios && portfolios.length > 0 && (
           <select className="portfolio-picker" value={current} onChange={(e) => setCurrent(e.target.value)} aria-label="Portfolio">
-            {portfolios.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
-            {portfolios.length > 1 && <option value={ALL}>All portfolios</option>}
+            {shared.length === 0 ? (
+              <>
+                {own.map((p) => <option key={p.id} value={portfolioKey(p)}>{p.name}</option>)}
+                {own.length > 1 && <option value={ALL}>All portfolios</option>}
+              </>
+            ) : (
+              <>
+                {own.length > 0 && (
+                  <optgroup label="Mine">
+                    {own.map((p) => <option key={p.id} value={portfolioKey(p)}>{p.name}</option>)}
+                    {own.length > 1 && <option value={ALL}>All my portfolios</option>}
+                  </optgroup>
+                )}
+                <optgroup label="Shared with me">
+                  {shared.map((p) => <option key={p.id} value={portfolioKey(p)}>{p.name} · {p.owner}</option>)}
+                </optgroup>
+              </>
+            )}
           </select>
         )}
         <TickerSearch />
@@ -229,6 +258,7 @@ function Main({ auth }: { auth: AuthStatus }) {
         )}
       </header>
       <main id="main-content" tabIndex={-1}>
+        <SharedBy.Provider value={sharedBy}>
         <Suspense fallback={<p className="muted">Loading…</p>}>
         {portfolios === null ? <p className="muted">Loading…</p>
           : portfolios.length === 0 ? (
@@ -261,6 +291,7 @@ function Main({ auth }: { auth: AuthStatus }) {
             </Routes>
           )}
         </Suspense>
+        </SharedBy.Provider>
       </main>
     </>
   );

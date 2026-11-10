@@ -501,6 +501,10 @@ export interface ScreenResult { status: ScreenerStatus; matches: number; rows: S
 
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
+  sharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("PUT", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
+  unsharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("DELETE", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
   fundamentalSeries: (symbol: string, period: string) =>
     get<FundamentalSeries>(`/api/fundamental-series/${enc(symbol)}?period=${period}`),

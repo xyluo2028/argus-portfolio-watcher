@@ -32,7 +32,7 @@ function DeletePortfolioCard({ onDeleted }: { onDeleted: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.portfolios().then(setPortfolios, () => setPortfolios([]));
+  const load = () => api.portfolios().then((ps) => setPortfolios(ps.filter((p) => !p.shared)), () => setPortfolios([]));
   useEffect(() => { load(); }, []);
 
   useEffect(() => {

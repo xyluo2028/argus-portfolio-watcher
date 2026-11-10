@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, type AccountInfo, type ApiKeyInfo, type AuthStatus, type NewApiKey } from "../api";
+import { useLocation } from "react-router-dom";
+import { ApiError, api, type AccountInfo, type ApiKeyInfo, type AuthStatus, type NewApiKey, type PortfolioRef } from "../api";
 import { NewPasswordFields, passwordReady } from "../components/PasswordFields";
 
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "–");
@@ -13,6 +14,7 @@ export function Account({ auth }: { auth: AuthStatus }) {
   return (
     <div className="stack">
       <MyAccount owner={!!auth.owner} />
+      <Sharing me={auth.account.username} />
       {auth.owner && <AllAccounts me={auth.account.username} />}
     </div>
   );
@@ -351,5 +353,82 @@ function AddAccount({ onAdd }: { onAdd: (username: string, password: string | nu
       <p className="small muted" style={{ margin: 0 }}>Without a password it signs in with API keys only, which suits a bot.</p>
       <div className="row"><button className="btn primary" disabled={busy || !ready}>Add account</button></div>
     </form>
+  );
+}
+
+/** Share your portfolios read-only with other accounts, and see what others share with you. */
+function Sharing({ me }: { me: string }) {
+  const [portfolios, setPortfolios] = useState<PortfolioRef[] | null>(null);
+  const [who, setWho] = useState<Record<number, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const { hash } = useLocation();
+  const load = useCallback(() => { api.portfolios().then(setPortfolios, (e) => setError(message(e))); }, []);
+  useEffect(load, [load]);
+  useEffect(() => {  // the dashboard's Share button lands here
+    if (portfolios && hash === "#sharing") document.getElementById("sharing")?.scrollIntoView({ block: "start" });
+  }, [portfolios, hash]);
+  if (!portfolios) return null;
+  const own = portfolios.filter((p) => !p.shared);
+  const shared = portfolios.filter((p) => p.shared);
+  const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try { await fn(); load(); return true; } catch (e) { setError(message(e)); return false; }
+  };
+  return (
+    <section className="card stack" id="sharing" style={{ gap: 12, scrollMarginTop: 120 }}>
+      <h2 style={{ margin: 0 }}>Sharing</h2>
+      <p className="small muted" style={{ margin: 0 }}>
+        Let another account see one of your portfolios, read-only: its positions, performance and analysis. They can't
+        change anything, and it never counts toward their "all portfolios". To watch a bot's portfolio, the bot shares it
+        with you ({`argus --as <bot> portfolio share <portfolio> --with ${me}`}, or its share_portfolio MCP tool).
+      </p>
+      {own.length === 0 ? <p className="muted small" style={{ margin: 0 }}>You have no portfolios yet.</p> : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th style={{ textAlign: "left" }}>Your portfolio</th><th style={{ textAlign: "left" }}>Shared with</th><th /></tr></thead>
+            <tbody>
+              {own.map((p) => (
+                <tr key={p.id} style={{ cursor: "default" }}>
+                  <td style={{ textAlign: "left" }}><strong>{p.name}</strong></td>
+                  <td style={{ textAlign: "left" }}>
+                    <div className="row">
+                      {(p.shared_with ?? []).length === 0 && <span className="muted small">nobody</span>}
+                      {(p.shared_with ?? []).map((u) => (
+                        <span key={u} className="chip">{u}
+                          <button className="btn ghost" style={{ padding: "0 4px" }} aria-label={`Stop sharing ${p.name} with ${u}`}
+                                  onClick={() => act(() => api.unsharePortfolio(p.name, u))}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <form className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }} onSubmit={async (e) => {
+                      e.preventDefault();
+                      const u = (who[p.id] ?? "").trim();
+                      if (u && await act(() => api.sharePortfolio(p.name, u))) setWho({ ...who, [p.id]: "" });
+                    }}>
+                      <input className="input" style={{ flex: "0 1 160px", width: 160, minWidth: 0 }} placeholder="username" autoCapitalize="none"
+                             spellCheck={false} aria-label={`Share ${p.name} with`} value={who[p.id] ?? ""}
+                             onChange={(e) => setWho({ ...who, [p.id]: e.target.value })} />
+                      <button className="btn" disabled={!(who[p.id] ?? "").trim()}>Share</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {shared.length > 0 && (
+        <>
+          <h2 style={{ margin: "4px 0 0" }}>Shared with you</h2>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {shared.map((p) => <li key={p.id}><strong>{p.name}</strong> <span className="muted">from {p.owner}, read-only</span></li>)}
+          </ul>
+          <p className="small muted" style={{ margin: 0 }}>Pick them under "Shared with me" in the portfolio menu.</p>
+        </>
+      )}
+      {error && <div className="error">{error}</div>}
+    </section>
   );
 }

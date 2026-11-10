@@ -59,7 +59,11 @@ test("phone menu reaches every page, closes after navigation, and exposes market
   const menu = page.getByRole("button", { name: "Menu", exact: true });
   await expect(nav).toBeHidden();
   await menu.tap();
-  await expect(nav.getByRole("link")).toHaveCount(9);
+  await expect(nav.getByRole("link")).toHaveCount(11);
+  await nav.getByRole("link", { name: "Account" }).tap();
+  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();  // no account yet
+  await noPageOverflow(page);
+  await menu.tap();
   await nav.getByRole("link", { name: "Transactions" }).tap();
   await expect(page).toHaveURL(/\/transactions$/);
   await expect(nav).toBeHidden();

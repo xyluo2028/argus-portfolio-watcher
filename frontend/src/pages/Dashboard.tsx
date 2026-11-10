@@ -7,6 +7,7 @@ import { HoldingsTable } from "../components/HoldingsTable";
 import { HoldingsTabs } from "../components/HoldingsTabs";
 import { PortfolioHeatmap } from "../components/PortfolioHeatmap";
 import { extLabel, money, pct, tone } from "../format";
+import { useSharedBy } from "../portfolioAccess";
 
 // The chart library is the biggest dependency: let the numbers render first.
 const PerformanceCard = lazy(() => import("../components/PerformanceCard").then((m) => ({ default: m.PerformanceCard })));
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function Dashboard({ portfolio, live }: Props) {
+  const sharedBy = useSharedBy();
   const [initial, setInitial] = useState<Summary | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -49,7 +51,11 @@ export function Dashboard({ portfolio, live }: Props) {
   return (
     <div className="stack">
       <section className="card">
-        <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
+          {sharedBy ? <span className="tag" title="You can view it; only its owner can change it">Shared by {sharedBy} · read-only</span>
+            : summary.portfolio.name !== ALL && <Link className="btn ghost small" to="/account#sharing">Share</Link>}
+        </div>
         <div className="hero-value">{money(t.market_value)}</div>
         <div className={`hero-delta ${tone(t.day_pnl)}`}>
           {money(t.day_pnl, { signed: true })} ({pct(t.day_pnl_pct)}) {["closed", "pre"].includes(summary.market.session) ? "last session" : "today"}

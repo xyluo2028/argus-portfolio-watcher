@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api, type Txn, type TxnDraft, type TxnResult } from "../api";
 import { TickerInput } from "../components/TickerInput";
 import { money, price } from "../format";
+import { useSharedBy } from "../portfolioAccess";
 
 const TYPES = ["BUY", "SELL", "DIVIDEND", "SPLIT", "FEE"] as const;
 const SOURCE_LABEL: Record<string, string> = { ui: "You (web)", cli: "You (CLI)", mcp: "Agent", import: "Import" };
@@ -9,6 +10,7 @@ const SOURCE_LABEL: Record<string, string> = { ui: "You (web)", cli: "You (CLI)"
 const empty = { type: "BUY", symbol: "", qty: "", price: "", fee: "", amount: "", date: "", note: "" };
 
 export function Transactions({ portfolio }: { portfolio: string }) {
+  const sharedBy = useSharedBy();
   const [txns, setTxns] = useState<Txn[] | null>(null);
   const [filter, setFilter] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
@@ -72,7 +74,12 @@ export function Transactions({ portfolio }: { portfolio: string }) {
 
   return (
     <div className="stack">
-      <section className="card">
+      {sharedBy ? (
+        <section className="card">
+          <p style={{ margin: 0 }}><strong>{sharedBy}</strong> shares this portfolio with you read-only: you can see its trades, but
+            only they can record or change them.</p>
+        </section>
+      ) : <section className="card">
         <h2>Record a transaction <span className="muted small">· this records a trade you made; it never places an order</span></h2>
         <form className="row" onSubmit={(e) => { e.preventDefault(); submit(true); }}>
           <select value={form.type} onChange={set("type")} aria-label="Type">{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
@@ -105,7 +112,7 @@ export function Transactions({ portfolio }: { portfolio: string }) {
           </div>
         )}
         {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
-      </section>
+      </section>}
 
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
@@ -132,7 +139,7 @@ export function Transactions({ portfolio }: { portfolio: string }) {
                   <td>{t.amount ? money(t.amount) : t.fee ? money(t.fee) : ""}</td>
                   <td><span className={`tag ${t.source === "mcp" ? "agent" : ""}`}>{SOURCE_LABEL[t.source] ?? t.source}</span></td>
                   <td style={{ textAlign: "left", whiteSpace: "normal" }} className="text-2 small">{t.note ?? ""}</td>
-                  <td>{!t.deleted && <button className="btn ghost" title="Delete" onClick={() => remove(t)}>×</button>}</td>
+                  <td>{!t.deleted && !sharedBy && <button className="btn ghost" title="Delete" onClick={() => remove(t)}>×</button>}</td>
                 </tr>
               ))}
             </tbody>
