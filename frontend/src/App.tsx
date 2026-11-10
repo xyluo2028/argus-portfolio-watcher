@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ALL, ApiError, UNAUTHORIZED_EVENT, api, type AuthStatus, type PortfolioRef } from "./api";
 import { LiveBadge } from "./components/LiveBadge";
-import { NewPasswordFields, passwordReady } from "./components/PasswordFields";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { TickerSearch } from "./components/TickerSearch";
 import { Dashboard } from "./pages/Dashboard";
@@ -59,22 +58,25 @@ function useSubmit(action: () => Promise<unknown>, onDone: () => void) {
   return { error, setError, busy, submit };
 }
 
-/** Two ways in, side by side: an account (or, before there is one, making it), and the server token. */
+/** Two ways in, side by side: an account's username and password, and the server token. Before any
+ * account exists, the token is the way in, and the first account is made on the Account page (the
+ * token sign-in shows it's your server; otherwise anyone who reached it could claim it). */
 function SignIn({ auth, onDone }: { auth: AuthStatus; onDone: () => void }) {
   const hasToken = auth.methods.includes("token");
   return (
     <main style={{ maxWidth: 760, margin: "10vh auto 0", padding: "0 16px" }}>
       <div className="brand" style={{ marginBottom: 16 }}><span className="brand-dot" aria-hidden />Argus</div>
       <div className="grid-2" style={{ alignItems: "start" }}>
-        {auth.setup ? <CreateFirstAccount needsToken={hasToken} onDone={onDone} /> : <PasswordSignIn onDone={onDone} />}
-        {hasToken && <TokenSignIn hasAccounts={!auth.setup} onDone={onDone} />}
+        <PasswordSignIn noAccounts={!!auth.setup} onDone={onDone} />
+        {hasToken && <TokenSignIn hasAccounts={!auth.setup}
+                                  onDone={auth.setup ? () => window.location.assign("/account") : onDone} />}
       </div>
       <p className="small muted">You stay signed in on this browser for 90 days.</p>
     </main>
   );
 }
 
-function PasswordSignIn({ onDone }: { onDone: () => void }) {
+function PasswordSignIn({ noAccounts, onDone }: { noAccounts: boolean; onDone: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const { error, busy, submit } = useSubmit(() => api.login({ username: username.trim(), password }), onDone);
@@ -82,47 +84,21 @@ function PasswordSignIn({ onDone }: { onDone: () => void }) {
     <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
       <h2 style={{ margin: 0 }}>Account</h2>
       <label className="field">Username
-        <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus
-               value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus={!noAccounts}
+               value={username} onChange={(e) => setUsername(e.target.value)} disabled={noAccounts} />
       </label>
       <label className="field">Password
         <input className="input" type="password" autoComplete="current-password" value={password}
-               onChange={(e) => setPassword(e.target.value)} />
+               onChange={(e) => setPassword(e.target.value)} disabled={noAccounts} />
       </label>
-      {error && <div className="error">{error}</div>}
-      <button className="btn primary" disabled={busy || !username.trim() || !password}>{busy ? "Signing in…" : "Sign in"}</button>
-    </form>
-  );
-}
-
-function CreateFirstAccount({ needsToken, onDone }: { needsToken: boolean; onDone: () => void }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [token, setToken] = useState("");
-  const { error, busy, submit } = useSubmit(
-    () => api.setup({ username: username.trim(), password, token: needsToken ? token.trim() : undefined }), onDone);
-  const ready = username.trim() !== "" && passwordReady(password, confirm) && (!needsToken || token.trim() !== "");
-  return (
-    <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Create your account</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        Argus has no accounts yet. The first one is the owner: it takes over every portfolio, watchlist, alert and
-        note recorded so far, and can add accounts for bots or other people later.
-      </p>
-      <label className="field">Username
-        <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus
-               value={username} onChange={(e) => setUsername(e.target.value)} />
-      </label>
-      <NewPasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
-      {needsToken && (
-        <label className="field">Access token
-          <input className="input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
-          <span className="small muted">The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>, to show it's your server.</span>
-        </label>
+      {noAccounts && (
+        <div className="warn-box small">
+          There are no accounts yet. Sign in with the server token, and you'll go to the Account page to create
+          yours (just a username and password).
+        </div>
       )}
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" disabled={busy || !ready}>{busy ? "Creating…" : "Create account and sign in"}</button>
+      <button className="btn primary" disabled={noAccounts || busy || !username.trim() || !password}>{busy ? "Signing in…" : "Sign in"}</button>
     </form>
   );
 }
@@ -139,7 +115,7 @@ function TokenSignIn({ hasAccounts, onDone }: { hasAccounts: boolean; onDone: ()
       </label>
       <p className="small muted" style={{ margin: 0 }}>
         The <code>ARGUS_TOKEN</code> from the server's <code>.env</code>.
-        {hasAccounts ? " It signs you in as the owner (the oldest account)." : ""}
+        {hasAccounts ? " It signs you in as the owner (the oldest account)." : " Then create your account."}
       </p>
       {error && <div className="error">{error}</div>}
       <button className="btn primary" disabled={busy || !token.trim()}>{busy ? "Signing in…" : "Sign in"}</button>

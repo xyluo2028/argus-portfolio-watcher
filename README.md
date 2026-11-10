@@ -63,9 +63,9 @@ Argus starts without sign-in, for use on your own machine. Create an account to 
 every request: the web UI asks for a username and password (or the server token), and bots, scripts
 and MCP clients send an account's API key.
 
-In the web UI: until an account exists, the sign-in page (or, without `ARGUS_TOKEN`, the **Account**
-page) offers **Create your account**, which asks for `ARGUS_TOKEN` when one is set. That first
-account is the owner: its Account page adds accounts for bots or people, makes their API keys,
+In the web UI: until an account exists, sign in with `ARGUS_TOKEN` (without one, the UI is open
+anyway) and create your account on the **Account** page: just a username and password. Make it
+yours, not a bot's. That first account is the owner: its Account page adds accounts for bots or people, makes their API keys,
 resets passwords and disables accounts. Every account changes its own password and manages its own
 keys there. Or from the terminal:
 

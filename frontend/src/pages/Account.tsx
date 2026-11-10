@@ -43,10 +43,14 @@ function FirstAccount() {
     <form className="card stack" style={{ gap: 12, maxWidth: 520 }} onSubmit={submit}>
       <h2 style={{ margin: 0 }}>Create your account</h2>
       <p style={{ margin: 0 }}>
-        Argus has no accounts yet, so anyone who can reach it can use it. Your account becomes the owner: it takes over
-        every portfolio, watchlist, alert and note recorded so far, and sign-in turns on for everyone, this machine
-        included. Then add accounts for bots or other people below.
+        Argus has no accounts yet. This first account becomes the owner: it takes over every portfolio, watchlist, alert
+        and note recorded so far, and manages the other accounts. Sign-in then turns on for everyone, this machine
+        included.
       </p>
+      <div className="warn-box small">
+        Make it <strong>your</strong> account, not a bot's. Once it exists, add bots (and other people) from this page;
+        they start with nothing of yours.
+      </div>
       <label className="field">Username
         <input className="input" autoComplete="username" autoCapitalize="none" spellCheck={false}
                value={username} onChange={(e) => setUsername(e.target.value)} />
