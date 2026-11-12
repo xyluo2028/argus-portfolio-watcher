@@ -38,9 +38,11 @@ def _close_on_or_before(closes: dict[date, float], d: date) -> tuple[date, float
 
 
 def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], bench: str = "SPY",
-            factors: dict[date, dict[str, float]] | None = None) -> dict:
+            factors: dict[date, dict[str, float]] | None = None,
+            book_day: tuple[date, float, float | None] | None = None) -> dict:
     """`values`: market value per holding. `closes`: daily closes per symbol, the benchmark included
-    (with enough history for the stress windows)."""
+    (with enough history for the stress windows). `book_day`: (session, Day P&L, Day P&L %) of the
+    shares actually held through that session; used for `last_day` when it is the latest session."""
     total = sum(v for v in values.values() if v and v > 0)
     syms = [s for s, v in values.items() if v and v > 0]
     if not syms:
@@ -82,11 +84,17 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
                 "var_value": float(-cut * total), "cvar_value": float(-tail.mean() * total)}
 
     var99 = var_cvar(0.99)
-    # Today's holdings over the latest session, in dollars of their value before it (as Day P&L
-    # counts it, trades aside), against the 99% VaR shown beside it.
-    last_r = filled[-1]
-    move = float(np.sum(w * total * last_r / (1 + last_r)))
-    last_day = {"date": days[-1].isoformat(), "return_pct": move / (total - move) * 100, "value": move,
+    # The latest session's P&L against the 99% VaR shown beside it. It's the book's Day P&L (the
+    # shares held through that session, so a trade after the close doesn't change it, B-152); only
+    # when that isn't available for this session, today's holdings over it, in dollars of their
+    # value before it.
+    if book_day and book_day[0] == days[-1]:
+        move, move_pct, basis = book_day[1], book_day[2], "session_holdings"
+    else:
+        last_r = filled[-1]
+        move = float(np.sum(w * total * last_r / (1 + last_r)))
+        move_pct, basis = move / (total - move) * 100, "current_holdings"
+    last_day = {"date": days[-1].isoformat(), "return_pct": move_pct, "value": move, "basis": basis,
                 "exceeds_var_99": bool(-move > var99["var_value"])}
 
     growth = np.cumprod(1 + rp)

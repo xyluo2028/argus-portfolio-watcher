@@ -377,7 +377,9 @@ export interface RiskReport {
   as_of: string; lookback_days: number; benchmark: string; total_value: number;
   beta: number; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
   var: Record<"95" | "99", { var_pct: number; cvar_pct: number; var_value: number; cvar_value: number }>;
-  last_day: { date: string; return_pct: number; value: number; exceeds_var_99: boolean };
+  // session_holdings: the book's Day P&L (shares held through that session); current_holdings: today's
+  // holdings over it, when quotes of that session aren't available for every position.
+  last_day: { date: string; return_pct: number | null; value: number; basis: "session_holdings" | "current_holdings"; exceeds_var_99: boolean };
   closes_from_quotes: { date: string; symbols: string[] } | null;
   positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; vol_pct: number; history_days: number; proxied: boolean }[];
   correlation: { symbols: string[]; matrix: (number | null)[][] };

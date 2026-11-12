@@ -70,11 +70,14 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
           <div className="value">{money(-v99.var_value, { whole: true })}</div>
           <div className="delta muted">{v99.var_pct.toFixed(2)}% · CVaR {v99.cvar_pct.toFixed(2)}%</div>
         </div>
-        <div className="tile" title="Today's holdings over the latest session, against the 99% VaR">
+        <div className="tile" title={r.last_day.basis === "session_holdings"
+          ? "Day P&L of the shares held through the latest session (trades after its close don't change it), against the 99% VaR"
+          : "Today's holdings over the latest session (not every quote is of that session yet), against the 99% VaR"}>
           <div className="label">Last session ({r.last_day.date.slice(5)})</div>
           <div className={`value ${tone(r.last_day.value)}`}>{money(r.last_day.value, { signed: true, whole: true })}</div>
           <div className={`delta ${r.last_day.exceeds_var_99 ? "down" : "muted"}`}>
-            {pct(r.last_day.return_pct, 2)}{r.last_day.exceeds_var_99 ? " · exceeded 99% VaR" : ""}
+            {pct(r.last_day.return_pct, 2)} · {r.last_day.basis === "session_holdings" ? "held that session" : "today's holdings"}
+            {r.last_day.exceeds_var_99 ? " · exceeded 99% VaR" : ""}
           </div>
         </div>
         <div className="tile">

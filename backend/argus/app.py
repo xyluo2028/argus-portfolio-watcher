@@ -1410,9 +1410,15 @@ class Argus:
         except ProviderError as e:
             log.warning("factor data: %s", e)
             factors = None
-        return {"portfolio": summ["portfolio"]["name"], "fully_priced": summ["totals"]["fully_priced"],
+        # Risk's last session is the dashboard's Day P&L when every quote is of that session (B-152).
+        tot = summ["totals"]
+        book_day = None
+        if tot["day_pnl"] is not None and all(session_date(datetime.fromisoformat(r["quote_as_of"])) == end
+                                              for r in summ["positions"] if r.get("quote_as_of")):
+            book_day = (end, tot["day_pnl"], tot["day_pnl_pct"])
+        return {"portfolio": summ["portfolio"]["name"], "fully_priced": tot["fully_priced"],
                 "closes_from_quotes": {"date": end.isoformat(), "symbols": from_quotes} if from_quotes else None,
-                **risk_mod.analyze(values, closes, bench, factors)}
+                **risk_mod.analyze(values, closes, bench, factors, book_day)}
 
     def exposure(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
         summ = self.portfolio(ref, True, False, live_quotes)

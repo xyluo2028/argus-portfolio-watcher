@@ -177,9 +177,51 @@ def test_risk_values_the_last_session_from_quotes_until_its_bar_arrives(make_arg
     assert ld["value"] == pytest.approx(-r["total_value"] / 9) and ld["exceeds_var_99"]
     assert all(last not in c for c in stored.values())  # computed from, never stored
 
-    # The real bar arrives (a smaller fall than the quote said): it's what risk uses.
+    # The real bar arrives (a smaller fall than the quote said): it's what risk's history uses.
     for s, c in stored.items():
         c[last] = prev[s] * 0.99
     r = a.risk("p")
     assert r["closes_from_quotes"] is None and r["as_of"] == last.isoformat()
-    assert r["last_day"]["return_pct"] == pytest.approx(-1.0) and not r["last_day"]["exceeds_var_99"]
+    # The last session itself stays the book's Day P&L, from the same quotes as the dashboard (B-152).
+    assert r["last_day"]["value"] == pytest.approx(a.portfolio("p")["totals"]["day_pnl"])
+
+
+def test_risk_last_session_is_day_pnl_after_an_evening_sell(make_argus, monkeypatch):
+    """B-152: shares sold after the close were held through the session; risk's last session is the
+    book's Day P&L, unchanged by the sale, while VaR uses today's (smaller) holdings."""
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    from argus.services.portfolio import TxnInput
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X", "Y"))}
+    last = days[-1]
+    at_close = datetime.combine(last, time(16, 5), NY)
+    quotes = {s: Quote(s, c[last], c[days[-2]], c[days[-2]], c[last], c[days[-2]], at_close, "fake")
+              for s, c in closes.items()}
+    a = _risk_argus(make_argus, monkeypatch, closes, last, quotes)
+    before = a.risk("p")
+    day_pnl = a.portfolio("p")["totals"]["day_pnl"]
+    assert before["last_day"]["value"] == pytest.approx(day_pnl) and before["last_day"]["basis"] == "session_holdings"
+
+    a.portfolios.add_transactions("p", [TxnInput("SELL", "X", datetime.combine(last, time(17, 30), NY), 5,
+                                                 closes["X"][last])])
+    after = a.risk("p")
+    totals = a.portfolio("p")["totals"]
+    assert totals["day_pnl"] == pytest.approx(day_pnl)
+    assert after["last_day"]["value"] == pytest.approx(totals["day_pnl"])
+    assert after["last_day"]["return_pct"] == pytest.approx(totals["day_pnl_pct"])
+    assert after["total_value"] < before["total_value"]  # forward-looking risk: today's holdings
+    assert after["var"]["99"]["var_value"] != pytest.approx(before["var"]["99"]["var_value"])
+
+
+def test_last_session_falls_back_to_current_holdings_for_another_session():
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X"))}
+    r = risk.analyze({"X": 1000.0}, closes, book_day=(days[-2], 123.0, 1.0))
+    assert r["last_day"]["basis"] == "current_holdings" and r["last_day"]["value"] != 123.0
+    r = risk.analyze({"X": 1000.0}, closes, book_day=(days[-1], 123.0, 1.0))
+    assert r["last_day"] == {"date": days[-1].isoformat(), "return_pct": 1.0, "value": 123.0,
+                            "basis": "session_holdings", "exceeds_var_99": False}
