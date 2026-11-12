@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 
+import httpx
 import pytest
 
 from argus.providers.macro import MacroProvider
@@ -369,6 +370,77 @@ def test_economic_events_retry_soon_when_today_is_missing(monkeypatch):
     assert not asked  # a full answer is held as before
 
 
+def _failing_nasdaq(answers, fail, asked=None):
+    """`_nasdaq_client`, with the queried dates in `fail` answering 403 (B-156)."""
+    ok = _nasdaq_client(answers, asked)
+
+    def get(self, url, params=None, **kw):
+        if params["date"] in fail:
+            req = httpx.Request("GET", url, params=params)
+            return httpx.Response(403, request=req)
+        return ok.get(url, params=params)
+    return type("C", (), {"get": get})()
+
+
+def test_economic_calendar_one_failed_day_costs_only_that_day(monkeypatch, tmp_path):
+    # Wednesday 11-11, 21:30 EST; `date=11-11` (Tuesday's CPI) answered earlier, now it's 403.
+    cpi = {"gmt": "08:30", "country": US, "eventName": "Core CPI", "actual": "0.3%"}
+    ppi = {"gmt": "08:30", "country": US, "eventName": "PPI MoM"}
+    answers = {"2026-11-11": [cpi], "2026-11-12": [{"gmt": "08:30", "country": US, "eventName": "Initial Jobless Claims"}],
+               "2026-11-14": [ppi]}
+    now = [datetime(2026, 11, 12, 2, 30, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    fail: set[str] = set()
+    p = MacroProvider(client=_failing_nasdaq(answers, fail), cache_dir=tmp_path)
+    rows, note = p.economic_calendar(5)
+    assert note is None and ("2026-11-10", "Core CPI") in {(e["date"], e["event"]) for e in rows}
+
+    fail.add("2026-11-11")
+    p._cache.clear()
+    rows, note = p.economic_calendar(5)
+    got = {(e["date"], e["event"]): e["actual"] for e in rows}
+    assert got[("2026-11-10", "Core CPI")] == "0.3%"  # kept, and the last good answer stands in
+    assert ("2026-11-13", "PPI MoM") in got and ("2026-11-11", "Initial Jobless Claims") in got  # the other days
+    assert note == "Nasdaq calendar: 1 of 8 days unavailable (403)"
+
+    # A fetch with a failed day is retried soon, not held for 6 h.
+    fail.clear()
+    now[0] += timedelta(minutes=11)
+    assert p.economic_calendar(5)[1] is None
+
+    # A fresh process has no earlier answer for the day, but its kept releases still show.
+    fail.add("2026-11-11")
+    fresh = MacroProvider(client=_failing_nasdaq(answers, fail), cache_dir=tmp_path)
+    rows, note = fresh.economic_calendar(5)
+    assert ("2026-11-10", "Core CPI") in {(e["date"], e["event"]) for e in rows}
+    assert ("2026-11-13", "PPI MoM") in {(e["date"], e["event"]) for e in rows} and "1 of 8" in note
+
+
+def test_economic_calendar_every_day_failing_serves_the_kept_releases(monkeypatch, tmp_path):
+    cpi = {"gmt": "08:30", "country": US, "eventName": "Core CPI", "actual": "0.3%"}
+    now = [datetime(2026, 11, 12, 2, 30, tzinfo=UTC)]
+    _at(monkeypatch, now)
+    MacroProvider(client=_nasdaq_client({"2026-11-11": [cpi]}), cache_dir=tmp_path).economic_calendar(5)
+
+    every = {(date(2026, 11, 10) + timedelta(days=i)).isoformat() for i in range(1, 9)}
+    p = MacroProvider(client=_failing_nasdaq({}, every), cache_dir=tmp_path)
+    rows, note = p.economic_calendar(5)
+    assert [(e["date"], e["event"], e["actual"]) for e in rows] == [("2026-11-10", "Core CPI", "0.3%")]
+    assert note == "Nasdaq calendar: 8 of 8 days unavailable (403); showing saved releases"
+
+
+def test_market_context_reports_a_partial_calendar_plainly(make_argus, monkeypatch):
+    a = make_argus()
+    monkeypatch.setattr(a.screener, "largest", lambda n: [])
+    for name in ("closes", "quote_rows", "treasury_curve", "fomc_meetings"):
+        monkeypatch.setattr(a.macro, name, lambda *_a, **_k: None)
+    row = {"date": "2026-11-10", "time_et": "08:30", "event": "Core CPI", "actual": "0.3%", "consensus": None, "previous": None}
+    monkeypatch.setattr(a.macro, "economic_calendar", lambda *_a: ([row], "Nasdaq calendar: 1 of 24 days unavailable (403)"))
+    out = a.market_context()
+    assert out["errors"]["events"] == "Nasdaq calendar: 1 of 24 days unavailable (403)"
+    assert out["calendar"]["all_count"] == 1  # the rows that did come back are shown
+
+
 def _row(sym, price, prev, hi, lo, a50, a200, hi52, lo52):
     return {"symbol": sym, "regularMarketPrice": price, "regularMarketPreviousClose": prev, "regularMarketDayHigh": hi,
             "regularMarketDayLow": lo, "fiftyDayAverage": a50, "twoHundredDayAverage": a200,
@@ -427,7 +499,7 @@ def test_market_context_counts_the_largest_stocks(make_argus, monkeypatch):
         return [_row("AAA", 10, 9, 10, 9, 8, 7, 10, 5), _row("BBB", 10, 11, 11, 10, 12, 13, 20, 10)]
 
     monkeypatch.setattr(a.macro, "quote_rows", quote_rows)
-    for name in ("closes", "treasury_curve", "fomc_meetings", "economic_events"):
+    for name in ("closes", "treasury_curve", "fomc_meetings", "economic_calendar"):
         monkeypatch.setattr(a.macro, name, lambda *_a, **_k: None)
     out = a.market_context()
     assert seen["symbols"] == ["AAA", "BBB"] and "fiftyDayAverage" in seen["fields"]

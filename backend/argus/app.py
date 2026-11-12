@@ -1249,7 +1249,7 @@ class Argus:
         jobs = {"closes": lambda: self.macro.closes(context_mod.ALL_SYMBOLS, context_mod.HISTORY),
                 "quotes": lambda: self.macro.quote_rows(context_mod.ALL_SYMBOLS, context_mod.QUOTE_FIELDS, 60),
                 "curve": self.macro.treasury_curve, "fomc": self.macro.fomc_meetings,
-                "events": lambda: self.macro.economic_events(21), "breadth": stocks}
+                "events": lambda: self.macro.economic_calendar(21), "breadth": stocks}
         def run(item):
             name, fn = item
             try:
@@ -1258,9 +1258,14 @@ class Argus:
                 return name, None, str(e)
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             got = {n: (v, e) for n, v, e in pool.map(run, jobs.items())}
-        out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], got["events"][0],
+        # The calendar comes back with a note when some of its days failed: shown, but not as a total loss (B-156).
+        events, events_note = got["events"][0] or (None, None)
+        out = context_mod.build(got["closes"][0] or {}, got["curve"][0], got["fomc"][0], events,
                                 datetime.now(NY).date(), got["breadth"][0], got["quotes"][0])
-        return out | {"errors": {k: e for k, (_, e) in got.items() if e}}
+        errors = {k: e for k, (_, e) in got.items() if e}
+        if events_note and "events" not in errors:
+            errors["events"] = events_note
+        return out | {"errors": errors}
 
     RESEARCH_TTL_S = 3600
     RESEARCH_RETRY_S = 120  # a bundle missing fundamentals, ratio history or statements is rebuilt soon after

@@ -64,6 +64,7 @@ class MacroProvider:
         self._lock = threading.Lock()
         self._releases_path = cache_dir / "econ_releases.json" if cache_dir else None
         self._releases: dict[str, dict] | None = None  # "date|time|event" -> row, loaded on first use
+        self._econ_answers: dict[date, list[dict]] = {}  # query date -> its last good answer (B-156)
 
     def _memo(self, key: str, ttl, fn):
         """`ttl` in seconds, or a function of the fetched value giving it."""
@@ -199,16 +200,28 @@ class MacroProvider:
         return out
 
     def economic_events(self, days: int = 21) -> list[dict]:
-        """US releases from Nasdaq's economic calendar from the last trading session before today through
-        the next `days` days. Times are Eastern; values are as published ("1,716K", "3.6%"). Rows from
-        that session through today are every row seen for those days, kept across fetches and restarts
-        (B-034)."""
+        """The rows of `economic_calendar`, without its note."""
+        return self.economic_calendar(days)[0]
+
+    def economic_calendar(self, days: int = 21) -> tuple[list[dict], str | None]:
+        """(rows, note) for US releases from Nasdaq's economic calendar from the last trading session before
+        today through the next `days` days. Times are Eastern; values are as published ("1,716K", "3.6%").
+        Rows from that session through today are every row seen for those days, kept across fetches and
+        restarts (B-034). Each day is queried on its own and fails on its own (B-156): a failed day falls
+        back to its last good answer in this process, the other days and the kept rows still come back,
+        and `note` says how many days Nasdaq didn't answer."""
         clean = lambda v: (html.unescape(v or "").strip() or None)  # noqa: E731
 
-        def day(d: date) -> list[dict]:
-            r = self._client.get(NASDAQ_URL, params={"date": d.isoformat()})
-            r.raise_for_status()
-            rows = ((r.json().get("data") or {}).get("rows")) or []
+        def day(d: date) -> list[dict] | str:
+            """The day's US rows, or why the query failed ("403", "ReadTimeout")."""
+            try:
+                r = self._client.get(NASDAQ_URL, params={"date": d.isoformat()})
+                r.raise_for_status()
+                rows = ((r.json().get("data") or {}).get("rows")) or []
+            except httpx.HTTPStatusError as e:
+                return str(e.response.status_code)
+            except Exception as e:  # noqa: BLE001
+                return type(e).__name__
             return [{k: clean(x.get(k)) for k in ("gmt", "eventName", "actual", "consensus", "previous")}
                     for x in rows if x.get("country") == "United States" and x.get("eventName")]
 
@@ -219,14 +232,21 @@ class MacroProvider:
         # From the last session, not yesterday: on a weekend, a Monday or after a holiday, yesterday has no
         # releases and the last session's actuals are the ones to read (B-126).
         start = session_before(today)
-        fetched_today = [False]
+        complete = [False]
 
         def fetch():
             # From the query after the last session (that session's rows) to one past the last day, to
             # compare with.
             queries = [start + timedelta(days=i) for i in range(1, (today - start).days + days + 3)]
             with ThreadPoolExecutor(max_workers=7) as pool:
-                per_day = list(pool.map(day, queries))
+                got = list(pool.map(day, queries))
+            failed = [why for why in got if isinstance(why, str)]
+            for q, rows in zip(queries, got):
+                if not isinstance(rows, str):
+                    self._econ_answers[q] = rows
+            per_day = [self._econ_answers.get(q, []) if isinstance(rows, str) else rows for q, rows in zip(queries, got)]
+            for q in [q for q in list(self._econ_answers) if q < queries[0]]:
+                self._econ_answers.pop(q, None)
             out = []
             answers = self._nasdaq_days(queries, per_day)
             offset = self.nasdaq_offset(answers)
@@ -237,13 +257,23 @@ class MacroProvider:
                     when, time_et = self.nasdaq_slot(d, x["gmt"], offset)
                     out.append({"date": when.isoformat(), "time_et": time_et, "event": x["eventName"],
                                 "actual": x["actual"], "consensus": x["consensus"], "previous": x["previous"]})
-            fetched_today[0] = any(e["date"] == today.isoformat() for e in out)
-            if not fetched_today[0] and today.weekday() < 5:
+            fetched_today = any(e["date"] == today.isoformat() for e in out)
+            complete[0] = not failed and (fetched_today or today.weekday() >= 5)
+            if not fetched_today and today.weekday() < 5:
                 log.warning("economic calendar: no rows for %s; per-query answers %s", today, [
-                    (q.isoformat(), len(rows), rows[0]["eventName"] if rows else None) for q, rows in zip(queries, per_day)])
-            return self._keep_releases(out, start, today)
+                    (q.isoformat(), rows if isinstance(rows, str) else len(rows), rows[0]["eventName"] if rows and not isinstance(rows, str) else None)
+                    for q, rows in zip(queries, got)])
+            note = None
+            if failed:
+                why = ", ".join(sorted(set(failed)))
+                note = f"Nasdaq calendar: {len(failed)} of {len(queries)} days unavailable ({why})"
+                if len(failed) == len(queries):
+                    note += "; showing saved releases"
+                log.warning("economic calendar: %s", note)
+            return self._keep_releases(out, start, today), note
 
-        ttl = lambda _: ECON_TTL_S if fetched_today[0] or today.weekday() >= 5 else ECON_RETRY_S  # noqa: E731
+        # A fetch with a failed day, or with no rows for a weekday today, is retried soon.
+        ttl = lambda _: ECON_TTL_S if complete[0] else ECON_RETRY_S  # noqa: E731
         return self._memo(f"econ:{days}:{today.isoformat()}", ttl, fetch)
 
     def _keep_releases(self, rows: list[dict], start: date, today: date) -> list[dict]:
