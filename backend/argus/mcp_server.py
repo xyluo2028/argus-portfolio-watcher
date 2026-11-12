@@ -318,8 +318,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         drawdown, each position's share of risk vs its weight, correlations among the largest
         positions, stress scenarios (2008, COVID 2020, 2022 rates, Q4 2018 replayed on actual prices,
         beta x SPY for holdings listed later; plus SPY -10%) and Fama-French 5 + momentum exposures.
-        `last_day` is the latest session's move of today's holdings, flagged when it exceeded the 99%
-        VaR; until Yahoo publishes that session's bar its closes come from quotes (`closes_from_quotes`)."""
+        `last_day` is the latest session's P&L of the shares held through it (the dashboard's Day P&L,
+        `basis` "session_holdings"; today's holdings over it, "current_holdings", only when not every
+        quote is of that session), flagged when it exceeded the 99% VaR; until Yahoo publishes that session's bar its closes come from quotes (`closes_from_quotes`)."""
         return argus.risk(portfolio, quotes_now())
 
     @mcp.tool(annotations=READ)
