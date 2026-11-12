@@ -906,7 +906,11 @@ class Argus:
         5-year compound annual growth rate of the price (price only; null when the history is shorter).
         Computed here rather than taken from Finnhub, whose figures lag a session and use other bases."""
         closes = self.market.daily_closes_many(symbols, datetime.now(NY).date() - timedelta(days=5 * 366 + 10))
-        anchor = _return_anchor(market_status())
+        status = market_status()
+        anchor = _return_anchor(status)
+        # While Yahoo's bar for the last session is late, end at the quote's close for it, as the stock
+        # page and risk/performance do (B-142): the bases already count from that session (B-157).
+        self._fill_last_session(closes, date.fromisoformat(status["last_session"]))
         out: dict[str, dict[str, float | None]] = {}
         for sym, by_day in closes.items():
             series = sorted(by_day.items())

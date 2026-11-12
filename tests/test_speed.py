@@ -252,6 +252,68 @@ def test_momentum_returns_null_beyond_the_history(make_argus, monkeypatch):
     assert m["return_1w_pct"] == pytest.approx(((100 + len(days) - 1) / (100 + len(days) - 6) - 1) * 100)
 
 
+def _late_bar_argus(make_argus, monkeypatch, stored, last, quote_price):
+    from datetime import time
+
+    import argus.app as app_mod
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+
+    at_close = datetime.combine(last, time(16, 5), NY)
+    prev = stored[max(stored)]
+    q = Quote("X", quote_price, prev, prev, quote_price, prev, at_close, "fake")
+
+    class Provider:
+        name = "fake"
+
+        def get_quotes(self, symbols):
+            return {"X": q} if "X" in symbols else {}
+
+    a = make_argus([Provider()])
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"session": "closed", "last_session": last.isoformat()})
+    monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {s: dict(stored) for s in syms if s == "X"})
+    return a
+
+
+def test_momentum_ends_at_the_quote_close_while_the_last_sessions_bar_is_late(make_argus, monkeypatch):
+    """B-157: Yahoo's bars end a session before the last session. The bases count from the last
+    session, so the end price must be that session's close (from the quote), not the prior bar's;
+    otherwise 1W spans six sessions and disagrees with the stock page."""
+    from datetime import date
+
+    import argus.app as app_mod
+
+    days = [d for d in (date(2025, 10, 1) + timedelta(days=i) for i in range(408)) if d.weekday() < 5]
+    last = days[-1]
+    full = {d: 100 + i * 0.1 for i, d in enumerate(days)}
+    stored = {d: c for d, c in full.items() if d < last}
+    a = _late_bar_argus(make_argus, monkeypatch, stored, last, 150.0)
+    bases = app_mod.range_bases(sorted(full.items()), last, {**app_mod.RETURN_MONTHS, "3Y": 36})
+    m = a.price_stats(["X"])["X"]
+    for key, label in app_mod.MOMENTUM_RANGES.items():
+        b = bases.get(label)
+        want = (150.0 / b["close"] - 1) * 100 if b else None
+        assert m[key] == (pytest.approx(want) if want is not None else None), key
+    assert bases["5D"]["date"] == days[-6].isoformat()
+    assert a.symbol_fundamentals(["X"])["metrics"]["X"]["return_1w_pct"] == pytest.approx(m["return_1w_pct"])
+    assert last not in stored  # computed from, never stored
+
+
+def test_momentum_uses_the_stored_bar_once_it_arrives(make_argus, monkeypatch):
+    from datetime import date
+
+    import argus.app as app_mod
+
+    days = [d for d in (date(2025, 10, 1) + timedelta(days=i) for i in range(408)) if d.weekday() < 5]
+    last = days[-1]
+    full = {d: 100 + i * 0.1 for i, d in enumerate(days)}
+    a = _late_bar_argus(make_argus, monkeypatch, full, last, 150.0)  # the quote disagrees: the bar wins
+    bases = app_mod.range_bases(sorted(full.items()), last)
+    m = a.price_stats(["X"])["X"]
+    assert m["return_1w_pct"] == pytest.approx((full[last] / bases["5D"]["close"] - 1) * 100)
+    assert m["return_1m_pct"] == pytest.approx((full[last] / bases["1M"]["close"] - 1) * 100)
+
+
 @pytest.mark.parametrize("day", [None, "2026-11-09", "2026-11-27", "2026-11-28", "2027-01-01", "2027-01-03",
                                  "2027-06-30"])
 def test_single_symbol_fundamentals_add_price_cagr_and_fcf_margin(make_argus, freeze_today, day):
