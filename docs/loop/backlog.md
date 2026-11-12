@@ -25,7 +25,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-002 Check every page at phone width
 - kind: ux · severity: medium
-- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005, income r006, macro r006, macro r008, multibagger r013, income r013, macro r013, income r014
+- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005, income r006, macro r006, macro r008, multibagger r013, income r013, macro r013, income r014, macro r015, income r015
 - evidence: pages were mostly designed and checked at desktop width. r001 at 390 px: Markets is 5,418 px tall
   with one gauge per row and clips the sector and calendar tables; Analysis tables (stress, dividends) and the
   Screener results table clip after the first columns; yield-curve end labels overlap on desktop
@@ -41,6 +41,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r008: Markets 5,900 px tall and Dashboard 2,606 px at 390 px; no horizontal overflow (macro r008)
 - r013: Dashboard Coming up and Holdings tables cut off at 390 px with no scroll hint (multibagger #8); Analysis factor and dividend tables hide number columns (income #6); Dashboard holdings clipped (macro)
 - r014: Analysis at phone width still hides income columns
+- r015: Markets at 390 px overflows horizontally because the error banner prints an unbroken Nasdaq URL (macro #3); Analysis Stress scenarios at 390 px show only the name and a cut-off date column, every loss figure off-screen (income #3)
 - status: open
 
 ### B-003 Header badge says "no Finnhub key" when the stream is only switched off
@@ -103,7 +104,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-017 Asset-class view: bonds, TIPS, gold, commodities and cash show as "Unclassified"; no asset-class targets or duration
 - kind: feature · severity: high
-- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003, macro r006, macro r008, income r008, income r009, income r010, income r012, income r013, income r014
+- reported by: macro r001, income r001, income r002 (see B-041: SEC N-PORT data has asset classes), macro r003, income r003, macro r006, macro r008, income r008, income r009, income r010, income r012, income r013, income r014, income r015, macro r015
 - evidence: look-through "Unclassified" 39.3% (loop-macro) and 35.5% (loop-income); `funds_without_profile`
   lists BND/VCIT/VGIT/SCHP; can't check a bond floor or set drift targets by asset class; no rate-shock scenario
 - r003: still 39.3% (loop-macro) / 35.5% (loop-income) Unclassified (macro r003, income r003)
@@ -116,20 +117,22 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r010: 10Y fell 35 bp in a month; no rate scenario or duration for the bond sleeve; bonds still "Unclassified 34.7%"; "SPY −10%" barely moves bonds (income r010 #6)
 - r013: no duration/rate scenario for the bond sleeve on a day the 10y fell 5.7 bp (income #4)
 - r014: income estimated durations by hand from Argus history (BND ~5.4, VCIT ~5.7, VGIT ~4.8, SCHP ~4.0; ≈ −$900 on the bond sleeve per +50 bp); macro r014: 39% of the book "Unclassified"
+- r015: income re-ran the by-hand duration regression (BND 5.42, VCIT 5.74, VGIT 4.80, SCHP 4.06 → −$906 per +50 bp); it predicted −$252 for the week's +13.9 bp vs −$260 actual (income #2)
 - status: open
 
 ### B-018 Notes (and cost alerts) aren't tied to a portfolio
 - kind: feature · severity: medium
-- reported by: macro r001, income r001, multibagger r001, income r003
+- reported by: macro r001, income r001, multibagger r001, income r003, macro r015
 - evidence: `note add` has no portfolio; theses for the same symbol mix across portfolios; no portfolio-level
   thesis; `below_cost_pct` uses cost averaged across portfolios
 - r003: still present; new notes are dated with the UTC date (income r003, see B-049)
 - r011: loop-growth Dashboard shows loop-income's XOM alert (multibagger r011 #6)
+- r015: every note still has `portfolio: null` (macro)
 - status: open
 
 ### B-019 Screener has only the last calendar year: no TTM or latest-quarter growth
 - kind: feature · severity: medium
-- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008, multibagger r009, multibagger r010
+- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008, multibagger r009, multibagger r010, multibagger r015
 - evidence: `fiscal_year: 2025` on 2026-10-20; LOAR +23% CY vs +36–39% latest quarters
 - r003: misled a screen — DUOL and ODD topped it on last year's growth but are now decelerating or shrinking (multibagger r003)
 - r004: XZO +62% in the screener vs +3% latest SEC quarter; COLL and HIMS likewise (multibagger r004 #4)
@@ -139,6 +142,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r008: PSIX ranked at FY2025 +51.8% while its latest quarter is −20.5%; KVYO +31.6% is 26.4% and slowing; asks for `revenue_growth_q_yoy_pct` from SEC (multibagger r008 #4)
 - r009: XZO FY +62% vs latest quarter +3%; NUTX +82% vs −13.6%; CRMD +617% with Q2 down 20% q/q; fourth round the top growth names fail research; SEC `revenue_growth_q_yoy_pct` already exists per symbol (multibagger r009 #3)
 - r010: IA shows +78.6% full-year growth but the last two quarters ran +2% and +11%; COLL +23.6% but slowed to +6% (multibagger r010 #6)
+- r015: XZO in the screener at FY +62% vs latest quarters +0/+3/+6%; RDDT screener P/E 38.5 (FY2025) vs 21.6 TTM on the stock page; no year label on the columns (multibagger #5)
 - status: open
 
 ### B-020 Rows missing gross margin silently drop out of a gross-margin filter
@@ -193,7 +197,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-026 Risk, events and the brief take 11–15 s on first load after a trade
 - kind: perf · severity: medium
-- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014
+- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014, macro r015, income r015, multibagger r015
 - r003: worse — cold `/risk` 33.4 s (income), 18.6 s (macro); brief 6.1 s
 - r004: cold `/risk` 24.1 s (macro), 21.5 s (income); cold portfolio fundamentals 26.8 s then all 17 "pending" (income r004 #7)
 - r005: cold `/risk` 15.5 s; portfolio fundamentals now 2.2 s (was 26.8 s) (income r005 #8)
@@ -205,6 +209,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r011: cold watchlist 6.4 s (multibagger r011 #8)
 - r013: cold risk 15.6 s (macro), 21.2 s (income); watchlist 8.8 s, LOAR earnings 6.7 s (multibagger)
 - r014: first risk load 25.6 s (income); watchlist first load 9.7 s (multibagger)
+- r015: first /risk 20.2 s, /performance 7.7 s, summary 3.3 s (macro #5); first risk 31.5 s (income #6); brief 4.9 s (1.35 s r014), cold watchlist 7.2 s, stock-page chart still "Loading chart…" at 2.7 s (multibagger #7)
 - status: open
 
 ### B-027 Screener universe isn't built until someone runs a screen (breadth unavailable meanwhile)
@@ -258,7 +263,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-036 Fear & greed jumps (24.6 → 38.3) when breadth loads; no component count; new-highs scored differently
 - kind: ux · severity: medium
-- reported by: macro r002, macro r003, macro r005, macro r006, macro r008, macro r009, macro r010, income r010, macro r012, macro r013
+- reported by: macro r002, macro r003, macro r005, macro r006, macro r008, macro r009, macro r010, income r010, macro r012, macro r013, macro r015
 - evidence: 22 highs vs 2 lows reads "Extreme greed" (rounds/002/investor-macro.md #4)
 - r003: 27.0 with 5 readings → 39.8 with 7 within minutes; Price strength 86.7 on 26 highs vs 4 lows (macro r003 #5)
 - r004: 9.5 → 27.8 when breadth loaded (macro r004 #3)
@@ -269,6 +274,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r009: 18.3 "Extreme fear" (5 readings) → 35 "Fear" (7) once breadth loaded; page doesn't show the reading count (macro r009 #6)
 - r010: the API gave 8.5 "Extreme fear" from 5 readings, then 27.2 "Fear" from 7 once breadth loaded, with no partial flag (macro r010 #3); "S&P 500 0.0% below its 125-day average" scores 9.3 Extreme fear (income r010 #8)
 - r013: 1.2 → 22.1 once breadth loaded; 'Price strength 91, Extreme greed' on a 76-up/424-down day (macro #4)
+- r015: 20.8 "Extreme fear" from 5 of 7 components, 38 "Fear" once breadth loaded; still no components count (macro #4)
 - status: open
 
 ### B-037 Markets has no 10y real yield, breakeven, dollar index or credit spreads
@@ -311,9 +317,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-043 Two dividend yields for one stock (KO 2.74% Finnhub vs 2.27% Argus)
 - kind: ux · severity: low
-- reported by: income r002, income r003, macro r006
+- reported by: income r002, income r003, macro r006, income r015
 - r003: KO 2.76% vs 2.29% (income r003); see B-063 (payout column)
 - r006: IEF 4.14% (/t/IEF, Peers) vs 4.04% (Analysis → Dividends) (macro r006 #6)
+- r015: KO 2.69% vs 2.17% on two pages (income #7)
 - status: open
 
 ### B-044 "Where the risk comes from" card drops holdings without saying so (15 of 17)
@@ -545,8 +552,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-078 Alerts can't watch an index or yield (^TNX rejected as "not a US ticker")
 - kind: feature · severity: medium
-- reported by: income r005
+- reported by: income r005, income r015
 - evidence: `argus alert add ^TNX price_above 5.25` → INVALID_SYMBOL while `argus quotes ^TNX` works (rounds/005/investor-income.md #2)
+- r015: income set a BND ≤ 70.70 price alert as a stand-in for the 10y at ~5.1% because ^TNX is rejected (income #4)
 - status: open
 
 ### B-079 FCF margin divides SEC FCF by Yahoo revenue from a later window
@@ -611,8 +619,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-090 No revenue guidance or segment revenue
 - kind: feature · severity: medium
-- reported by: multibagger r006
+- reported by: multibagger r006, multibagger r015
 - evidence: RMBS exit rule needs product revenue and guide vs consensus; Argus has total revenue only (rounds/006/investor-multibagger.md #5)
+- r015: PAYS's affirmed FY sales guidance ($114–117M) minus three SEC quarters implies Q4 $26.9–29.9M, below Q3 — worked out by hand; no next-quarter revenue consensus on the Estimates tab (multibagger #4)
 - status: open
 
 ### B-091 Economic calendar figures have no unit or period (PCE QoQ annualized read as monthly)
@@ -746,10 +755,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-108 After-hours P&L counts stale single prints (QUAL +1.04% from 5:44 PM while QQQ −1.05%)
 - kind: bug · severity: medium
-- reported by: macro r008, macro r009, macro r014
+- reported by: macro r008, macro r009, macro r014, macro r015
 - evidence: Dashboard "After hours +$298.88" while ES=F −0.45%; QUAL +$122.96 from a 4.5 h-old print; no print time on the row; `ext_coverage_pct 100` (rounds/008/investor-macro.md #4; related to B-055)
 - r009: after-hours +$112.91 while ES −1.1%: XLP +1.36% print (+$109) implausible, DBC print from 4:09 PM six hours old (−$83); `ext_coverage_pct` 100 (macro r009 #4)
 - r014: one stale DBC after-hours print (−$97) drives the after-hours P&L line on Sunday night
+- r015: TIP post-market −1.00% (single print) on a bond holiday while IEF +0.02%, TLT −0.06% (macro #7)
 - status: open
 
 ### B-109 Simulate prices trades at the 4 pm close during extended hours and doesn't say which price it used
@@ -815,9 +825,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-120 Forward P/E is unlabeled and uses next fiscal year's adjusted consensus (HRMY 5.5 vs trailing GAAP 12.5)
 - kind: ux · severity: medium
-- reported by: multibagger r009, multibagger r014
+- reported by: multibagger r009, multibagger r014, multibagger r015
 - evidence: `pe_forward` 5.51 = price ÷ `trend["+1y"]` 7.00 (FY2027); FY2026 consensus 5.22 would give 7.4 (rounds/009/investor-multibagger.md #2)
 - r014: RDDT forward P/E 10.2 from Yahoo forward EPS 9.29, matching no estimate on the Estimates tab (FY26 5.48, FY27 6.86)
+- r015: RDDT forward P/E 11.4 on eps_forward 9.29 vs 19.3/15.4 from FY26/FY27 consensus (multibagger #6)
 - status: open
 
 ### B-121 No SEC filings list on the stock page; Research → News drops the summary
@@ -875,9 +886,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-135 Upcoming economic-calendar rows disappear when Nasdaq's feed drops a day (payrolls 11-06 gone)
 - kind: bug · severity: medium
-- reported by: income r012, macro r012, macro r013, income r013
+- reported by: income r012, macro r012, macro r013, income r013, macro r015, income r015
 - evidence: Fri 11-06 payrolls was listed in r011; tonight Nasdaq returns no US rows for 11-06 and Markets jumps from Thu 11-05 to Tue 11-10 with no warning. Argus keeps previously seen rows only for past days (rounds/012/investor-income.md #3, investor-macro.md #3)
 - r013: payrolls 11-06 back, only because Nasdaq restored it; still no protection
+- r015: see B-156: one day's 403 now empties the whole calendar, kept rows included
 - status: open
 
 ### B-136 The brief's upcoming dividends are empty while Coming up lists three
@@ -885,7 +897,8 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - reported by: income r012, income r013, income r014
 - evidence: rounds/012/investor-income.md #4
 - r014: narrowed — the brief now lists O's 11-13 payment, but on a Sunday-evening run misses Monday's PG payment and XOM ex-date
-- status: open
+- r015: brief lists O, PG and XOM, the same as Coming up (income confirmed fixed on a weekday run)
+- status: done (confirmed fixed r015)
 
 ### B-137 Stock page's Reported financials table stops before the quarter just reported
 - kind: ux · severity: medium
@@ -972,8 +985,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-149 Earnings report dated the day after an after-close release (GRND 11-06 vs 11-05)
 - kind: bug · severity: medium
-- reported by: multibagger r014
+- reported by: multibagger r014, multibagger r015
 - evidence: GRND reported 11-05 after the close; Argus dates it 11-06 and shows an invented "after hours −1.0%" reaction instead of Friday's −0.73%; the brief disagrees with the stock page on date and EPS estimate (0.04 vs 0.15)
+- r015: PAYS labeled `amc` 11-09, but Argus's own Benzinga headline is 12:09 ET and the 11-09 bar fell 14.8% on 3–4× volume; reaction shows −18.9% vs ~−31% from the pre-report close; GRND still dated 11-06 (multibagger #2)
 - status: open
 
 ### B-150 Split warning missing from the first portfolio summary after a restart
@@ -989,10 +1003,13 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - status: open
 
 ### B-152 Two "last session" P&L figures (Risk +$3,978 vs Dashboard +$3,335); Day % column follows two rules
-- kind: ux · severity: medium
-- reported by: multibagger r014, income r014
+- kind: bug · severity: medium
+- reported by: multibagger r014, income r014, macro r015
 - evidence: Risk's Last session tile values today's holdings over Friday (only a tooltip says so), Dashboard uses actual Day P&L; Holdings Day % shows TMDX +23.0% while the stock rose +27.9%, RDDT +1.38% beside $0.00 Day P&L (bought after the close); income saw −$374 vs −$375.21
-- status: open
+- r015: new cause: after an evening sell of 50 XLE, Risk "Last session (11-11)" went from +$542.11 to +$483.80 while Day P&L and performance stay +$542.11; the $58 gap is the sold shares' 11-11 move; `exceeds_var_99` tests a P&L the book never had (macro #2)
+- acceptance: Risk's last-session P&L (`last_day.value` and the Analysis Risk tile, and its `exceeds_var_99` check) comes from the holdings the book actually had over that session — the same figure as Dashboard Day P&L / performance's last step — so a trade recorded after the close doesn't change it; a test records an evening sell and checks risk's last-session value equals `totals.day_pnl`; forward-looking VaR keeps using current holdings; the tile/tooltip says which holdings it uses
+- r015 live: loop-macro last_day 542.11 = day_pnl 542.11 (basis session_holdings) after the evening XLE sell; income 66.56 = 66.56; growth 1568.16 = 1568.16. The Holdings Day % column rules are split out to B-162
+- status: done (r015, 1e5ffaf)
 
 ### B-153 "2026 so far" income includes estimated payments without marking them, and changes with no trade
 - kind: ux · severity: low
@@ -1010,6 +1027,52 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: bug · severity: medium
 - reported by: developer r014
 - evidence: `analysis.exposure()` returns only `{"total_value": 0.0}` with nothing held (`services/analysis.py` ~line 36); `frontend/src/pages/Analysis.tsx` ~line 19 reads `c.top1_pct` and throws, unmounting the page (so the Risk card's new empty state can't be seen)
+- status: open
+
+### B-156 One failed day empties the whole economic calendar, saved releases included (CPI actual invisible)
+- kind: bug · severity: high
+- reported by: macro r015, income r015
+- evidence: `/api/market-context` gives `calendar.events: []`, `all_count: 0`, error `econ:21:2026-11-11: … 403 Forbidden`; CPI 11-10 (with actual) and PPI 11-13 gone though Nasdaq answers those days. `economic_events()` in `backend/argus/providers/macro.py` runs ~24 day queries through `pool.map`; the first `raise_for_status()` fails the whole fetch, so the answered days and `_keep_releases()` are never returned (rounds/015/investor-macro.md #1, investor-income.md #1)
+- acceptance: a failed day costs only that day: the other days' rows and the kept releases are still returned; on a total failure the kept store is served; `errors.events` says plainly how many days failed (e.g. "Nasdaq calendar: 1 of 24 days unavailable (403)") instead of the raw httpx text; tests cover one failing day and all days failing
+- r015 live: after the fix every one of the server's 24 Nasdaq queries got 403 (plain curl from the same machine got 200), and `econ_releases.json` was empty, so the calendar still showed 0 rows with the plain note "24 of 24 days unavailable (403); showing saved releases"
+- status: done (r015, 2533339)
+
+### B-157 Momentum returns (API, MCP, Dashboard tabs) end at a stale bar when Yahoo's latest bar is late; RMBS 1W −2.58% vs +3.0% on the stock page
+- kind: bug · severity: high
+- reported by: multibagger r015
+- evidence: `/api/fundamentals/RMBS` 1W −2.58%, 1M −24.85%, YTD −12.11%; `/t/RMBS` Momentum card +3.0%, −20.6%, −7.1%. `price_stats` (`backend/argus/app.py`) takes `last = series[-1]` (11-10 close 80.76) but anchors the period bases on the last session (11-11), so 1W = 80.76 / 82.90 − 1; live is 85.36 / 82.90 − 1 = +2.97%. PAYS 1W −33.7% vs −38.0% (rounds/015/investor-multibagger.md #1)
+- acceptance: when the last cached bar is older than the last session, `price_stats` uses the quote's session close (the B-134/B-142 fill) as the end price, so the API/MCP/Dashboard momentum periods equal the stock page's for the same windows; when bars are current nothing changes; tests cover the late-bar case and the current-bar case
+- r015 live: Yahoo's 11-11 bar had arrived by the live check, so API and stock page agreed (RMBS 1W +2.97%); the late-bar case is covered by tests
+- status: done (r015, 976d2c9)
+
+### B-158 Markets error banner shows raw httpx text above the indices
+- kind: ux · severity: low
+- reported by: macro r015
+- evidence: banner reads "events (econ:21:2026-11-11: Client error '403 Forbidden' for url … For more information check: https://developer.mozilla.org/…)"; its unbroken URL overflows the 390 px layout (macro #3)
+- status: open
+
+### B-159 Yield cards show a move on a bond-market holiday (10y "+2 bp" on Veterans Day)
+- kind: ux · severity: low
+- reported by: macro r015, income r015
+- evidence: ^TNX 4.998 as_of 11-11 vs 4.98 on 11-10 while the cash Treasury market was closed; the curve on the same page is dated 11-10 (macro #6, income #5)
+- status: open
+
+### B-160 The brief's 7-day earnings window misses a holding's report 8 days out (ESE 11-19)
+- kind: ux · severity: low
+- reported by: multibagger r015
+- evidence: `/api/brief/loop-growth` `earnings_upcoming: []` on Wed 11-11 while `argus events` lists ESE 11-19 (multibagger #3)
+- status: open
+
+### B-161 Simulate's side/type conflict message lists the values in reverse order
+- kind: ux · severity: low
+- reported by: macro r015
+- evidence: `{"side":"SELL","type":"BUY"}` returns "side and type disagree (BUY vs SELL)" (macro #8)
+- status: open
+
+### B-162 Holdings "Day %" column follows two rules (TMDX +23.0% while the stock rose +27.9%; RDDT +1.38% beside $0.00 Day P&L)
+- kind: ux · severity: low
+- reported by: multibagger r014 (split from B-152 in r015)
+- evidence: Day % mixes the stock's move with the position's own day P&L share for positions bought or added during/after the session (rounds/014/investor-multibagger.md)
 - status: open
 
 ## Done

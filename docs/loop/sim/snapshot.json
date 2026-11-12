@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-09T02:45:46.782063+00:00",
+ "created_at": "2026-11-12T02:45:54.039612+00:00",
  "tables": {
   "portfolio": [
    {
@@ -1414,6 +1414,38 @@
     "external_id": "r014-growth-rddt-buy",
     "deleted": false,
     "created_at": "2026-11-09T02:19:43.476652+00:00"
+   },
+   {
+    "id": 58,
+    "portfolio_id": 3,
+    "type": "SELL",
+    "symbol": "XLE",
+    "qty": 50.0,
+    "price": 63.51,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-12T02:17:17.324360+00:00",
+    "note": "r015: oil trend break (WTI 85.7<90, XLE below 50d); hot CPI read keeps beta flat, rotate commodity risk to T-bills",
+    "source": "cli",
+    "external_id": "macro-r015-xle-sell",
+    "deleted": false,
+    "created_at": "2026-11-12T02:17:17.606747+00:00"
+   },
+   {
+    "id": 59,
+    "portfolio_id": 3,
+    "type": "BUY",
+    "symbol": "SGOV",
+    "qty": 31.0,
+    "price": 100.52,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-12T02:17:20.578819+00:00",
+    "note": "r015: proceeds of XLE trim to T-bills",
+    "source": "cli",
+    "external_id": "macro-r015-sgov-buy",
+    "deleted": false,
+    "created_at": "2026-11-12T02:17:20.902854+00:00"
    }
   ],
   "target": [
@@ -1541,7 +1573,7 @@
     "portfolio_id": 3,
     "level": "symbol",
     "key": "SGOV",
-    "weight_pct": 13.5
+    "weight_pct": 17.0
    },
    {
     "portfolio_id": 3,
@@ -1565,7 +1597,7 @@
     "portfolio_id": 3,
     "level": "symbol",
     "key": "XLE",
-    "weight_pct": 10.0
+    "weight_pct": 6.5
    },
    {
     "portfolio_id": 3,
@@ -1756,6 +1788,16 @@
     "active": true,
     "created_by": "cli",
     "created_at": "2026-11-06T02:19:39.839779+00:00"
+   },
+   {
+    "id": 10,
+    "symbol": "BND",
+    "kind": "price_below",
+    "threshold": 70.7,
+    "note": "loop-income r015: proxy for 10y ~5.1% (BND eff. duration ~5.4 from Argus history; ^TNX alerts are rejected). Review bond add vs drift.",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-11-12T02:19:38.852123+00:00"
    }
   ],
   "alert_event": [
@@ -2700,6 +2742,39 @@
     "created_by": "cli",
     "created_at": "2026-11-09T02:19:56.916954+00:00",
     "updated_at": "2026-11-09T02:19:56.916960+00:00"
+   },
+   {
+    "id": 85,
+    "symbol": "XLE",
+    "kind": "thesis",
+    "text": "loop-macro r015 (11-11 21:15 ET): SELL 50 XLE @63.51 (post-mkt; realized -196.00), BUY 31 SGOV @100.52. Targets XLE 10->6.5, SGOV 13.5->17. CPI 11-10 not visible in Argus (calendar empty, Nasdaq 403), read from the tape: IEF -0.86%, GLD -2.7%, UUP +0.6%, 10Y 4.86->4.98, 2Y 4.51->4.73 (2s10s 25bp) = hot print, so note 82 rule (c): no SPY add although VIX/VIX3M is now 0.91 and HYG 77.35. Oil leg broke: WTI 85.7 (<90 trigger), 1M -8.5%, XLE below 50d; inflation is in services, not commodities, so trim the commodity hedge into T-bills rather than RSP (no new beta into a hawkish repricing). Keep IEF 12.5% (hedged 11-05). Next: if core inflation cools and 10Y < 4.8, SGOV->SPY 4 sh; if WTI < 80, XLE -> 0 into VTIP; if WTI > 95, rebuild XLE to 10.",
+    "review_on": "2026-11-19",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-12T02:17:38.610730+00:00",
+    "updated_at": "2026-11-12T02:17:38.610736+00:00"
+   },
+   {
+    "id": 86,
+    "symbol": "PAYS",
+    "kind": "note",
+    "text": "[loop-growth] r015 (11-11 close 9.48, -35% since 11-06 close 14.69): Q3 (11-09) passed my note-r010 buy tests (SEC revenue 30.8M +42.6% y/y, op margin 23.8% vs 7.4%), but FY26 sales guide affirmed at 114-117M implies Q4 26.9-29.9M = down q/q and only +18-31% y/y (Q4-25 22.8M), consistent with the 'plasma customer exit' headline. 19 insider sales (7.5M), no buys. Growth durability is the thesis and it just broke forward. No buy. Revisit after Q4 (3-23): need growth >= 30% ex the lost customer.",
+    "review_on": "2027-03-24",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-12T02:19:34.982883+00:00",
+    "updated_at": "2026-11-12T02:19:34.982889+00:00"
+   },
+   {
+    "id": 87,
+    "symbol": "BND",
+    "kind": "note",
+    "text": "loop-income r015 (11-11 21:30 ET, 11-11 close): no trade. CPI week: 10y 4.86->4.998 (+14bp), 2y 4.51->4.73; bond sleeve -$260 since 11-06, matching my empirical duration (~$906 per +50bp predicts -$252). 10y still under the 5.1% add trigger; all drift within +/-0.46pp (HD +0.46). Cash $49.70, so any add must be funded by trimming HD/JNJ/PEP. Watch HD earnings 11-17 (largest risk contributor 13.5%), PPI 11-13. Alert 'BND <= 70.70' set as 10y-5.1% proxy.",
+    "review_on": "2026-11-18",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-12T02:19:39.994226+00:00",
+    "updated_at": "2026-11-12T02:19:39.994232+00:00"
    }
   ],
   "peer_list": [],
@@ -6415,6 +6490,150 @@
      "created_by": "cli",
      "created_at": "2026-11-09T02:19:56.916954+00:00",
      "updated_at": "2026-11-09T02:19:56.916960+00:00"
+    }
+   },
+   {
+    "id": 183,
+    "ts": "2026-11-12T02:17:19.449025+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "58",
+    "before": null,
+    "after": {
+     "id": 58,
+     "type": "SELL",
+     "symbol": "XLE",
+     "qty": 50.0,
+     "price": 63.51,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-12T02:17:17.324360+00:00",
+     "note": "r015: oil trend break (WTI 85.7<90, XLE below 50d); hot CPI read keeps beta flat, rotate commodity risk to T-bills",
+     "source": "cli",
+     "external_id": "macro-r015-xle-sell",
+     "deleted": false
+    }
+   },
+   {
+    "id": 184,
+    "ts": "2026-11-12T02:17:20.905334+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "59",
+    "before": null,
+    "after": {
+     "id": 59,
+     "type": "BUY",
+     "symbol": "SGOV",
+     "qty": 31.0,
+     "price": 100.52,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-12T02:17:20.578819+00:00",
+     "note": "r015: proceeds of XLE trim to T-bills",
+     "source": "cli",
+     "external_id": "macro-r015-sgov-buy",
+     "deleted": false
+    }
+   },
+   {
+    "id": 185,
+    "ts": "2026-11-12T02:17:21.696080+00:00",
+    "actor": "ui",
+    "action": "set_targets",
+    "entity": "portfolio",
+    "entity_id": "3",
+    "before": null,
+    "after": {
+     "level": "symbol",
+     "weights": {
+      "SGOV": 17.0,
+      "XLV": 12.0,
+      "QUAL": 12.0,
+      "IEF": 12.5,
+      "SPY": 10.0,
+      "XLE": 6.5,
+      "XLP": 8.0,
+      "USMV": 8.0,
+      "VTIP": 8.0,
+      "DBC": 6.0
+     }
+    }
+   },
+   {
+    "id": 186,
+    "ts": "2026-11-12T02:17:38.612034+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "85",
+    "before": null,
+    "after": {
+     "id": 85,
+     "symbol": "XLE",
+     "kind": "thesis",
+     "text": "loop-macro r015 (11-11 21:15 ET): SELL 50 XLE @63.51 (post-mkt; realized -196.00), BUY 31 SGOV @100.52. Targets XLE 10->6.5, SGOV 13.5->17. CPI 11-10 not visible in Argus (calendar empty, Nasdaq 403), read from the tape: IEF -0.86%, GLD -2.7%, UUP +0.6%, 10Y 4.86->4.98, 2Y 4.51->4.73 (2s10s 25bp) = hot print, so note 82 rule (c): no SPY add although VIX/VIX3M is now 0.91 and HYG 77.35. Oil leg broke: WTI 85.7 (<90 trigger), 1M -8.5%, XLE below 50d; inflation is in services, not commodities, so trim the commodity hedge into T-bills rather than RSP (no new beta into a hawkish repricing). Keep IEF 12.5% (hedged 11-05). Next: if core inflation cools and 10Y < 4.8, SGOV->SPY 4 sh; if WTI < 80, XLE -> 0 into VTIP; if WTI > 95, rebuild XLE to 10.",
+     "review_on": "2026-11-19",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-12T02:17:38.610730+00:00",
+     "updated_at": "2026-11-12T02:17:38.610736+00:00"
+    }
+   },
+   {
+    "id": 187,
+    "ts": "2026-11-12T02:19:34.984173+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "86",
+    "before": null,
+    "after": {
+     "id": 86,
+     "symbol": "PAYS",
+     "kind": "note",
+     "text": "[loop-growth] r015 (11-11 close 9.48, -35% since 11-06 close 14.69): Q3 (11-09) passed my note-r010 buy tests (SEC revenue 30.8M +42.6% y/y, op margin 23.8% vs 7.4%), but FY26 sales guide affirmed at 114-117M implies Q4 26.9-29.9M = down q/q and only +18-31% y/y (Q4-25 22.8M), consistent with the 'plasma customer exit' headline. 19 insider sales (7.5M), no buys. Growth durability is the thesis and it just broke forward. No buy. Revisit after Q4 (3-23): need growth >= 30% ex the lost customer.",
+     "review_on": "2027-03-24",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-12T02:19:34.982883+00:00",
+     "updated_at": "2026-11-12T02:19:34.982889+00:00"
+    }
+   },
+   {
+    "id": 188,
+    "ts": "2026-11-12T02:19:38.853602+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "10",
+    "before": null,
+    "after": {
+     "symbol": "BND",
+     "kind": "price_below",
+     "threshold": 70.7
+    }
+   },
+   {
+    "id": 189,
+    "ts": "2026-11-12T02:19:39.995894+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "87",
+    "before": null,
+    "after": {
+     "id": 87,
+     "symbol": "BND",
+     "kind": "note",
+     "text": "loop-income r015 (11-11 21:30 ET, 11-11 close): no trade. CPI week: 10y 4.86->4.998 (+14bp), 2y 4.51->4.73; bond sleeve -$260 since 11-06, matching my empirical duration (~$906 per +50bp predicts -$252). 10y still under the 5.1% add trigger; all drift within +/-0.46pp (HD +0.46). Cash $49.70, so any add must be funded by trimming HD/JNJ/PEP. Watch HD earnings 11-17 (largest risk contributor 13.5%), PPI 11-13. Alert 'BND <= 70.70' set as 10y-5.1% proxy.",
+     "review_on": "2026-11-18",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-12T02:19:39.994226+00:00",
+     "updated_at": "2026-11-12T02:19:39.994232+00:00"
     }
    }
   ]
