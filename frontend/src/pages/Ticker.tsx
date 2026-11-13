@@ -62,7 +62,9 @@ function secQuarters(key: string, sec: SecCoverage | null | undefined): string[]
 // Figures that come from SEC's four quarters when current, else a provider: they always say which, so a
 // card mixing the two can't pass one source's figure off as the other's.
 const SEC_WINDOW = new Set(["revenue_ttm", "eps_ttm", "pe_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
-  "operating_margin_pct", "net_margin_pct", "ocf_margin_pct"]);
+  "operating_margin_pct", "net_margin_pct", "ocf_margin_pct", "eps_growth_yoy_pct", "eps_growth_q_yoy_pct"]);
+// Latest quarter vs the same quarter a year earlier, rather than a four-quarter window.
+const QUARTER_YOY = new Set(["revenue_growth_q_yoy_pct", "eps_growth_q_yoy_pct"]);
 const LABELED_SOURCE = new Set([...SEC_WINDOW, "fcf_ttm", "fcf_margin_pct"]);
 const SOURCE_NAMES: Record<string, string> = { finnhub: "Finnhub", yahoo: "Yahoo", sec: "SEC" };
 
@@ -289,15 +291,16 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                       const src = since ? `since the ${since.date} close, as the chart's ${d.range}`
                         : fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
                       const quarters = fund.sources[k] === "sec" ? secQuarters(k, fund.sec) : null;
-                      const covers = !quarters?.length ? undefined : k === "revenue_growth_q_yoy_pct"
+                      const covers = !quarters?.length ? undefined : QUARTER_YOY.has(k)
                         ? `SEC, quarter to ${quarters[0]} vs a year earlier`
-                        : `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}`;
+                        : `SEC, ${quarters.length} quarters ${quarters[quarters.length - 1]} – ${quarters[0]}`
+                          + (k === "eps_growth_yoy_pct" ? " vs the four before" : "");
                       return (
                         <div key={k} title={[d.title, covers ?? src].filter(Boolean).join(" · ") || undefined}>
                           <dt>{d.label}</dt>
                           <dd className={metricTone(k, v)}>
                             {notMeaningful(k, m) ? "n/m" : formatMetric(k, v)}
-                            {quarters?.length ? <span className="ext-line">SEC, {k === "revenue_growth_q_yoy_pct" ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span>
+                            {quarters?.length ? <span className="ext-line">SEC, {QUARTER_YOY.has(k) ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span>
                               : LABELED_SOURCE.has(k) && fund.sources[k] ? <span className="ext-line">{SOURCE_NAMES[fund.sources[k]] ?? fund.sources[k]}</span> : null}
                             {k === "ocf_margin_pct" && <span className="ext-line">capex not reported</span>}
                           </dd>
