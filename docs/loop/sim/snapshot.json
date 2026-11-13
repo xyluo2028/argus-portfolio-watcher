@@ -1,7 +1,7 @@
 {
  "format": "argus-snapshot",
  "version": 1,
- "created_at": "2026-11-12T02:45:54.039612+00:00",
+ "created_at": "2026-11-13T02:38:00.147332+00:00",
  "tables": {
   "portfolio": [
    {
@@ -32,6 +32,15 @@
     "sector": "Healthcare",
     "industry": "Drug Manufacturers - General",
     "updated_at": "2026-10-20T15:23:03.256199+00:00"
+   },
+   {
+    "symbol": "APP",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-13T02:26:16.610856+00:00"
    },
    {
     "symbol": "BCRX",
@@ -374,6 +383,15 @@
     "sector": "ETF",
     "industry": null,
     "updated_at": "2026-10-20T15:23:07.994961+00:00"
+   },
+   {
+    "symbol": "TGTX",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-13T02:20:01.084733+00:00"
    },
    {
     "symbol": "TMDX",
@@ -1446,6 +1464,70 @@
     "external_id": "macro-r015-sgov-buy",
     "deleted": false,
     "created_at": "2026-11-12T02:17:20.902854+00:00"
+   },
+   {
+    "id": 60,
+    "portfolio_id": 2,
+    "type": "SELL",
+    "symbol": "HD",
+    "qty": 1.0,
+    "price": 348.26,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T02:16:07.026475+00:00",
+    "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+    "source": "cli",
+    "external_id": "loop-income-r016-HD",
+    "deleted": false,
+    "created_at": "2026-11-13T02:16:07.468607+00:00"
+   },
+   {
+    "id": 61,
+    "portfolio_id": 2,
+    "type": "SELL",
+    "symbol": "JNJ",
+    "qty": 1.0,
+    "price": 283.52,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T02:16:09.317813+00:00",
+    "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+    "source": "cli",
+    "external_id": "loop-income-r016-JNJ",
+    "deleted": false,
+    "created_at": "2026-11-13T02:16:09.747441+00:00"
+   },
+   {
+    "id": 62,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "BND",
+    "qty": 5.0,
+    "price": 70.65,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T02:16:11.295918+00:00",
+    "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+    "source": "cli",
+    "external_id": "loop-income-r016-BND",
+    "deleted": false,
+    "created_at": "2026-11-13T02:16:11.678179+00:00"
+   },
+   {
+    "id": 63,
+    "portfolio_id": 2,
+    "type": "BUY",
+    "symbol": "VCIT",
+    "qty": 4.0,
+    "price": 78.76,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T02:16:13.371991+00:00",
+    "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+    "source": "cli",
+    "external_id": "loop-income-r016-VCIT",
+    "deleted": false,
+    "created_at": "2026-11-13T02:16:13.813108+00:00"
    }
   ],
   "target": [
@@ -1616,6 +1698,10 @@
    {
     "id": 1,
     "name": "growth-candidates"
+   },
+   {
+    "id": 2,
+    "name": "Watchlist"
    }
   ],
   "watchlist_item": [
@@ -1678,6 +1764,12 @@
     "symbol": "PTCT",
     "note": "r002 screen C: CY2025 revenue growth 94% / 115%; check durability (one-offs?)",
     "added_at": "2026-10-21T02:20:04.699118+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "TGTX",
+    "note": "r016: SEC Q3 rev +60.7% y/y (Q1-Q2 +70%), op margin 33%; fwd P/E 22 on FY27 2.93; no insider buys, SI 28%, healthcare already 46% of book. Wait for a pullback or a weaker holding to swap.",
+    "added_at": "2026-11-13T02:20:01.081604+00:00"
    },
    {
     "watchlist_id": 1,
@@ -1798,6 +1890,16 @@
     "active": true,
     "created_by": "cli",
     "created_at": "2026-11-12T02:19:38.852123+00:00"
+   },
+   {
+    "id": 11,
+    "symbol": "BND",
+    "kind": "price_below",
+    "threshold": 69.3,
+    "note": "loop-income r016: proxy for 10y ~5.35% (next bond add trigger); ^TNX alerts rejected (B-078)",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-11-13T02:16:44.308536+00:00"
    }
   ],
   "alert_event": [
@@ -1816,6 +1918,14 @@
     "ts": "2026-11-06T02:19:45.930751+00:00",
     "value": -4.194711879810297,
     "message": "JPM: -4.19% on the day"
+   },
+   {
+    "id": 3,
+    "alert_id": 10,
+    "session_date": "2026-11-12",
+    "ts": "2026-11-13T02:12:32.517162+00:00",
+    "value": 70.65,
+    "message": "BND: price 70.65 \u2264 70.70"
    }
   ],
   "note": [
@@ -2775,6 +2885,39 @@
     "created_by": "cli",
     "created_at": "2026-11-12T02:19:39.994226+00:00",
     "updated_at": "2026-11-12T02:19:39.994232+00:00"
+   },
+   {
+    "id": 88,
+    "symbol": "BND",
+    "kind": "thesis",
+    "text": "loop-income r016 (11-12 21:15 ET, 11-12 close): 10y 4.998->5.103 (+10.5bp, curve 10Y 5.10) crossed my 5.1% add trigger; alert 10 (BND<=70.70) fired at 70.65. Bond sleeve fell -$209 on the day vs -$190 predicted by my empirical duration (~$906/+50bp). Bought 5 BND @70.65 and 4 VCIT @78.76 (bonds back to ~target, sleeve ~34.5% vs 35%), funded by selling 1 HD @348.26 (largest risk contributor, earnings 11-17 bmo) and 1 JNJ @259.61-cost/283.52 (overweight). Locks ~5% YTM on more of the book. Next add only if 10y >5.35% (BND ~69.3). PPI 11-13 08:30. Cash $13.19.",
+    "review_on": "2026-11-19",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-13T02:16:32.077996+00:00",
+    "updated_at": "2026-11-13T02:16:32.078012+00:00"
+   },
+   {
+    "id": 89,
+    "symbol": "IEF",
+    "kind": "thesis",
+    "text": "loop-macro r016 (11-12 21:15 ET): no trade. Bear move after hot CPI: 10Y 4.98->5.10 (11-10->11-12), 2Y 4.73->4.86, 2s10s 24bp; GLD -2.8%, TLT -1.5%, IEF -0.80% while SPX -0.35%, RUT -1.66% (139 up/359 down), HYG -0.48%, VIX 18.7, VIX/VIX3M 0.93; claims 200K vs 194K. Book -228 (-0.23%) vs SPY -0.35%. Note 68 stop not hit: 10Y 5.10 < 5.15 and IEF 20d corr to SPY -0.24 (own calc from Argus closes to 11-11), so the hedge still works on average. Staged (sim 11-12 close): if core PPI 11-13 >=0.4% m/m AND 10Y closes > 5.15, SELL 44 IEF / BUY 39 SGOV (net cash +48.57, FIFO realized -46.64; IEF 11.6->7.6%, SGOV 16.4->20.4%). Else hold; FOMC minutes 11-18 (missing from Argus's key calendar). Supersedes note 68's 11-13 review.",
+    "review_on": "2026-11-16",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-13T02:19:14.311398+00:00",
+    "updated_at": "2026-11-13T02:19:14.311405+00:00"
+   },
+   {
+    "id": 90,
+    "symbol": "TGTX",
+    "kind": "note",
+    "text": "[loop-growth] r016 (11-12 close 64.56): screen A hit; one of only 8 of 19 screen hits still growing >=25% in the latest SEC quarter. Q3 revenue 259.9M +60.7% y/y (Q2 +70.3%, Q1 +69.6%: decelerating from +93%), op margin 33.0% (Q2 9.0%, Q1 17.0%: lumpy). TTM P/E 96 (SEC EPS 0.67), fwd 22 on FY27 2.93 (Yahoo +1y); screener P/E 21.8 and net margin 72.6% are FY2025 flattered by a 390.9M Q3-25 tax benefit. Insiders 0 buys / 2 sells, short interest 28% of float, 2026 guide raised (headlines). No buy: no cash, healthcare is already 46% of the book, and it does not beat my weakest holding on durability evidence. Revisit at Q4 (Feb) or on a >20% pullback.",
+    "review_on": "2027-02-26",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-13T02:20:01.101763+00:00",
+    "updated_at": "2026-11-13T02:20:01.101768+00:00"
    }
   ],
   "peer_list": [],
@@ -6635,6 +6778,214 @@
      "created_at": "2026-11-12T02:19:39.994226+00:00",
      "updated_at": "2026-11-12T02:19:39.994232+00:00"
     }
+   },
+   {
+    "id": 190,
+    "ts": "2026-11-13T02:16:07.474241+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "60",
+    "before": null,
+    "after": {
+     "id": 60,
+     "type": "SELL",
+     "symbol": "HD",
+     "qty": 1.0,
+     "price": 348.26,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-13T02:16:07.026475+00:00",
+     "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+     "source": "cli",
+     "external_id": "loop-income-r016-HD",
+     "deleted": false
+    }
+   },
+   {
+    "id": 191,
+    "ts": "2026-11-13T02:16:09.751929+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "61",
+    "before": null,
+    "after": {
+     "id": 61,
+     "type": "SELL",
+     "symbol": "JNJ",
+     "qty": 1.0,
+     "price": 283.52,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-13T02:16:09.317813+00:00",
+     "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+     "source": "cli",
+     "external_id": "loop-income-r016-JNJ",
+     "deleted": false
+    }
+   },
+   {
+    "id": 192,
+    "ts": "2026-11-13T02:16:11.681446+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "62",
+    "before": null,
+    "after": {
+     "id": 62,
+     "type": "BUY",
+     "symbol": "BND",
+     "qty": 5.0,
+     "price": 70.65,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-13T02:16:11.295918+00:00",
+     "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+     "source": "cli",
+     "external_id": "loop-income-r016-BND",
+     "deleted": false
+    }
+   },
+   {
+    "id": 193,
+    "ts": "2026-11-13T02:16:13.817376+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "txn",
+    "entity_id": "63",
+    "before": null,
+    "after": {
+     "id": 63,
+     "type": "BUY",
+     "symbol": "VCIT",
+     "qty": 4.0,
+     "price": 78.76,
+     "fee": 0.0,
+     "amount": 0.0,
+     "ts": "2026-11-13T02:16:13.371991+00:00",
+     "note": "loop-income r016: 10y 5.103% crossed 5.1% add trigger; rebalance bonds to target, fund from HD/JNJ overweights",
+     "source": "cli",
+     "external_id": "loop-income-r016-VCIT",
+     "deleted": false
+    }
+   },
+   {
+    "id": 194,
+    "ts": "2026-11-13T02:16:32.080796+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "88",
+    "before": null,
+    "after": {
+     "id": 88,
+     "symbol": "BND",
+     "kind": "thesis",
+     "text": "loop-income r016 (11-12 21:15 ET, 11-12 close): 10y 4.998->5.103 (+10.5bp, curve 10Y 5.10) crossed my 5.1% add trigger; alert 10 (BND<=70.70) fired at 70.65. Bond sleeve fell -$209 on the day vs -$190 predicted by my empirical duration (~$906/+50bp). Bought 5 BND @70.65 and 4 VCIT @78.76 (bonds back to ~target, sleeve ~34.5% vs 35%), funded by selling 1 HD @348.26 (largest risk contributor, earnings 11-17 bmo) and 1 JNJ @259.61-cost/283.52 (overweight). Locks ~5% YTM on more of the book. Next add only if 10y >5.35% (BND ~69.3). PPI 11-13 08:30. Cash $13.19.",
+     "review_on": "2026-11-19",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-13T02:16:32.077996+00:00",
+     "updated_at": "2026-11-13T02:16:32.078012+00:00"
+    }
+   },
+   {
+    "id": 195,
+    "ts": "2026-11-13T02:16:44.310361+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "alert",
+    "entity_id": "11",
+    "before": null,
+    "after": {
+     "symbol": "BND",
+     "kind": "price_below",
+     "threshold": 69.3
+    }
+   },
+   {
+    "id": 196,
+    "ts": "2026-11-13T02:19:14.313104+00:00",
+    "actor": "cli",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "89",
+    "before": null,
+    "after": {
+     "id": 89,
+     "symbol": "IEF",
+     "kind": "thesis",
+     "text": "loop-macro r016 (11-12 21:15 ET): no trade. Bear move after hot CPI: 10Y 4.98->5.10 (11-10->11-12), 2Y 4.73->4.86, 2s10s 24bp; GLD -2.8%, TLT -1.5%, IEF -0.80% while SPX -0.35%, RUT -1.66% (139 up/359 down), HYG -0.48%, VIX 18.7, VIX/VIX3M 0.93; claims 200K vs 194K. Book -228 (-0.23%) vs SPY -0.35%. Note 68 stop not hit: 10Y 5.10 < 5.15 and IEF 20d corr to SPY -0.24 (own calc from Argus closes to 11-11), so the hedge still works on average. Staged (sim 11-12 close): if core PPI 11-13 >=0.4% m/m AND 10Y closes > 5.15, SELL 44 IEF / BUY 39 SGOV (net cash +48.57, FIFO realized -46.64; IEF 11.6->7.6%, SGOV 16.4->20.4%). Else hold; FOMC minutes 11-18 (missing from Argus's key calendar). Supersedes note 68's 11-13 review.",
+     "review_on": "2026-11-16",
+     "archived": false,
+     "created_by": "cli",
+     "created_at": "2026-11-13T02:19:14.311398+00:00",
+     "updated_at": "2026-11-13T02:19:14.311405+00:00"
+    }
+   },
+   {
+    "id": 197,
+    "ts": "2026-11-13T02:20:01.083938+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "growth-candidates",
+    "before": null,
+    "after": {
+     "added": [
+      "TGTX"
+     ]
+    }
+   },
+   {
+    "id": 198,
+    "ts": "2026-11-13T02:20:01.102783+00:00",
+    "actor": "ui",
+    "action": "create",
+    "entity": "note",
+    "entity_id": "90",
+    "before": null,
+    "after": {
+     "id": 90,
+     "symbol": "TGTX",
+     "kind": "note",
+     "text": "[loop-growth] r016 (11-12 close 64.56): screen A hit; one of only 8 of 19 screen hits still growing >=25% in the latest SEC quarter. Q3 revenue 259.9M +60.7% y/y (Q2 +70.3%, Q1 +69.6%: decelerating from +93%), op margin 33.0% (Q2 9.0%, Q1 17.0%: lumpy). TTM P/E 96 (SEC EPS 0.67), fwd 22 on FY27 2.93 (Yahoo +1y); screener P/E 21.8 and net margin 72.6% are FY2025 flattered by a 390.9M Q3-25 tax benefit. Insiders 0 buys / 2 sells, short interest 28% of float, 2026 guide raised (headlines). No buy: no cash, healthcare is already 46% of the book, and it does not beat my weakest holding on durability evidence. Revisit at Q4 (Feb) or on a >20% pullback.",
+     "review_on": "2027-02-26",
+     "archived": false,
+     "created_by": "ui",
+     "created_at": "2026-11-13T02:20:01.101763+00:00",
+     "updated_at": "2026-11-13T02:20:01.101768+00:00"
+    }
+   },
+   {
+    "id": 199,
+    "ts": "2026-11-13T02:26:16.610584+00:00",
+    "actor": "ui",
+    "action": "watch",
+    "entity": "watchlist",
+    "entity_id": "Watchlist",
+    "before": null,
+    "after": {
+     "added": [
+      "APP"
+     ]
+    }
+   },
+   {
+    "id": 200,
+    "ts": "2026-11-13T02:26:18.638680+00:00",
+    "actor": "ui",
+    "action": "unwatch",
+    "entity": "watchlist",
+    "entity_id": "Watchlist",
+    "before": {
+     "removed": [
+      "APP"
+     ]
+    },
+    "after": null
    }
   ]
  }
