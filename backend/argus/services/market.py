@@ -53,11 +53,14 @@ EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
 # Trailing figures SEC's quarters supply when they're at least as recent as the providers', so the
 # valuation card agrees with the quarterly statements (Yahoo's revenue and Finnhub's quarterly growth can
-# lag a 10-Q by weeks; Finnhub's margins too). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
+# lag a 10-Q by weeks; Finnhub's margins and EPS growth too). fcf_ttm and fcf_margin_pct come from SEC whenever
+# it has them. An EPS growth SEC supplies as None is "not meaningful" (loss or near-zero base) and stays blank.
 SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
-                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct")
+                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct", "eps_growth_yoy_pct",
+                     "eps_growth_q_yoy_pct")
+SEC_NOT_MEANINGFUL = ("eps_growth_yoy_pct", "eps_growth_q_yoy_pct")
 SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly different dates
-FUNDAMENTALS_VERSION = 10 # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 11  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
 
@@ -558,7 +561,7 @@ class MarketService:
         if self.sec is None or not self.settings.sec_user_agent:
             return {}
         try:
-            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 5 for the quarter's growth
+            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 8 for TTM EPS growth
         except ProviderError as e:
             if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
                 return {}  # ETFs, funds and foreign filers: the providers' figures stand
@@ -601,7 +604,7 @@ class MarketService:
             order = ["sec", *order] if "sec" in by_provider else order
             for n in order:
                 v = by_provider[n].get(field)
-                if v is not None:
+                if v is not None or (n == "sec" and field in SEC_NOT_MEANINGFUL and field in by_provider[n]):
                     metrics[field], sources[field] = v, n
                     break
         if metrics and by_provider.get("sec", {}).get("_sec"):
