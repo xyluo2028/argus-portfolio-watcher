@@ -41,6 +41,15 @@ def test_build_breadth_and_calendar_filter():
     assert [f["date"] for f in out["calendar"]["fomc"]] == ["2026-10-28"]
 
 
+def test_calendar_keeps_fomc_minutes_under_either_name():
+    def ev(name, day):
+        return {"date": day, "time_et": "14:00", "event": name, "consensus": None, "previous": None, "actual": None}
+    events = [ev("FOMC Meeting Minutes", "2026-11-18"), ev("FOMC Minutes", "2026-11-19"),
+              ev("FOMC Member Williams Speaks", "2026-11-18")]
+    cal = mc.build({}, None, None, events, date(2026, 11, 13))["calendar"]
+    assert [e["event"] for e in cal["events"]] == ["FOMC Meeting Minutes", "FOMC Minutes"]
+
+
 def test_calendar_keeps_pce_price_index_eci_and_labels_gdp_report_prices():
     def ev(name, prev, day="2026-10-29"):
         return {"date": day, "time_et": "08:30", "event": name, "consensus": None, "previous": prev, "actual": None}
