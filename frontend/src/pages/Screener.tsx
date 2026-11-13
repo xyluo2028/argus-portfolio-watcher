@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, api, type ScreenResult, type ScreenerStatus } from "../api";
+import { ApiError, api, type ScreenResult, type ScreenerStatus, type WatchlistSummary } from "../api";
 import { big, nyTime, price, tone } from "../format";
+import { pickWatchlist, rememberWatchlist, savedWatchlist, withDefault } from "../watchlists";
 
 type Filter = { field: string; min: string; max: string };
 const BILLIONS = new Set(["market_cap", "revenue", "net_income"]);  // entered in $B
@@ -38,10 +39,18 @@ export function Screener() {
   const [otc, setOtc] = useState(false);
   const [res, setRes] = useState<ScreenResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [added, setAdded] = useState<Set<string>>(new Set());
+  // "+ watch" adds to the list picked here, which starts as the one open on the Watchlist page.
+  const [lists, setLists] = useState<WatchlistSummary[]>(withDefault([]));
+  const [target, setTarget] = useState<string | null>(null);
+  const [added, setAdded] = useState<Set<string>>(new Set());  // "list\u0000symbol"
+  const [notice, setNotice] = useState<string | null>(null);
   const seq = useRef(0);
 
   useEffect(() => { api.screenerStatus().then(setStatus, () => undefined); }, []);
+  useEffect(() => {
+    api.watchlists().then((ls) => { const all = withDefault(ls); setLists(all); setTarget(pickWatchlist(all, savedWatchlist())); },
+                          () => setTarget(pickWatchlist(withDefault([]), null)));
+  }, []);
   const fields = status?.fields ?? {};
 
   const body = useMemo(() => ({
@@ -67,8 +76,16 @@ export function Screener() {
 
   const set = (i: number, patch: Partial<Filter>) => setFilters((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   const used = new Set(filters.map((f) => f.field));
+  const isAdded = (sym: string) => target != null && added.has(`${target}\u0000${sym}`);
   const watch = async (sym: string) => {
-    try { await api.watchAdd([sym]); setAdded((s) => new Set(s).add(sym)); } catch (e) { setError((e as ApiError).message); }
+    if (!target) return;
+    try {
+      const r = await api.watchAdd([sym], undefined, target);
+      setAdded((s) => new Set(s).add(`${target}\u0000${sym}`));
+      setLists((ls) => ls.map((l) => (l.name === target ? { ...l, count: l.count + r.added.length } : l)));
+      setNotice(r.added.length ? `Added ${sym} to ${target}` : `${sym} is already on ${target}`);
+      rememberWatchlist(target);
+    } catch (e) { setError((e as ApiError).message); }
   };
 
   return (
@@ -125,7 +142,15 @@ export function Screener() {
           </p>
         ) : (
           <>
-            <h2>{res.matches.toLocaleString("en-US")} matches {res.matches > res.rows.length && <span className="muted small">· showing {res.rows.length}</span>}</h2>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>{res.matches.toLocaleString("en-US")} matches {res.matches > res.rows.length && <span className="muted small">· showing {res.rows.length}</span>}</h2>
+              <label className="small">“+ watch” adds to{" "}
+                <select value={target ?? ""} onChange={(e) => { setTarget(e.target.value); setNotice(null); }} aria-label="Watchlist to add to">
+                  {lists.map((l) => <option key={l.name} value={l.name}>{l.name} ({l.count})</option>)}
+                </select>
+              </label>
+            </div>
+            {notice && <p className="small muted" role="status" style={{ margin: "0 0 8px" }}>{notice} · <Link to={`/watchlist?list=${encodeURIComponent(target ?? "")}`}>open</Link></p>}
             <div className="table-wrap">
               <table className="metric-table">
                 <thead><tr><th>Symbol</th><th>Price</th>{COLUMNS.map((c) => <th key={c} className={c === sort ? "sorted" : undefined}>{fields[c]?.label ?? c}</th>)}<th /></tr></thead>
@@ -137,7 +162,9 @@ export function Screener() {
                       {COLUMNS.map((c) => (
                         <td key={c} className={c.endsWith("growth_pct") ? tone(r[c] as number) : undefined}>{show(c, r[c], fields[c]?.unit)}</td>
                       ))}
-                      <td><button className="btn ghost small" disabled={added.has(r.symbol)} onClick={() => watch(r.symbol.replace("-", "."))}>{added.has(r.symbol) ? "watching" : "+ watch"}</button></td>
+                      <td><button className="btn ghost small" disabled={!target || isAdded(r.symbol.replace("-", "."))}
+                                  title={target ? `Add to ${target}` : undefined}
+                                  onClick={() => watch(r.symbol.replace("-", "."))}>{isAdded(r.symbol.replace("-", ".")) ? "watching" : "+ watch"}</button></td>
                     </tr>
                   ))}
                 </tbody>
