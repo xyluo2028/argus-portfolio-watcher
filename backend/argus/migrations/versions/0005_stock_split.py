@@ -1,7 +1,7 @@
 """stock_split: splits Yahoo reports in daily history (B-140)
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0005
+Revises: 0004
 Create Date: 2026-11-06 03:00:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 import argus.models  # noqa: F401 - custom column types (UTCDateTime)
 
 
-revision = '0002'
-down_revision = '0001'
+revision = '0005'
+down_revision = '0004'
 branch_labels = None
 depends_on = None
 

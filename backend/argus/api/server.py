@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import json
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -18,12 +19,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
-from argus.api.auth import COOKIE, COOKIE_MAX_AGE, TokenAuthMiddleware, request_token, token_ok
+from argus.api.auth import (COOKIE_MAX_AGE, OPEN, SESSION_COOKIE, TOKEN_COOKIE, Authenticator, AuthMiddleware,
+                            LoginThrottle, credentials, token_ok)
 from argus.app import Argus
 from argus.config import REPO_ROOT
 from argus.errors import ArgusError
 from argus.live import LiveHub
 from argus.mcp_server import create_mcp
+from argus.services.accounts import Principal
 from argus.market_calendar import parse_ny_datetime
 from argus.services.alerts import KINDS
 from argus.services.portfolio import TxnInput
@@ -32,12 +35,20 @@ from argus.symbols import normalize_symbol
 UI_DIST = REPO_ROOT / "frontend" / "dist"
 STREAM_MIN_INTERVAL_S = 1.0
 KEEPALIVE_S = 15.0
+LOGIN_FAIL_DELAY_S = 1.0  # slows guessing; the throttle caps it
+SIGNUP_LIMIT, SIGNUP_WINDOW_S = 10, 3600.0  # accounts the sign-in page may create per hour
 
-_STATUS = {"UNAUTHORIZED": 401, "NOT_FOUND": 404, "ALREADY_EXISTS": 409, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
+_STATUS = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "WRONG_PASSWORD": 403, "READ_ONLY": 403, "NOT_FOUND": 404,
+           "ALREADY_EXISTS": 409,
+           "TOO_MANY_ATTEMPTS": 429, "PROVIDER_ERROR": 502, "NOT_CONFIGURED": 503}
 
 
 class PeersBody(BaseModel):
     peers: list[str] | None  # None resets to the suggested peers
+
+
+class ValuationBody(BaseModel):
+    inputs: dict | None  # None forgets the saved model
 
 
 class ScreenBody(BaseModel):
@@ -115,7 +126,30 @@ class SimBody(BaseModel):
 
 
 class LoginBody(BaseModel):
-    token: str
+    username: str | None = None  # with password; without, `token` is the server token
+    password: str | None = None
+    token: str | None = None
+
+
+class PasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class SetupBody(BaseModel):
+    username: str
+    password: str
+    token: str | None = None  # required when ARGUS_TOKEN is set (or send it as the cookie / Bearer)
+
+
+class SignupBody(BaseModel):
+    username: str
+    password: str
+
+
+class KeyBody(BaseModel):
+    name: str
+    expires_days: int | None = None
 
 
 class PortfolioBody(BaseModel):
@@ -141,7 +175,9 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
     app = FastAPI(title="Argus", lifespan=lifespan)
     settings = argus.settings
-    app.add_middleware(TokenAuthMiddleware, token=settings.token)
+    auth = Authenticator(settings.token, argus.accounts)
+    throttle = LoginThrottle()
+    app.add_middleware(AuthMiddleware, auth=auth)
     # Only answer requests addressed to this machine (or a configured tunnel name): blocks DNS-rebinding
     # pages in the browser from reaching the portfolio through a hostile name that resolves to 127.0.0.1.
     # Added last, so it runs first.
@@ -156,6 +192,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def run(fn, *args, **kwargs):
         # Service calls hit SQLite and providers synchronously; keep the event loop free.
         return await asyncio.to_thread(fn, *args, **kwargs)
+
+    def own_account(request: Request, signed_in: bool = False) -> Principal:
+        """The caller's account. `signed_in`: refuse API keys, so a leaked key can't mint more keys
+        or take over the password."""
+        p: Principal = getattr(request.state, "principal", OPEN)
+        if p.account_id is None:
+            raise ArgusError("NO_ACCOUNT", "Not signed in with an account.",
+                             hint="Create one on the server (`argus user add <name>`) and sign in with it.")
+        if signed_in and p.via == "key":
+            raise ArgusError("FORBIDDEN", "API keys can't manage keys or passwords.",
+                             hint="Sign in in the web UI, or use `argus key` / `argus user passwd` on the server.")
+        return p
 
     # -- market ----------------------------------------------------------------
     @app.get("/api/market-status")
@@ -195,6 +243,22 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
         return await run(argus.history, symbol, period, interval, specs)
 
+    @app.get("/api/fundamental-series/{symbol}")
+    async def fundamental_series(symbol: str, period: str = "1y"):
+        return await run(argus.fundamental_series, symbol, period)
+
+    @app.get("/api/valuation")
+    async def valuation_models():
+        return await run(argus.valuation_models)
+
+    @app.get("/api/valuation/{symbol}")
+    async def valuation(symbol: str):
+        return await run(argus.valuation, symbol, dict(hub.quotes))
+
+    @app.put("/api/valuation/{symbol}")
+    async def save_valuation(symbol: str, body: ValuationBody):
+        return {"saved": await run(argus.save_valuation, symbol, body.inputs, "ui")}
+
     @app.get("/api/profile/{symbol}")
     async def company_profile(symbol: str, refresh: bool = False):
         return await run(argus.company_profile, symbol, refresh)
@@ -204,8 +268,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.fund_holdings, symbol)
 
     @app.get("/api/peers/{symbol}")
-    async def peers(symbol: str):
-        return await run(argus.peers, symbol)
+    async def peers(symbol: str, metrics: bool = True):
+        return await run(argus.peers, symbol, metrics)
 
     @app.put("/api/peers/{symbol}")
     async def set_peers(symbol: str, body: PeersBody):
@@ -241,6 +305,18 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     @app.post("/api/portfolios", status_code=201)
     async def create_portfolio(body: PortfolioBody):
         return await run(argus.portfolios.create_portfolio, body.name, body.benchmark, "ui")
+
+    @app.get("/api/portfolios/{ref}/shares")
+    async def portfolio_shares(ref: str):
+        return await run(argus.portfolios.shares, ref)
+
+    @app.put("/api/portfolios/{ref}/shares/{username}")
+    async def share_portfolio(ref: str, username: str):
+        return await run(argus.portfolios.share, ref, username, "ui")
+
+    @app.delete("/api/portfolios/{ref}/shares/{username}")
+    async def unshare_portfolio(ref: str, username: str):
+        return await run(argus.portfolios.unshare, ref, username, "ui")
 
     @app.get("/api/portfolios/{ref}")
     async def portfolio(ref: str, lots: bool = False):
@@ -288,9 +364,13 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.watchlists.remove, [symbol], name, "ui")
 
     @app.get("/api/compare")
-    async def compare(symbols: str, fields: str | None = None):
+    async def compare(symbols: str, fields: str | None = None, full: bool = False):
         f = [x.strip() for x in fields.split(",")] if fields else None
-        return await run(argus.compare, symbols.split(","), f)
+        return await run(argus.compare, symbols.split(","), f, full)
+
+    @app.get("/api/compare/history")
+    async def compare_history(symbols: str, period: str = "1y"):
+        return await run(argus.compare_history, symbols.split(","), period)
 
     # -- routines: brief, events, alerts, notes ------------------------------------
     @app.get("/api/brief/{ref}")
@@ -376,21 +456,36 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.simulate_trades, ref, body.trades, dict(hub.quotes))
 
     # -- live stream -------------------------------------------------------------
-    # Every open tab/device on the same portfolio gets the same summary per hub update: compute it once.
-    summaries: dict[str, tuple[tuple[int, int], dict]] = {}
+    # Every open tab/device of one account on the same portfolio gets the same summary per hub update:
+    # compute it once. Keyed by account too, since a name means each account's own portfolio.
+    summaries: dict[tuple[int | None, str], tuple[tuple[int, int], dict]] = {}
+    # Which prices each account's stream carries: its holdings, watchlists and benchmarks.
+    visible: dict[int | None, tuple[tuple[int, int], set[str]]] = {}
 
-    async def summary_at(portfolio: str, version: int) -> dict:
+    async def visible_symbols(account_id: int | None) -> set[str]:
+        key = (argus.portfolios.revision, argus.watchlists.revision)
+        hit = visible.get(account_id)
+        if hit and hit[0] == key:
+            return hit[1]
+        syms = set(await run(argus.tracked_symbols))
+        syms |= {p["benchmark"] for p in await run(argus.portfolios.list_portfolios)}
+        visible[account_id] = (key, syms)
+        return syms
+
+    async def summary_at(account_id: int | None, portfolio: str, version: int) -> dict:
         key = (version, argus.portfolios.revision)  # new prices or a new trade both invalidate
-        hit = summaries.get(portfolio)
+        hit = summaries.get((account_id, portfolio))
         if hit and hit[0] == key:
             return hit[1]
         summary = await run(argus.portfolios.summary, portfolio, dict(hub.quotes))
-        summaries[portfolio] = (key, summary)
+        summaries[(account_id, portfolio)] = (key, summary)
         return summary
 
     @app.get("/api/stream")
     async def stream(request: Request, portfolio: str | None = None):
         """SSE: an `update` event at most once per second while prices change."""
+        account_id = getattr(request.state, "principal", OPEN).account_id
+
         async def events():
             seen = -1
             while not await request.is_disconnected():
@@ -399,12 +494,20 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
                     yield ": keepalive\n\n"
                     continue
                 seen = version
-                payload = hub.snapshot()
+                syms = await visible_symbols(account_id)
+                summary = None
                 if portfolio:
                     try:
-                        payload["portfolio"] = await summary_at(portfolio, version)
+                        summary = await summary_at(account_id, portfolio, version)
                     except ArgusError as e:
-                        payload["portfolio_error"] = e.to_dict()
+                        summary = e
+                if isinstance(summary, dict):  # a portfolio shared with you: its holdings' prices too
+                    syms = syms | {r["symbol"] for r in summary["positions"]} | {summary["portfolio"]["benchmark"]}
+                payload = hub.snapshot(account_id, syms)
+                if isinstance(summary, dict):
+                    payload["portfolio"] = summary
+                elif summary is not None:
+                    payload["portfolio_error"] = summary.to_dict()
                 yield f"event: update\ndata: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(STREAM_MIN_INTERVAL_S)
 
@@ -421,45 +524,147 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         name = Path(PureWindowsPath(body.filename).name)  # drop any folders (/ or \\); the name may hold the portfolio
         return await run(argus.import_investing, name, body.portfolio or None, cutoff, body.dry_run, True, body.content)
 
-    # -- snapshot ------------------------------------------------------------------
+    # -- snapshot: your own records only (the whole instance is `argus snapshot`, CLI only) --------
     @app.get("/api/snapshot")
-    async def snapshot_download():
-        doc = await run(argus.snapshots.export)
-        name = f"argus-snapshot-{datetime.now():%Y%m%d-%H%M%S}.json"
+    async def snapshot_download(request: Request):
+        who = getattr(request.state, "principal", OPEN).username
+        doc = await run(argus.account_snapshots.export, who)
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in who or "argus")
+        name = f"argus-{safe}-{datetime.now():%Y%m%d-%H%M%S}.json"
         return JSONResponse(doc, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.post("/api/snapshot/restore")
-    async def snapshot_restore(doc: dict = Body(...), replace: bool = False, dry_run: bool = True):
-        return await run(argus.snapshots.restore, doc, replace, dry_run, argus.settings.data_dir / "snapshots")
+    async def snapshot_restore(request: Request, doc: dict = Body(...), replace: bool = False, dry_run: bool = True):
+        who = getattr(request.state, "principal", OPEN).username
+        return await run(argus.account_snapshots.restore, doc, replace, dry_run,
+                         argus.settings.data_dir / "snapshots", who)
 
     @app.get("/api/health")
     async def health():
         return {"ok": True, "stream": hub.ws_state, "session": hub.status["session"]}
 
-    # -- auth (only matters when ARGUS_TOKEN is set) ------------------------------
+    # -- auth (only matters once an account exists or ARGUS_TOKEN is set) ------------------
     @app.get("/api/auth/status")
     async def auth_status(request: Request):
-        required = bool(settings.token)
-        return {"required": required,
-                "authenticated": not required or token_ok(settings.token, request_token(dict(request.headers)))}
+        def status():
+            p = auth.check(dict(request.headers))
+            has_accounts = argus.accounts.exist()
+            return {"required": has_accounts or bool(settings.token), "authenticated": p is not None,
+                    "methods": [m for m, on in (("password", has_accounts), ("token", bool(settings.token))) if on],
+                    "account": {"id": p.account_id, "username": p.username} if p and p.account_id else None,
+                    # No account yet: the first one is made on the Account page, once signed in with the token.
+                    "setup": not has_accounts,
+                    # Whether the sign-in page offers "Create account" (ARGUS_SIGNUP; needs a first account).
+                    "signup": has_accounts and settings.signup}
+        return await run(status)
+
+    def _cookie(resp: JSONResponse, request: Request, name: str, value: str) -> None:
+        resp.set_cookie(name, value, max_age=COOKIE_MAX_AGE, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+
+    async def _refuse(key: str, message: str):
+        throttle.failed(key)
+        await asyncio.sleep(LOGIN_FAIL_DELAY_S)
+        raise ArgusError("UNAUTHORIZED", message)
 
     @app.post("/api/auth/login")
     async def login(body: LoginBody, request: Request):
-        if not settings.token:
+        if not await run(auth.required):
             return {"ok": True, "required": False}
-        if not token_ok(settings.token, body.token.strip()):
-            await asyncio.sleep(1)  # slow down guessing (the token itself should be long and random)
-            raise ArgusError("UNAUTHORIZED", "Wrong token.")
-        resp = JSONResponse({"ok": True, "required": True})
-        resp.set_cookie(COOKIE, settings.token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", path="/")
+        key = "token" if body.username is None else "user:" + body.username.strip().lower()
+        if throttle.blocked(key):
+            raise ArgusError("TOO_MANY_ATTEMPTS", "Too many failed sign-ins.",
+                             hint="Wait 15 minutes, or set a new password on the server: `argus user passwd <name>`.")
+        if body.username is None:  # the server token
+            if not token_ok(settings.token, (body.token or "").strip()):
+                await _refuse(key, "Wrong token.")
+            throttle.succeeded(key)
+            resp = JSONResponse({"ok": True, "required": True})
+            _cookie(resp, request, TOKEN_COOKIE, settings.token)
+            return resp
+        p = await run(argus.accounts.authenticate, body.username, body.password or "")
+        if p is None:
+            await _refuse(key, "Wrong username or password.")
+        throttle.succeeded(key)
+        resp = JSONResponse({"ok": True, "required": True, "account": {"id": p.account_id, "username": p.username}})
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, p.account_id))
+        return resp
+
+    @app.post("/api/auth/setup", status_code=201)
+    async def setup(body: SetupBody, request: Request):
+        """First run: make the first account and sign in with it. It takes over every record so far."""
+        if await run(argus.accounts.exist):
+            raise ArgusError("ALREADY_EXISTS", "Argus already has an account.",
+                             hint="Sign in with it, or create your own on the sign-in page.")
+        if settings.token:  # whoever reaches the server must prove they hold the server's secret
+            bearer, _, cookie = credentials(dict(request.headers))
+            if throttle.blocked("token"):
+                raise ArgusError("TOO_MANY_ATTEMPTS", "Too many failed sign-ins.", hint="Wait 15 minutes.")
+            if not any(token_ok(settings.token, (t or "").strip()) for t in (body.token, bearer, cookie)):
+                await _refuse("token", "Wrong token.")
+            throttle.succeeded("token")
+        a = await run(argus.accounts.create, body.username, body.password, "ui", True)
+        resp = JSONResponse({"ok": True, "account": {"id": a["id"], "username": a["username"]},
+                             "claimed": a["claimed"]}, status_code=201)
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, a["id"]))
+        return resp
+
+    signups: list[float] = []  # times of recent sign-ups, to cap them
+
+    @app.post("/api/auth/signup", status_code=201)
+    async def signup(body: SignupBody, request: Request):
+        """Anyone who reaches the server can make an account: all accounts are the same kind, and a new
+        one starts empty. Not the first one, though: that takes over the existing records (`setup`)."""
+        if not settings.signup:
+            raise ArgusError("FORBIDDEN", "Creating accounts here is switched off (ARGUS_SIGNUP=off).",
+                             hint="Ask whoever runs this server: `argus user add <name>`.")
+        if not await run(argus.accounts.exist):
+            raise ArgusError("FORBIDDEN", "The first account is made on the Account page.",
+                             hint="Sign in with the server token first: it takes over the existing records.")
+        cutoff = time.monotonic() - SIGNUP_WINDOW_S
+        signups[:] = [t for t in signups if t > cutoff]
+        if len(signups) >= SIGNUP_LIMIT:
+            raise ArgusError("TOO_MANY_ATTEMPTS", "Too many accounts were created in the last hour.",
+                             hint="Try later, or use `argus user add <name>` on the server.")
+        a = await run(argus.accounts.create, body.username, body.password, "ui")
+        signups.append(time.monotonic())
+        resp = JSONResponse({"ok": True, "account": {"id": a["id"], "username": a["username"]}}, status_code=201)
+        _cookie(resp, request, SESSION_COOKIE, await run(argus.accounts.create_session, a["id"]))
         return resp
 
     @app.post("/api/auth/logout")
-    async def logout():
+    async def logout(request: Request):
+        _, session, _ = credentials(dict(request.headers))
+        if session:
+            await run(argus.accounts.end_session, session)
         resp = JSONResponse({"ok": True})
-        resp.delete_cookie(COOKIE, path="/")
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        resp.delete_cookie(TOKEN_COOKIE, path="/")
         return resp
+
+    # -- your account -----------------------------------------------------------------
+    @app.get("/api/account")
+    async def account(request: Request):
+        p = own_account(request)
+        return await run(lambda: {"account": argus.accounts.get(p.account_id), "via": p.via,
+                                  "keys": argus.accounts.list_keys(p.account_id)})
+
+    @app.put("/api/account/password")
+    async def change_password(body: PasswordBody, request: Request):
+        p = own_account(request, signed_in=True)
+        _, session, _ = credentials(dict(request.headers))
+        return await run(argus.accounts.change_password, p.account_id, body.current_password, body.new_password,
+                         session, "ui")
+
+    @app.post("/api/account/keys", status_code=201)
+    async def create_key(body: KeyBody, request: Request):
+        p = own_account(request, signed_in=True)
+        return await run(argus.accounts.create_key, p.account_id, body.name, body.expires_days, "ui")
+
+    @app.delete("/api/account/keys/{key_id}")
+    async def revoke_key(key_id: int, request: Request):
+        p = own_account(request, signed_in=True)
+        return await run(argus.accounts.revoke_key, key_id, p.account_id, "ui")
 
     app.mount("/mcp", mcp_app)
 
@@ -471,6 +676,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str):
+            if path == "api" or path.startswith("api/"):
+                raise ArgusError("NOT_FOUND", f"No API route /{path}.")
             f = (root / path).resolve()
             # Only files inside dist/ (an encoded "../" must not reach .env or data/).
             if path and f.is_relative_to(root) and f.is_file():
@@ -519,24 +726,26 @@ def serve(port: int, host: str | None = None) -> None:
 
     settings = load_settings()
     host = host or settings.host
-    if host not in LOOPBACK and not settings.token and not settings.insecure_bind:
-        raise ArgusError("INSECURE", f"Refusing to listen on {host} without ARGUS_TOKEN.",
-                         hint="Set ARGUS_TOKEN (openssl rand -hex 32), or keep the default 127.0.0.1 and use a tunnel.")
-    if settings.allowed_hosts and not settings.token:
-        logging.getLogger("argus").warning(
-            "ARGUS_ALLOWED_HOSTS is set but ARGUS_TOKEN isn't: anyone who can reach %s gets full access.",
-            ", ".join(settings.allowed_hosts))
     lock = _lock_data_dir(settings.data_dir)
-    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex((host, port)) == 0:
-            raise ArgusError("PORT_IN_USE", f"Port {port} is already in use.",
-                             hint="Pass --port, or set ARGUS_PORT in .env.")
     try:
+        argus = Argus(settings)
+        secured = bool(settings.token) or argus.accounts.exist()
+        if host not in LOOPBACK and not secured and not settings.insecure_bind:
+            raise ArgusError("INSECURE", f"Refusing to listen on {host} with sign-in off.",
+                             hint="Create an account (`argus user add <name>`) or set ARGUS_TOKEN "
+                                  "(openssl rand -hex 32), or keep the default 127.0.0.1 and use a tunnel.")
+        if settings.allowed_hosts and not secured:
+            logging.getLogger("argus").warning(
+                "ARGUS_ALLOWED_HOSTS is set but sign-in is off (no accounts, no ARGUS_TOKEN): "
+                "anyone who can reach %s gets full access.", ", ".join(settings.allowed_hosts))
+        with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex((host, port)) == 0:
+                raise ArgusError("PORT_IN_USE", f"Port {port} is already in use.",
+                                 hint="Pass --port, or set ARGUS_PORT in .env.")
         # One worker on purpose: the live hub lives in memory and SQLite has one writer.
         # Proxy headers (from a local tunnel) give the real scheme, so the auth cookie is Secure on https.
-        uvicorn.run(create_app(), host=host, port=port, log_level="info", proxy_headers=True,
+        uvicorn.run(create_app(argus), host=host, port=port, log_level="info", proxy_headers=True,
                     forwarded_allow_ips="127.0.0.1")
     finally:
         if lock:
             lock.close()
-

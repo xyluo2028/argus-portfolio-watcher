@@ -191,10 +191,15 @@ class YahooProvider:
             return []
         bars = []
         for ts, row in df.iterrows():
-            ohlc = [_num(row.get(k)) for k in ("Open", "High", "Low", "Close")]
-            if None in ohlc:  # e.g. the latest session before Yahoo has its close; the next fetch picks it up
+            # Yahoo sometimes returns a session with no close (NaN), e.g. AEHR for 2026-10-23 or the latest
+            # session before its close is in: skip it (a later fetch picks it up, B-128) and fill a missing
+            # open/high/low from the close.
+            c = _num(row.get("Close"))
+            if c is None:
                 continue
-            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), *ohlc, _num(row.get("Volume")) or 0.0,
+            o, h, low = (_num(row.get(k)) for k in ("Open", "High", "Low"))
+            bars.append(Bar(ts.to_pydatetime().astimezone(UTC), o if o is not None else c, h if h is not None else c,
+                            low if low is not None else c, c, _num(row.get("Volume")) or 0.0,
                             _num(row.get("Stock Splits")) or 0.0))
         return bars
 

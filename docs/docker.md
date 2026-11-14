@@ -27,7 +27,7 @@ Edit `.env`:
 |---|---|---|
 | `FINNHUB_API_KEY` | your key | your key |
 | `SEC_USER_AGENT` | `argus you@example.com` | same |
-| `ARGUS_TOKEN` | leave empty | **required**: `openssl rand -hex 32` |
+| `ARGUS_TOKEN` | leave empty | `openssl rand -hex 32`, unless you sign in with accounts (below) |
 | `ARGUS_ALLOWED_HOSTS` | leave empty | your tunnel's hostname, e.g. `argus.tail1234.ts.net` |
 
 Leave `ARGUS_HOST` and `ARGUS_DATA_DIR` empty: the image sets them (`0.0.0.0`, `/data`).
@@ -35,7 +35,8 @@ Leave `ARGUS_HOST` and `ARGUS_DATA_DIR` empty: the image sets them (`0.0.0.0`, `
 `compose.yaml` publishes the port on the host's **loopback only** (`127.0.0.1:8787`) and sets
 `ARGUS_INSECURE_BIND=1`, which lets the server listen on all interfaces *inside* the container
 without a token. Nothing outside the host can reach it unless you add a tunnel or change the port
-mapping. If you publish it more widely, remove that line and set `ARGUS_TOKEN`.
+mapping. If you publish it more widely, remove that line and turn on sign-in: create an account or
+set `ARGUS_TOKEN`.
 
 ## 3. Build and start
 
@@ -45,8 +46,14 @@ docker compose ps                   # STATUS should become "healthy" within ~20 
 docker compose logs -f              # Ctrl+C to stop following
 ```
 
-Open http://localhost:8787. With `ARGUS_TOKEN` set you'll get a sign-in screen; paste the token
-once per browser.
+Open http://localhost:8787. Once sign-in is on you'll get a sign-in screen, once per browser.
+
+Accounts (a bot is just another account; the first one turns sign-in on):
+
+```bash
+docker compose exec argus argus user add me
+docker compose exec argus argus key create me --name "my claude"   # API key, shown once
+```
 
 The container runs as an unprivileged user, restarts unless stopped, and has a health check on
 `/api/health`. Database migrations run automatically at start.
@@ -88,7 +95,7 @@ Claude Code against the container (use `https://<tunnel-host>/mcp/` from other d
 
 ```bash
 claude mcp add --transport http argus http://localhost:8787/mcp/ \
-  --header "Authorization: Bearer <ARGUS_TOKEN>"
+  --header "Authorization: Bearer <API key or ARGUS_TOKEN>"
 ```
 
 ## 6. Backups
@@ -135,9 +142,9 @@ Keep the loopback-only port mapping and run the tunnel on the host:
 
 | Symptom | Cause and fix |
 |---|---|
-| Container exits: `Refusing to listen on 0.0.0.0 without ARGUS_TOKEN` | You removed `ARGUS_INSECURE_BIND` (or ran `docker run` without it): set `ARGUS_TOKEN`, or add `-e ARGUS_INSECURE_BIND=1` with a loopback-only `-p 127.0.0.1:...` |
+| Container exits: `Refusing to listen on 0.0.0.0 with sign-in off` | You removed `ARGUS_INSECURE_BIND` (or ran `docker run` without it): create an account or set `ARGUS_TOKEN`, or add `-e ARGUS_INSECURE_BIND=1` with a loopback-only `-p 127.0.0.1:...` |
 | `Invalid host header` (HTTP 400) through a tunnel | Add the tunnel hostname to `ARGUS_ALLOWED_HOSTS` and restart |
-| Every API call is 401 | `ARGUS_TOKEN` is set: sign in in the UI, or send `Authorization: Bearer <token>` |
+| Every API call is 401 | Sign-in is on (an account exists or `ARGUS_TOKEN` is set): sign in in the UI, or send `Authorization: Bearer <API key or token>` |
 | Live prices say "reconnecting" | Another server uses the same Finnhub key; stop it |
 | Charts or dividends empty on a cloud VM | Yahoo is throttling the datacenter IP; see deployment.md item 8 |
 | `docker: command not found` in WSL | Enable WSL integration in Docker Desktop, or use `docker.exe` |

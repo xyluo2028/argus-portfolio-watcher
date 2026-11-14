@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ALL, ApiError, api, type Position, type PositionPreview, type Txn } from "../api";
 import { money, pct, price, tone } from "../format";
+import { useSharedBy } from "../portfolioAccess";
 
 const TYPE_LABEL: Record<string, string> = { OPENING: "Opening", BUY: "Buy", SELL: "Sell", DIVIDEND: "Dividend", SPLIT: "Split", FEE: "Fee" };
 const SHARE_TYPES = new Set(["OPENING", "BUY", "SELL"]);
@@ -46,11 +47,12 @@ export function PositionCard({ symbol, portfolio, position, lastPrice, onChanged
   };
 
   const allView = portfolio === ALL;
+  const sharedBy = useSharedBy();
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Your position</h2>
-        {!trading && <button className="btn primary" onClick={() => { setTrading(true); setEditing(null); }}>Buy / Sell</button>}
+        {!trading && !sharedBy && <button className="btn primary" onClick={() => { setTrading(true); setEditing(null); }}>Buy / Sell</button>}
       </div>
 
       {position ? (
@@ -88,10 +90,10 @@ export function PositionCard({ symbol, portfolio, position, lastPrice, onChanged
                   <td>{SHARE_TYPES.has(t.type) ? t.qty : "–"}</td>
                   <td>{SHARE_TYPES.has(t.type) ? price(t.price) : money(t.amount)}</td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    {SHARE_TYPES.has(t.type) && (
+                    {sharedBy ? null : <>{SHARE_TYPES.has(t.type) && (
                       <button className="btn ghost" onClick={() => { setEditing(t.id); setTrading(false); }}>Edit</button>
                     )}
-                    <button className="btn ghost" onClick={() => remove(t)} aria-label={`Delete transaction ${t.id}`}>×</button>
+                    <button className="btn ghost" onClick={() => remove(t)} aria-label={`Delete transaction ${t.id}`}>×</button></>}
                   </td>
                 </tr>
               ))}
@@ -128,7 +130,7 @@ function TradeForm({ symbol, portfolio, held, lastPrice, onDone, onCancel }: {
   const [key] = useState(() => crypto.randomUUID()); // retrying a save never doubles it
 
   useEffect(() => {
-    if (portfolio === ALL) api.portfolios().then((ps) => setNames(ps.map((p) => p.name)), () => undefined);
+    if (portfolio === ALL) api.portfolios().then((ps) => setNames(ps.filter((p) => !p.shared).map((p) => p.name)), () => undefined);
   }, [portfolio]);
   useEffect(() => setPreview(null), [side, qty, px, fee, date, target]);
 

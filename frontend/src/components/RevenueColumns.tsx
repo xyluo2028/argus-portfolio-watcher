@@ -32,7 +32,9 @@ export function RevenueColumns({ periods }: { periods: FinancialPeriod[] }) {
           const last = i === data.length - 1;
           return (
             <g key={d.period_end}
-               onMouseMove={(e) => setHover({ i, x: e.clientX, y: e.clientY })} onMouseLeave={() => setHover(null)}>
+               onPointerDown={(e) => setHover({ i, x: e.clientX, y: e.clientY })}
+               onPointerMove={(e) => setHover({ i, x: e.clientX, y: e.clientY })}
+               onPointerLeave={() => setHover(null)} onPointerCancel={() => setHover(null)}>
               {/* hit target wider than the mark */}
               <rect x={pad.l + band * i} y={pad.t} width={band} height={H - pad.t - pad.b} fill="transparent" />
               <path d={`M${x},${y(0)} V${top + r} Q${x},${top} ${x + r},${top} H${x + bw - r} Q${x + bw},${top} ${x + bw},${top + r} V${y(0)} Z`}

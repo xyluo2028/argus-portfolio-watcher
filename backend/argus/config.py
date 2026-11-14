@@ -30,6 +30,9 @@ class Settings:
     # Allow a non-loopback listen address without a token: only for a container whose port is
     # published on the host's loopback (compose.yaml), where the network is the boundary.
     insecure_bind: bool = False
+    # Whether the sign-in page lets anyone who reaches the server create an account (a new account
+    # starts empty and sees nothing of the others). Off: accounts come from `argus user add` only.
+    signup: bool = True
     backup_keep: int = 14
     # Live WebSocket prices (Finnhub allows one connection per key); off = REST polling only, e.g. for
     # a second instance that must not take the stream from the main one.
@@ -57,6 +60,7 @@ def load_settings() -> Settings:
         allowed_hosts=tuple(h.strip().lower() for h in (os.environ.get("ARGUS_ALLOWED_HOSTS") or "").split(",") if h.strip()),
         token=os.environ.get("ARGUS_TOKEN") or None,
         insecure_bind=(os.environ.get("ARGUS_INSECURE_BIND") or "").lower() in ("1", "true", "yes"),
+        signup=(os.environ.get("ARGUS_SIGNUP") or "on").lower() not in ("off", "0", "false", "no"),
         backup_keep=int(os.environ.get("ARGUS_BACKUP_KEEP") or 14),
         stream=(os.environ.get("ARGUS_STREAM") or "on").lower() not in ("off", "0", "false", "no"),
     )

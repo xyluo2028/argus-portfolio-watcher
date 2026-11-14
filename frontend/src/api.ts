@@ -110,7 +110,11 @@ export interface SplitWarning {
   qty_before: number; qty_after: number; message: string; record: string; hint: string;
 }
 
-export interface PortfolioRef { id: number; name: string; benchmark: string }
+export interface PortfolioRef {
+  id: number; name: string; benchmark: string;
+  shared_with?: string[];  // your portfolio: the accounts it's shared with
+  shared?: boolean; owner?: string;  // shared with you by `owner`, read-only
+}
 
 export interface HistoryResponse {
   symbol: string;
@@ -118,6 +122,13 @@ export interface HistoryResponse {
   period: string;
   bars: { ts: string; o: number; h: number; l: number; c: number; v: number }[];
   indicators?: Record<string, (number | null)[] | Record<string, (number | null)[]>>;
+}
+
+/** Daily valuation ratios (by New York date) and quarterly revenue, for the price chart's panes. */
+export interface FundamentalSeries {
+  symbol: string; period: string;
+  ratios: Record<string, [string, number | null][]>; medians: Record<string, number>; labels: Record<string, string>;
+  revenue: { period_end: string; revenue: number; yoy_pct: number | null }[]; errors: Record<string, string>;
 }
 
 export interface Fundamentals {
@@ -214,7 +225,27 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired when the server wants a token (ARGUS_TOKEN set and the cookie missing or stale). */
+export type SignInMethod = "password" | "token";
+
+export interface AuthStatus {
+  required: boolean;
+  authenticated: boolean;
+  // How you can sign in: "password" once an account exists, "token" when ARGUS_TOKEN is set.
+  methods: SignInMethod[];
+  account: { id: number; username: string } | null;
+  setup?: boolean;  // no account yet: the first one can be made from the UI (with the token, when one is set)
+  signup?: boolean;  // the sign-in page offers Create account (every account is the same kind)
+}
+
+export interface AccountInfo { id: number; username: string; has_password: boolean; disabled: boolean; created_at: string; keys?: number }
+export interface ApiKeyInfo {
+  id: number; account_id: number; username?: string; name: string; prefix: string; created_at: string;
+  expires_at: string | null; last_used_at: string | null; revoked_at: string | null; active: boolean;
+}
+/** A key just made: `key` is shown this once. */
+export interface NewApiKey extends ApiKeyInfo { key: string }
+
+/** Fired when the server wants a sign-in (an account exists or ARGUS_TOKEN is set, and the cookie is missing or stale). */
 export const UNAUTHORIZED_EVENT = "argus:unauthorized";
 
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
@@ -234,6 +265,28 @@ async function get<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 const send = <T>(method: string, path: string, body?: unknown) =>
   get<T>(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+
+export type DcfMetricKey = "free_cash_flow" | "operating_cash_flow" | "net_income" | "revenue";
+export interface DcfMetric {
+  label: string; currency: string;
+  base: number | null; base_end: string | null; base_basis: string | null;
+  annual: { period_end: string; value: number }[];
+  growth: { hist_3y: number | null; hist_5y: number | null; analyst: number | null; analyst_basis: string | null };
+  multiple: { current: number | null; median_5y: number | null; p25_5y: number | null; p75_5y: number | null; points: number;
+              history: { date: string; v: number }[] };
+}
+/** Saved calculator inputs; percentages are in percent (10 = 10%). */
+export interface DcfInputs {
+  metric: DcfMetricKey; base: number; years: number; growth: number; decay: number; multiple: number;
+  target_return: number; dps: number; dividend_growth: number; share_change: number;
+}
+export interface DcfSaved { inputs: DcfInputs; updated_at: string }
+export interface DcfData {
+  symbol: string; company: string | null; price: number | null; market_cap: number | null; shares: number | null;
+  dps: number; dividend_growth_5y: number | null; share_change: number | null; share_change_years: number | null;
+  analyst_target: number | null; analyst_count: number | null;
+  metrics: Record<DcfMetricKey, DcfMetric>; saved: DcfSaved | null;
+}
 
 export interface PortfolioDeletion {
   portfolio: PortfolioRef; dry_run: boolean; backup?: string;
@@ -255,7 +308,7 @@ export interface ImportReport {
 }
 
 export interface RestoreReport {
-  created_at: string | null; dry_run: boolean; replace: boolean;
+  created_at: string | null; account?: string | null; dry_run: boolean; replace: boolean;
   will_remove: Record<string, number>; counts: Record<string, number>; backup?: string;
 }
 
@@ -323,6 +376,13 @@ export interface SimResult {
 }
 
 export interface CompareResult { fields: string[]; rows: Record<string, number | string | null>[]; errors: Record<string, string> }
+export interface CompareRow {
+  symbol: string; name: string | null; type: string | null; price: number | null; change_pct: number | null;
+  ext_price: number | null; ext_change_pct: number | null; ext_session: ExtSession | null;
+  [metric: string]: number | string | null;
+}
+export interface CompareFull { fields: string[]; rows: CompareRow[]; errors: Record<string, string>; pending: string[] }
+export interface CompareHistory { period: string; start: string; series: Record<string, [string, number][]> }
 
 export interface CompanyProfile {
   symbol: string; as_of: string; name?: string; summary?: string; quote_type?: string;
@@ -459,7 +519,13 @@ export interface ScreenResult { status: ScreenerStatus; matches: number; rows: S
 
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
+  sharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("PUT", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
+  unsharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("DELETE", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
+  fundamentalSeries: (symbol: string, period: string) =>
+    get<FundamentalSeries>(`/api/fundamental-series/${enc(symbol)}?period=${period}`),
   history: (symbol: string, period: string, interval: string, indicators: string[]) =>
     get<HistoryResponse>(
       `/api/history/${enc(symbol)}?period=${period}&interval=${interval}` +
@@ -480,12 +546,22 @@ export const api = {
   },
   importInvesting: (body: { filename: string; content: string; portfolio?: string; opening_through?: string; dry_run: boolean }) =>
     send<ImportReport>("POST", "/api/import/investing", body),
-  authStatus: () => get<{ required: boolean; authenticated: boolean }>("/api/auth/status"),
-  login: (token: string) => send<{ ok: boolean }>("POST", "/api/auth/login", { token }),
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  login: (creds: { username: string; password: string } | { token: string }) =>
+    send<{ ok: boolean }>("POST", "/api/auth/login", creds),
   logout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
   snapshotUrl: "/api/snapshot",
   restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>
     send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),
+  setup: (body: { username: string; password: string; token?: string }) =>
+    send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/setup", body),
+  signup: (username: string, password: string) =>
+    send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/signup", { username, password }),
+  account: () => get<{ account: AccountInfo; via: string; keys: ApiKeyInfo[] }>("/api/account"),
+  changePassword: (current_password: string, new_password: string) =>
+    send<AccountInfo>("PUT", "/api/account/password", { current_password, new_password }),
+  createKey: (name: string, expires_days?: number) => send<NewApiKey>("POST", "/api/account/keys", { name, expires_days }),
+  revokeKey: (id: number) => send<ApiKeyInfo>("DELETE", `/api/account/keys/${id}`),
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
@@ -508,8 +584,16 @@ export const api = {
   research: (symbol: string) => get<Research>(`/api/research/${enc(symbol)}`),
   returnBases: (symbol: string) => get<ReturnBases>(`/api/returns/${enc(symbol)}`),
   peers: (symbol: string) => get<Peers>(`/api/peers/${enc(symbol)}`),
+  valuation: (symbol: string) => get<DcfData>(`/api/valuation/${enc(symbol)}`),
+  valuationModels: () => get<{ symbol: string; metric: DcfMetricKey; updated_at: string }[]>("/api/valuation"),
+  saveValuation: (symbol: string, inputs: DcfInputs | null) =>
+    send<{ saved: DcfSaved | null }>("PUT", `/api/valuation/${enc(symbol)}`, { inputs }),
+  peerList: (symbol: string) => get<{ symbol: string; peers: string[]; custom: boolean }>(`/api/peers/${enc(symbol)}?metrics=false`),
   setPeers: (symbol: string, peers: string[] | null) => send<Peers>("PUT", `/api/peers/${enc(symbol)}`, { peers }),
   compare: (symbols: string[]) => get<CompareResult>(`/api/compare?symbols=${symbols.map(enc).join(",")}`),
+  compareFull: (symbols: string[]) => get<CompareFull>(`/api/compare?full=true&symbols=${symbols.map(enc).join(",")}`),
+  compareHistory: (symbols: string[], period: string) =>
+    get<CompareHistory>(`/api/compare/history?period=${period}&symbols=${symbols.map(enc).join(",")}`),
   search: (q: string, limit = 8) => get<SearchHit[]>(`/api/search?q=${enc(q)}&limit=${limit}`),
   events: (daysAhead = 14, daysBack = 7, scope: { portfolio?: string; symbol?: string } = {}) => {
     const qs = new URLSearchParams({ days_ahead: String(daysAhead), days_back: String(daysBack) });

@@ -31,8 +31,10 @@ export function ThemeToggle() {
     window.dispatchEvent(new Event("argus-theme"));
   }, [theme]);
   return (
-    <button className="btn" onClick={() => setTheme(NEXT[theme])} title="Theme">
-      {theme === "system" ? "◐ Auto" : theme === "light" ? "☀ Light" : "☾ Dark"}
+    <button className="btn theme-toggle" onClick={() => setTheme(NEXT[theme])}
+            aria-label={`Theme: ${theme}. Switch to ${NEXT[theme]}`} title={`Theme: ${theme}. Switch to ${NEXT[theme]}`}>
+      <span aria-hidden>{theme === "system" ? "◐" : theme === "light" ? "☀" : "☾"}</span>
+      <span className="theme-label"> {theme === "system" ? "Auto" : theme === "light" ? "Light" : "Dark"}</span>
     </button>
   );
 }

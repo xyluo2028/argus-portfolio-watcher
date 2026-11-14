@@ -11,7 +11,7 @@ Status: ✅ done · 🟡 done, not yet verified end to end · ⬜ to do
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | **Access control.** Optional shared token (`ARGUS_TOKEN`) for the API, the live stream and `/mcp/`; the UI asks for it once and keeps it in an HttpOnly cookie. Network-level access (Tailscale, Cloudflare Access) stays the first line. The server refuses to listen beyond loopback without a token. | ✅ |
+| 1 | **Access control.** Accounts (`argus user add`) sign in to the UI with a password; bots, scripts and MCP clients use an account's API key (`argus key create`). The optional shared token (`ARGUS_TOKEN`) still works and acts as the oldest account. Once an account exists or the token is set, every request to the API, the live stream and `/mcp/` must sign in, from localhost too. Network-level access (Tailscale, Cloudflare Access) stays the first line. The server refuses to listen beyond loopback with sign-in off. | ✅ |
 | 2 | **Configurable hosts.** `ARGUS_ALLOWED_HOSTS` adds the tunnel's hostname to the localhost allow-list (otherwise every proxied request gets HTTP 400); `ARGUS_HOST` sets the listen address; proxy headers are honored. | ✅ |
 | 3 | **Schema migrations.** Alembic with a baseline of the current schema. New databases are created at the latest revision, pre-Alembic databases are stamped, and every start upgrades to head. A test keeps models and migrations in sync. | ✅ |
 | 4 | **Backups.** `argus backup` writes an SQLite online backup plus a JSON snapshot and prunes old sets; a systemd timer runs it nightly. Copying backups off the machine is described below. | ✅ |
@@ -39,7 +39,7 @@ zone data.
 | | Tailscale (recommended start) | Cloudflare Tunnel | Cloud VM |
 |---|---|---|---|
 | Who can reach it | Only your devices | Anyone with the URL | Your choice (still use a tunnel) |
-| `ARGUS_TOKEN` | Optional, recommended for MCP | **Required**, plus Cloudflare Access | Required |
+| Sign-in (accounts or `ARGUS_TOKEN`) | Optional, recommended | **Required**, plus Cloudflare Access | Required |
 | Claude Desktop/Code MCP | Works on tailnet devices | Works with service-token headers | Same |
 | Yahoo data | Your home IP, fine | Your home IP, fine | Risky from datacenter IPs |
 
@@ -55,12 +55,13 @@ Settings come from environment variables or the repo-root `.env` (see `.env.exam
 | `FINNHUB_API_KEY` | – | Live quotes, metrics, events (free tier is fine) |
 | `SEC_USER_AGENT` | – | Needed for `argus financials` (`"argus you@example.com"`) |
 | `ARGUS_PORT` | `8787` | Listen port |
-| `ARGUS_HOST` | `127.0.0.1` | Listen address; anything else requires `ARGUS_TOKEN` |
+| `ARGUS_HOST` | `127.0.0.1` | Listen address; anything else requires sign-in (an account or `ARGUS_TOKEN`) |
 | `ARGUS_ALLOWED_HOSTS` | – | Extra hostnames to answer, comma-separated (e.g. `argus.tail1234.ts.net`) |
-| `ARGUS_TOKEN` | – | Shared secret for the UI, API and MCP. Generate with `openssl rand -hex 32` |
-| `ARGUS_INSECURE_BIND` | – | `1` allows a non-loopback `ARGUS_HOST` without a token; only for a container published on the host's loopback (`compose.yaml` sets it) |
+| `ARGUS_TOKEN` | – | Shared secret for the UI, API and MCP; acts as the oldest account. Optional once you have accounts. Generate with `openssl rand -hex 32` |
+| `ARGUS_INSECURE_BIND` | – | `1` allows a non-loopback `ARGUS_HOST` with sign-in off; only for a container published on the host's loopback (`compose.yaml` sets it) |
 | `ARGUS_DATA_DIR` | `./data` | Database, caches, snapshots, backups |
 | `ARGUS_BACKUP_KEEP` | `14` | Backup sets kept by `argus backup` |
+| `ARGUS_SIGNUP` | `on` | `off` = no Create an account on the sign-in page; accounts come from `argus user add` only |
 | `ARGUS_STREAM` | `on` | `off` = no live WebSocket, REST polling only (for a second instance sharing the Finnhub key) |
 
 ## Setup on a Linux host (systemd)
@@ -103,24 +104,85 @@ and restore, updates, troubleshooting): **[docker.md](docker.md)**.
 tailscale serve --bg 8787        # https://<host>.<tailnet>.ts.net -> http://127.0.0.1:8787
 ```
 
-Set `ARGUS_ALLOWED_HOSTS=<host>.<tailnet>.ts.net`. Don't use Funnel unless `ARGUS_TOKEN` is set;
-Funnel makes it public.
+Set `ARGUS_ALLOWED_HOSTS=<host>.<tailnet>.ts.net`. Don't use Funnel unless sign-in is on (an account
+or `ARGUS_TOKEN`); Funnel makes it public.
 
 **Cloudflare Tunnel**: point a public hostname at `http://127.0.0.1:8787`, add a Cloudflare Access
-application for that hostname (email one-time code or your SSO), and set `ARGUS_TOKEN` and
-`ARGUS_ALLOWED_HOSTS=<hostname>`. For MCP clients, create an Access service token and send its
-headers along with the Argus token (below).
+application for that hostname (email one-time code or your SSO), turn on sign-in (create an account,
+or set `ARGUS_TOKEN`) and set `ARGUS_ALLOWED_HOSTS=<hostname>`. For MCP clients, create an Access
+service token and send its headers along with the Argus API key (below).
 
 **Your PC (WSL)**: WSL stops when idle and doesn't start at boot. Enable systemd (`/etc/wsl.conf`:
 `[boot] systemd=true`), install the user units above, add a Windows Task Scheduler task that runs
 `wsl.exe -d Ubuntu --exec /bin/true` at logon, and turn off sleep. Run `tailscale` or `cloudflared`
 inside WSL: both connect outbound, which avoids Windows' localhost forwarding.
 
+## Accounts and API keys
+
+There is one kind of account, whether a person or a bot uses it, and none manages another. The first
+one is made on the web UI's Account page once you're in (signed in with `ARGUS_TOKEN`, or with no
+token set, the UI is open), because it takes over the existing records. After that, anyone who can
+reach the server creates their own on the sign-in page (at most 10 an hour); it starts empty. Set
+`ARGUS_SIGNUP=off` if the server is reachable by people you don't want accounts for. The CLI makes
+accounts too, and is the only place to disable one or reset its password:
+
+```bash
+uv run argus user add me                       # asks for a password; make your own account first
+uv run argus user add trader-bot --no-password # a bot that only uses API keys
+uv run argus key create trader-bot --name "sim routine" [--expires-days 90]   # shown once
+uv run argus user list
+uv run argus key list
+uv run argus key revoke 3                      # stops working at once
+uv run argus user passwd me                    # new password; signs out every browser
+uv run argus user disable trader-bot           # sessions and keys stop working until `enable`
+```
+
+- The first account switches sign-in on for every request, including from this machine, so a bot
+  can't skip its key by calling `localhost`. Disabling accounts doesn't switch it off again.
+- `ARGUS_TOKEN` acts as the oldest account, so create your own account before the bot's.
+- Passwords are stored as scrypt hashes, session ids and API keys as SHA-256; no secret is stored as given.
+- An API key can read and write like its account, but can't create keys or change the password.
+- Ten failed sign-ins for a name within 15 minutes block it for the rest of that window.
+- The CLI and `argus mcp` (stdio) open the database file directly and need no sign-in. They act as
+  the oldest account, or as `argus --as <user> ...`: give a bot only an API key for the HTTP MCP
+  endpoint, never a shell on the server.
+- Accounts and keys are in `argus backup` and in JSON snapshots (hashes only). Web sessions aren't,
+  so everyone signs in again after `argus snapshot load`.
+
+### Whose records are whose
+
+| | Who sees it |
+|---|---|
+| Portfolios (transactions, targets, performance history) | The account that created it, plus accounts it's shared with (read-only) |
+| Watchlists, alerts, notes, peer lists, saved DCF models | Only the account that created them |
+| Market data, the screener, market context, the events calendar | Everyone |
+| Whole-server snapshot (`argus snapshot dump/load`) | Only the CLI: it holds every account's records |
+| Back up / Restore on the Data page | Each account, its own records only; a restore replaces only those |
+| Creating an account | Anyone, on the sign-in page (unless `ARGUS_SIGNUP=off`); the first one needs the token sign-in; the CLI |
+| An account's password and API keys | That account only (and the CLI) |
+
+- **The first account takes over** everything recorded before any account existed (and, when you
+  upgrade to this version with accounts already set up, the oldest account does).
+- **Names are per account:** a bot can have its own `growth` portfolio or `Watchlist`. Anyone
+  else's portfolio is "not found", so its existence doesn't leak.
+- **"All portfolios"** (`all`) combines only your own portfolios, never ones shared with you.
+- **Sharing:** the owner shares a portfolio read-only with `argus portfolio share <portfolio> --with <user>`
+  (a bot's: `argus --as <bot> portfolio share ...`), the `share_portfolio` MCP tool, or
+  `PUT /api/portfolios/<portfolio>/shares/<user>`. The other account can view positions,
+  performance and analysis, but changing anything returns `READ_ONLY`. `unshare`, or deleting
+  the portfolio, ends it. A shared portfolio whose name matches one of yours is reached by its id.
+- **Live updates:** the price stream carries only the symbols in your own holdings, watchlists and
+  benchmarks (and those of a shared portfolio you open), and a fired alert reaches only its owner.
+  Cost alerts compare with the owner's own average cost.
+- **Audit log:** each entry records the account that made the change.
+
 ## Claude (MCP) against the deployed server
 
 ```bash
-claude mcp add --transport http argus https://<host>/mcp/ --header "Authorization: Bearer <ARGUS_TOKEN>"
+claude mcp add --transport http argus https://<host>/mcp/ --header "Authorization: Bearer <API key>"
 ```
+
+The key is an account's API key (`argus key create`), or `ARGUS_TOKEN`.
 
 Behind Cloudflare Access, also pass `--header "CF-Access-Client-Id: …" --header "CF-Access-Client-Secret: …"`.
 Use this instead of the stdio server once the data lives on the server, so there is only one database.

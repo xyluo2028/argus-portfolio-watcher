@@ -15,13 +15,14 @@ from typing import Callable
 
 from sqlalchemy import Engine, select
 
+from argus import access
 from argus.config import Settings, load_settings
 from argus.db import make_engine, session_scope, upsert
 from argus.errors import ArgusError
 from argus import indicators as indicators_mod
 from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between, trade_session
-from argus.models import (AuditLog, CompanyProfile, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
+from argus.models import (AuditLog, CompanyProfile, ValuationModel, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
                           Target)
 from argus.providers.base import ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
@@ -29,12 +30,14 @@ from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
 from argus.providers.yahoo import YahooProvider
 from argus.services import analysis
+from argus.services.accounts import AccountService
 from argus.services import dividends as dividends_mod
 from argus.services import earnings as earnings_mod
 from argus.services import research as research_mod
 from argus.services import screener as screener_mod
 from argus.services import splits as splits_mod
 from argus.services import risk as risk_mod
+from argus.services import valuation as valuation_mod
 from argus.providers.french import FrenchFactors
 from argus.providers.macro import MacroProvider
 from argus.services import market_context as context_mod
@@ -45,7 +48,7 @@ from argus.services import performance as performance_mod
 from argus.services.market import MarketService, session_close_from_quote, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
-from argus.services.snapshot import SnapshotService
+from argus.services.snapshot import AccountSnapshots, SnapshotService
 from argus.services.watchlist import DEFAULT as DEFAULT_WATCHLIST, WatchlistService
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
@@ -141,6 +144,8 @@ class Argus:
         self.alerts = AlertService(self.engine)
         self.notes = NoteService(self.engine)
         self.snapshots = SnapshotService(self.engine)
+        self.account_snapshots = AccountSnapshots(self.engine, on_change=self._records_replaced)
+        self.accounts = AccountService(self.engine)
         self.factors = FrenchFactors(self.settings.cache_dir)
         self.macro = MacroProvider(cache_dir=self.settings.cache_dir)
         self.screener = screener_mod.ScreenerService(self.settings.cache_dir, self.market.sec, self.market.profile_provider)
@@ -148,7 +153,13 @@ class Argus:
         self._jobs: set[str] = set()  # background refreshes in flight (single-flight by name)
         self._jobs_lock = threading.Lock()
         self._research: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, bundle)
+        self._valuation: dict[str, tuple[float, dict]] = {}  # symbol -> (monotonic time, DCF inputs)
         self._fund_attempted: dict[str, float] = {}  # symbol -> monotonic time of the last background try
+
+    def _records_replaced(self) -> None:
+        """An account's records were swapped wholesale: drop what is cached on their revisions."""
+        self.portfolios.revision += 1
+        self.watchlists.revision += 1
 
     def run_background(self, name: str, fn: Callable[[], object]) -> bool:
         """Run `fn` on a daemon thread unless a job with this name is already running."""
@@ -302,6 +313,82 @@ class Argus:
             }
         return out
 
+    # Chart panes from Finnhub's quarterly ratio history: field -> (Finnhub key, label)
+    FUND_SERIES = {"pe_ttm": ("peTTM", "P/E"), "ps_ttm": ("psTTM", "P/S"), "pb": ("pb", "P/B"),
+                   "ev_ebitda": ("evEbitdaTTM", "EV/EBITDA")}
+    FUND_SERIES_STALE_DAYS = 200  # a quarter's figures stop carrying forward after this (missed filings)
+
+    def fundamental_series(self, symbol: str, period: str = "1y") -> dict:
+        """Daily valuation ratios and quarterly revenue for the price chart's panes.
+
+        Finnhub reports each ratio once a quarter. Its denominator (TTM EPS, sales per share, book value
+        per share, EBITDA) is recovered from the close on that quarter's end, then every daily close is
+        divided by the latest one, so a ratio moves with the price day by day and equals Finnhub's at
+        each quarter end. A quarter's figures apply from its end date (they're published a few weeks
+        later). Ratios are null where they mean nothing (a P/E on losses). `medians`: 5-year median of
+        the quarterly values. `revenue`: SEC quarterly revenue with its year-over-year change."""
+        from bisect import bisect_right
+
+        sym = normalize_symbol(symbol)
+        if period in ("1d", "5d"):
+            raise ArgusError("INVALID_ARG", "Fundamental series are daily; use a range of a month or more.")
+        bars = self.market.get_history(sym, period, "1d")
+        full = self.market.get_history(sym, "max", "1d") if bars else []
+        days = [b.ts.astimezone(NY).date() for b in full]
+        close_at = dict(zip(days, (b.c for b in full)))
+        chart_days = [b.ts.astimezone(NY).date() for b in bars]
+        out: dict = {"symbol": sym, "period": period, "ratios": {}, "medians": {}, "labels": {}, "revenue": [],
+                     "errors": {}}
+
+        def on_or_before(d: date) -> float | None:
+            i = bisect_right(days, d)
+            return close_at[days[i - 1]] if i else None
+
+        series = {}
+        if self.market.directory is not None and bars:
+            try:
+                series = self.market.directory.ratio_series(sym)
+            except ProviderError as e:
+                out["errors"]["ratios"] = str(e)
+        five_years_ago = datetime.now(NY).date() - timedelta(days=5 * 365)
+        for key, (fk, label) in self.FUND_SERIES.items():
+            out["labels"][key] = label
+            pts = sorted((date.fromisoformat(x["period"]), float(x["v"])) for x in series.get(fk) or []
+                         if isinstance(x.get("v"), (int, float)) and x.get("period"))
+            if not pts:
+                continue
+            ends = [d for d, _ in pts]
+            denoms = []
+            for d, ratio in pts:
+                c = on_or_before(d)
+                denoms.append(c / ratio if c and ratio > 0 else None)
+            values = []
+            for d, c in zip(chart_days, (b.c for b in bars)):
+                i = bisect_right(ends, d) - 1
+                ok = i >= 0 and denoms[i] and (d - ends[i]).days <= self.FUND_SERIES_STALE_DAYS
+                values.append([d.isoformat(), round(c / denoms[i], 2) if ok else None])
+            if any(v is not None for _, v in values):
+                out["ratios"][key] = values
+            recent = sorted(v for d, v in pts if d >= five_years_ago and v > 0)
+            if recent:
+                out["medians"][key] = round(recent[len(recent) // 2] if len(recent) % 2 else
+                                            (recent[len(recent) // 2 - 1] + recent[len(recent) // 2]) / 2, 2)
+        if bars:
+            limit = 60 if period == "max" else 24 if period in ("2y", "5y") else 12
+            try:
+                quarters = sorted(self.market.get_financials(sym, "quarterly", limit)["periods"],
+                                  key=lambda p: p["period_end"])
+                rev = {p["period_end"]: p.get("revenue") for p in quarters if p.get("revenue") is not None}
+                ends = sorted(rev)
+                for e in ends:
+                    prior = date.fromisoformat(e) - timedelta(days=365)
+                    year_ago = next((rev[x] for x in ends if abs((date.fromisoformat(x) - prior).days) <= 20), None)
+                    out["revenue"].append({"period_end": e, "revenue": rev[e],
+                                           "yoy_pct": (rev[e] / year_ago - 1) * 100 if year_ago and year_ago > 0 else None})
+            except ArgusError as e:
+                out["errors"]["revenue"] = e.message
+        return out
+
     def return_bases(self, symbol: str) -> dict:
         """The price each chart range is measured from, so a client can show live returns:
         1D the previous close, 5D the close five sessions back, 1M-5Y the close on or before that
@@ -343,11 +430,52 @@ class Argus:
                     errors.setdefault(i["symbol"], e.message)
         return {"watchlist": name, "items": items, "errors": errors}
 
-    def compare(self, symbols: list[str], fields: list[str] | None = None) -> dict:
-        """Side-by-side quote + metrics for 2-10 symbols."""
+    COMPARE_MAX = 10
+    COMPARE_PERIODS = {"1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "3y": 3 * 366, "5y": 5 * 366}
+
+    def _compare_symbols(self, symbols: list[str]) -> list[str]:
         syms = list(dict.fromkeys(normalize_symbol(s) for s in symbols if s.strip()))
-        if not 1 <= len(syms) <= 10:
-            raise ArgusError("INVALID_ARG", "Compare 1 to 10 symbols.")
+        if not 1 <= len(syms) <= self.COMPARE_MAX:
+            raise ArgusError("INVALID_ARG", f"Compare 1 to {self.COMPARE_MAX} symbols.")
+        return syms
+
+    def _names(self, syms: list[str]) -> dict[str, dict]:
+        """Name and type per symbol: from instruments we know, else the Finnhub directory."""
+        with session_scope(self.engine) as s:
+            out = {i.symbol: {"name": i.name, "type": i.type} for i in
+                   s.scalars(select(Instrument).where(Instrument.symbol.in_(syms))) if i.name}
+        missing = [x for x in syms if x not in out]
+        if missing and self.market.directory is not None:
+            try:
+                d = self.market.directory.symbol_directory()
+                out |= {x: {"name": d[x].name, "type": d[x].type} for x in missing if x in d}
+            except ProviderError:
+                pass
+        return out
+
+    def compare(self, symbols: list[str], fields: list[str] | None = None, full: bool = False) -> dict:
+        """Side-by-side quote + metrics for 1-10 symbols. `full` returns every indicator the dashboard
+        shows (valuation, growth, profitability, momentum incl. 1M return and price CAGR, dividends,
+        fund figures) plus names; missing fundamentals are fetched first."""
+        syms = self._compare_symbols(symbols)
+        if full:
+            data = self.symbol_fundamentals(syms, wait=True)
+            quotes, errors = self.market.get_quotes(syms)
+            names = self._names(syms)
+            rows = []
+            for sym in syms:
+                q = quotes.get(sym)
+                row = {"symbol": sym, **names.get(sym, {"name": None, "type": None}),
+                       "price": q.price if q else None, "change_pct": q.change_pct if q else None,
+                       "ext_price": q.ext_price if q else None, "ext_change_pct": q.ext_change_pct if q else None,
+                       "ext_session": q.ext_session if q else None}
+                row |= data["metrics"].get(sym, {})
+                if sym not in data["metrics"]:
+                    errors.setdefault(sym, "no fundamentals")
+                rows.append(row)
+            fields_out = sorted({k for r in rows for k in r} - {"symbol", "name", "type", "price", "change_pct",
+                                                                   "ext_price", "ext_change_pct", "ext_session"})
+            return {"fields": fields_out, "rows": rows, "errors": errors, "pending": data["pending"]}
         wanted = fields or list(self.COMPARE_FIELDS)
         quotes, errors = self.market.get_quotes(syms)
         rows = []
@@ -361,6 +489,27 @@ class Argus:
                 errors.setdefault(sym, e.message)
             rows.append(row)
         return {"fields": wanted, "rows": rows, "errors": errors}
+
+    def compare_history(self, symbols: list[str], period: str = "1y") -> dict:
+        """Daily closes for 1-10 symbols over `period` (1mo 3mo 6mo ytd 1y 3y 5y), for a relative-performance
+        chart: {"period", "start", "series": {symbol: [[date, close], ...]}}. Price only, split-adjusted."""
+        syms = self._compare_symbols(symbols)
+        today = datetime.now(NY).date()
+        if period == "ytd":
+            start = date(today.year - 1, 12, 31) - timedelta(days=6)  # last year's final close is the base
+        elif period in self.COMPARE_PERIODS:
+            start = today - timedelta(days=self.COMPARE_PERIODS[period])
+        else:
+            raise ArgusError("INVALID_ARG", f"Unknown period '{period}'.",
+                             hint=f"Use one of {', '.join([*self.COMPARE_PERIODS, 'ytd'])}.")
+        closes = self.market.daily_closes_many(syms, start)
+        if period == "ytd":  # start from the last close of the previous year
+            for sym, by_day in closes.items():
+                prior = [d for d in by_day if d.year < today.year]
+                keep = max(prior) if prior else None
+                closes[sym] = {d: c for d, c in by_day.items() if d.year == today.year or d == keep}
+        return {"period": period, "start": start.isoformat(),
+                "series": {s: [[d.isoformat(), round(c, 4)] for d, c in sorted(closes[s].items())] for s in syms}}
 
     # -- tracked symbols, events, alerts, brief ----------------------------------
     # -- company profile & peers ---------------------------------------------------
@@ -458,7 +607,7 @@ class Argus:
         """Your peer list for `symbol` (or the suggested one) with a side-by-side comparison."""
         sym = normalize_symbol(symbol)
         with session_scope(self.engine) as s:
-            row = s.get(PeerList, sym)
+            row = s.get(PeerList, (access.owner(s), sym))
             custom = list(row.peers) if row else None
         profile = self.company_profile(sym)
         fund = profile.get("quote_type") in self.FUND_TYPES
@@ -673,11 +822,12 @@ class Argus:
         """Save your peer list (unknown tickers are refused); None goes back to the suggestions."""
         sym = normalize_symbol(symbol)
         with session_scope(self.engine) as s:
-            before = s.get(PeerList, sym)
+            me = access.owner(s)
+            before = s.get(PeerList, (me, sym))
             before_peers = list(before.peers) if before else None
         if peers is None:
             with session_scope(self.engine) as s:
-                if (row := s.get(PeerList, sym)) is not None:
+                if (row := s.get(PeerList, (me, sym))) is not None:
                     s.delete(row)
                     s.add(AuditLog(actor=actor, action="reset_peers", entity="peers", entity_id=sym,
                                    before={"peers": before_peers}))
@@ -692,7 +842,7 @@ class Argus:
             raise ArgusError("UNKNOWN_SYMBOL", f"No quote found for: {', '.join(sorted({*bad, *unknown}))}",
                              hint="Check the ticker; only US-listed stocks and ETFs are supported.")
         with session_scope(self.engine) as s:
-            s.merge(PeerList(symbol=sym, peers=clean))
+            s.merge(PeerList(account_id=me, symbol=sym, peers=clean))
             s.add(AuditLog(actor=actor, action="set_peers", entity="peers", entity_id=sym,
                            before={"peers": before_peers}, after={"peers": clean}))
         return self.peers(sym, with_metrics=False)
@@ -851,9 +1001,11 @@ class Argus:
                 "errors": {"price_history": err} if err else {}}
 
     def held_positions(self) -> dict[str, tuple[float, float]]:
-        """symbol -> (total shares, weighted average cost) across all portfolios."""
+        """symbol -> (total shares, weighted average cost) across your portfolios (every account's, for SYSTEM)."""
         agg: dict[str, list[float]] = {}
         for p in self.portfolios.list_portfolios():
+            if p.get("shared"):
+                continue
             for sym, pos in self.portfolios.positions(p["id"]).items():
                 if pos.is_open:
                     a = agg.setdefault(sym, [0.0, 0.0])
@@ -872,8 +1024,6 @@ class Argus:
     def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
                         symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
         """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
-        if symbols:
-            syms = [normalize_symbol(x) for x in symbols]
         scoped = not symbols and portfolio and str(portfolio).lower() != ALL
         if symbols:
             syms = [normalize_symbol(x) for x in symbols]
@@ -960,7 +1110,14 @@ class Argus:
         missing = [s for s in syms if s not in quotes]
         if missing:
             quotes |= self.market.get_quotes(missing)[0]
-        costs = {s: c for s, (_, c) in self.held_positions().items()}
+        cost_by_account: dict[int, dict[str, float]] = {}
+
+        def costs(account_id: int) -> dict[str, float]:
+            """An alert's own account's average costs (background checks see every account's alerts)."""
+            if account_id not in cost_by_account:
+                with access.acting_as(account_id):
+                    cost_by_account[account_id] = {s: c for s, (_, c) in self.held_positions().items()}
+            return cost_by_account[account_id]
         today = datetime.now(NY).date()
 
         def metrics(sym: str) -> dict:
@@ -1138,7 +1295,7 @@ class Argus:
     def delete_portfolio(self, ref: str, confirm: str | None = None, dry_run: bool = True, actor: str = "cli") -> dict:
         """Delete a portfolio and everything recorded in it. `confirm` must repeat its exact name; all
         records are saved to a snapshot in data/snapshots/ first, so it can be restored."""
-        p = self.portfolios.get_portfolio(ref)
+        p = self.portfolios.get_portfolio(ref, write=True)
         if not dry_run:
             if confirm != p.name:
                 raise ArgusError("INVALID_ARG", f"Confirm by giving the portfolio's exact name, '{p.name}'.")
@@ -1393,6 +1550,84 @@ class Argus:
                 not have_fundamentals or any(_transient(errors.get(k)) for k in ("fundamentals", "series", "quarterly"))),
         }
 
+    # -- DCF calculator ----------------------------------------------------------
+    def valuation(self, symbol: str, live_quotes: dict[str, Quote] | None = None) -> dict:
+        """What the DCF calculator fills its inputs from (services/valuation.py), today's price, and the
+        model you saved for the symbol, if any. The company data is cached for an hour."""
+        sym = normalize_symbol(symbol)
+        q = (live_quotes or {}).get(sym) or self.market.get_quotes([sym])[0].get(sym)
+        price = q.price if q else None
+        hit = self._valuation.get(sym)
+        if hit and time.monotonic() - hit[0] < self.RESEARCH_TTL_S:
+            data = hit[1]
+        else:
+            data = self._build_valuation(sym)
+            self._valuation[sym] = (time.monotonic(), data)
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, (access.owner(s), sym))
+            saved = {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()} if row else None
+        if price and data["market_cap"] and data["price"]:  # the cap moves with the live price
+            data = data | {"market_cap": data["market_cap"] * price / data["price"]}
+        return data | {"price": price or data["price"], "saved": saved}
+
+    def _build_valuation(self, sym: str) -> dict:
+        yahoo, fh = self.market.profile_provider, self.market.directory
+        metrics = self.symbol_fundamentals([sym], wait=True)["metrics"].get(sym, {})
+        q = self.market.get_quotes([sym])[0].get(sym)
+        jobs = {
+            "quarterly": lambda: self.market.get_financials(sym, "quarterly", 48),
+            "annual": lambda: self.market.get_financials(sym, "annual", 11),
+            "series": (lambda: fh.ratio_series(sym)) if fh else None,
+            "analyst": (lambda: yahoo.get_analyst(sym)) if yahoo else None,
+            "statements": (lambda: yahoo.get_statements(sym)) if yahoo else None,
+            "info": (lambda: yahoo.get_info(sym)) if yahoo else None,
+        }
+        def run(item):
+            name, fn = item
+            try:
+                return name, fn() if fn else None, None
+            except Exception as e:  # noqa: BLE001 - only the filings are required
+                return name, None, e
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # network only
+            got = {name: (val, err) for name, val, err in pool.map(run, jobs.items())}
+        if got["annual"][0] is None and got["quarterly"][0] is None:
+            err = got["annual"][1] or got["quarterly"][1]
+            if isinstance(err, ArgusError) and err.code == "NOT_CONFIGURED":
+                raise err
+            raise ArgusError("NOT_FOUND", f"No reported financials for {sym}, so there is nothing to project.",
+                             hint="The DCF calculator needs SEC filings; ETFs and funds have none.")
+        return valuation_mod.build(sym, q.price if q else None, metrics, got["quarterly"][0] or {}, got["annual"][0] or {},
+                                   got["series"][0] or {}, got["analyst"][0] or {}, got["statements"][0] or {},
+                                   got["info"][0] or {}, datetime.now(NY).date())
+
+    def save_valuation(self, symbol: str, inputs: dict | None, actor: str = "cli") -> dict | None:
+        """Save your DCF inputs for a symbol, or forget them (None)."""
+        sym = normalize_symbol(symbol)
+        clean = valuation_mod.clean_inputs(inputs) if inputs is not None else None
+        with session_scope(self.engine) as s:
+            me = access.owner(s)
+            before = s.get(ValuationModel, (me, sym))
+            before_inputs = dict(before.inputs) if before else None
+            if clean is None:
+                if before is not None:
+                    s.delete(before)
+            else:
+                s.merge(ValuationModel(account_id=me, symbol=sym, inputs=clean, updated_at=datetime.now(UTC)))
+            s.add(AuditLog(actor=actor, action="save_valuation" if clean else "delete_valuation", entity="valuation",
+                           entity_id=sym, before=before_inputs, after=clean))
+        if clean is None:
+            return None
+        with session_scope(self.engine) as s:
+            row = s.get(ValuationModel, (me, sym))
+            return {"inputs": row.inputs, "updated_at": row.updated_at.isoformat()}
+
+    def valuation_models(self) -> list[dict]:
+        """Your saved DCF models, most recently saved first."""
+        with session_scope(self.engine) as s:
+            rows = s.scalars(select(ValuationModel).where(access.owned(s, ValuationModel.account_id))
+                             .order_by(ValuationModel.updated_at.desc())).all()
+            return [{"symbol": r.symbol, "metric": r.inputs.get("metric"), "updated_at": r.updated_at.isoformat()} for r in rows]
+
     RISK_HISTORY_START = date(2007, 9, 1)  # covers the 2008 stress window
 
     def risk(self, ref: str, live_quotes: dict[str, Quote] | None = None) -> dict:
@@ -1440,7 +1675,7 @@ class Argus:
         if any(w < 0 or w > 100 for w in weights.values()):
             raise ArgusError("INVALID_ARG", "Each target must be between 0 and 100 (percent).")
         clean = {(normalize_symbol(k) if level == "symbol" else k.strip()): float(w) for k, w in weights.items()}
-        p = self.portfolios.get_portfolio(ref)
+        p = self.portfolios.get_portfolio(ref, write=True)
         preview = self.drift(ref, level, targets=clean)
         preview["dry_run"] = dry_run
         if not dry_run:
@@ -1668,7 +1903,7 @@ class Argus:
                                  hint="; ".join(c["detail"] for c in checks if not c["ok"]))
             return report
 
-        existing = {p["name"] for p in self.portfolios.list_portfolios()}
+        existing = {p["name"] for p in self.portfolios.list_portfolios() if not p.get("shared")}
         if name not in existing:
             report["creates_portfolio"] = True
             if dry_run:

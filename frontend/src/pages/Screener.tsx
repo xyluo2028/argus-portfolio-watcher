@@ -22,6 +22,8 @@ const PRESETS: { name: string; hint: string; sort: string; filters: Filter[] }[]
     { field: "revenue_growth_pct", min: "10", max: "" }, { field: "current_ratio", min: "1.5", max: "" }] },
 ];
 
+// Lower is better for these, so a click on their header sorts low → high first.
+const LOW_FIRST = new Set(["pe", "ps", "pb", "debt_to_equity"]);
 const COLUMNS = ["market_cap", "revenue_growth_pct", "gross_margin_pct", "net_margin_pct", "fcf_yield_pct", "pe", "ps", "roe_pct", "debt_to_equity"];
 
 function show(field: string, v: unknown, unit: string | undefined) {
@@ -45,6 +47,12 @@ export function Screener() {
   const [added, setAdded] = useState<Set<string>>(new Set());  // "list\u0000symbol"
   const [notice, setNotice] = useState<string | null>(null);
   const seq = useRef(0);
+
+  // The server sorts every match (only the first 200 come back), so a header click re-runs the screen.
+  const sortBy = (c: string) => {
+    if (c === sort) setDesc((d) => !d);
+    else { setSort(c); setDesc(!LOW_FIRST.has(c)); }
+  };
 
   useEffect(() => { api.screenerStatus().then(setStatus, () => undefined); }, []);
   useEffect(() => {
@@ -76,6 +84,8 @@ export function Screener() {
 
   const set = (i: number, patch: Partial<Filter>) => setFilters((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   const used = new Set(filters.map((f) => f.field));
+  // The usual columns, plus any field being filtered or sorted on, so every field can be seen and sorted.
+  const columns = [...COLUMNS, ...[...filters.map((f) => f.field), sort].filter((k, i, a) => k !== "price" && !COLUMNS.includes(k) && a.indexOf(k) === i)];
   const isAdded = (sym: string) => target != null && added.has(`${target}\u0000${sym}`);
   const watch = async (sym: string) => {
     if (!target) return;
@@ -126,11 +136,9 @@ export function Screener() {
             const next = Object.keys(fields).find((k) => !used.has(k));
             if (next) setFilters((fs) => [...fs, { field: next, min: "", max: "" }]);
           }}>+ Filter</button>
-          <label className="small">Sort by{" "}
-            <select value={sort} onChange={(e) => setSort(e.target.value)}>{Object.entries(fields).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+          <label className="small" title="Over-the-counter: stocks not listed on an exchange like NYSE or Nasdaq (pink sheets, OTCQX/QB), mostly foreign ADRs and small or thinly traded companies">
+            <input type="checkbox" checked={otc} onChange={(e) => setOtc(e.target.checked)} /> include OTC
           </label>
-          <button className="btn ghost" onClick={() => setDesc((d) => !d)}>{desc ? "high → low" : "low → high"}</button>
-          <label className="small"><input type="checkbox" checked={otc} onChange={(e) => setOtc(e.target.checked)} /> include OTC</label>
         </div>
         {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
       </section>
@@ -143,7 +151,8 @@ export function Screener() {
         ) : (
           <>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>{res.matches.toLocaleString("en-US")} matches {res.matches > res.rows.length && <span className="muted small">· showing {res.rows.length}</span>}</h2>
+              <h2 style={{ margin: 0 }}>{res.matches.toLocaleString("en-US")} matches {res.matches > res.rows.length && <span className="muted small">· showing {res.rows.length}</span>}
+                <span className="muted small"> · click a column header to sort</span></h2>
               <label className="small">“+ watch” adds to{" "}
                 <select value={target ?? ""} onChange={(e) => { setTarget(e.target.value); setNotice(null); }} aria-label="Watchlist to add to">
                   {lists.map((l) => <option key={l.name} value={l.name}>{l.name} ({l.count})</option>)}
@@ -153,13 +162,22 @@ export function Screener() {
             {notice && <p className="small muted" role="status" style={{ margin: "0 0 8px" }}>{notice} · <Link to={`/watchlist?list=${encodeURIComponent(target ?? "")}`}>open</Link></p>}
             <div className="table-wrap">
               <table className="metric-table">
-                <thead><tr><th>Symbol</th><th>Price</th>{COLUMNS.map((c) => <th key={c} className={c === sort ? "sorted" : undefined}>{fields[c]?.label ?? c}</th>)}<th /></tr></thead>
+                <thead><tr>
+                  <th style={{ cursor: "default" }}>Symbol</th>
+                  {["price", ...columns].map((c) => (
+                    <th key={c} onClick={() => sortBy(c)} title={`Sort by ${fields[c]?.label ?? c}; click again to reverse`}
+                        aria-sort={c === sort ? (desc ? "descending" : "ascending") : undefined}>
+                      {fields[c]?.label ?? c}{c === sort ? (desc ? " ↓" : " ↑") : ""}
+                    </th>
+                  ))}
+                  <th />
+                </tr></thead>
                 <tbody>
                   {res.rows.map((r) => (
                     <tr key={r.symbol} style={{ cursor: "default" }}>
                       <td><Link to={`/t/${r.symbol.replace("-", ".")}`} className="sym">{r.symbol}</Link><span className="name" title={`${r.name ?? ""} · ${r.exchange ?? ""}`}>{r.name}</span></td>
                       <td>{show("price", r.price, "$")}</td>
-                      {COLUMNS.map((c) => (
+                      {columns.map((c) => (
                         <td key={c} className={c.endsWith("growth_pct") ? tone(r[c] as number) : undefined}>{show(c, r[c], fields[c]?.unit)}</td>
                       ))}
                       <td><button className="btn ghost small" disabled={!target || isAdded(r.symbol.replace("-", "."))}

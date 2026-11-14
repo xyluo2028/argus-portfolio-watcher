@@ -7,17 +7,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Engine, delete, func, select
+from sqlalchemy import Engine, delete, func, or_, select
 
+from argus import access
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.market_calendar import NY, market_status, session_date, trade_session
-from argus.models import AuditLog, Instrument, NavDaily, Portfolio, Target, Transaction, TxnType
+from argus.models import (Account, AuditLog, Instrument, NavDaily, Portfolio, PortfolioShare, Target, Transaction,
+                          TxnType)
 from argus.providers.base import Quote
 from argus.services.lots import EPS, Lot, PositionState, build_positions
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
-# Read-only view that combines every portfolio (positions, summary, performance, exposure).
+# Read-only view that combines every portfolio you own (positions, summary, performance, exposure);
+# portfolios shared with you stay out of it.
 ALL = "all"
 
 CASH_TYPES = {TxnType.DIVIDEND, TxnType.FEE}
@@ -95,9 +98,9 @@ class PortfolioService:
         if name.lower() == ALL:
             raise ArgusError("INVALID_ARG", f"'{ALL}' is reserved for the combined view.")
         with session_scope(self.engine) as s:
-            if s.scalar(select(Portfolio).where(Portfolio.name == name)):
+            if s.scalar(select(Portfolio).where(Portfolio.name == name, access.owned(s, Portfolio.account_id))):
                 raise ArgusError("ALREADY_EXISTS", f"Portfolio '{name}' already exists.")
-            p = Portfolio(name=name, benchmark=normalize_symbol(benchmark))
+            p = Portfolio(account_id=access.owner(s), name=name, benchmark=normalize_symbol(benchmark))
             s.add(p)
             s.flush()
             s.add(AuditLog(actor=actor, action="create", entity="portfolio", entity_id=str(p.id),
@@ -106,8 +109,9 @@ class PortfolioService:
 
     def delete_portfolio(self, ref: str | int, actor: str = "cli", dry_run: bool = True) -> dict:
         """Permanently delete a portfolio with its transactions (soft-deleted ones too), targets and
-        performance history. Watchlists, notes and alerts are per symbol and stay. A dry run only counts."""
-        p = self.get_portfolio(ref)
+        performance history, and stops sharing it. Watchlists, notes and alerts are per symbol and stay.
+        A dry run only counts."""
+        p = self.get_portfolio(ref, write=True)
         with session_scope(self.engine) as s:
             count = lambda model: s.scalar(select(func.count()).select_from(model).where(model.portfolio_id == p.id))  # noqa: E731
             counts = {"transactions": count(Transaction), "targets": count(Target), "nav_days": count(NavDaily)}
@@ -116,7 +120,7 @@ class PortfolioService:
         if dry_run:
             return out
         with session_scope(self.engine) as s:
-            for model in (Transaction, Target, NavDaily):
+            for model in (Transaction, Target, NavDaily, PortfolioShare):
                 s.execute(delete(model).where(model.portfolio_id == p.id))
             s.execute(delete(Portfolio).where(Portfolio.id == p.id))
             s.add(AuditLog(actor=actor, action="delete", entity="portfolio", entity_id=str(p.id),
@@ -124,25 +128,48 @@ class PortfolioService:
         self.revision += 1
         return out
 
-    def list_portfolios(self) -> list[dict]:
-        with session_scope(self.engine) as s:
-            return [{"id": p.id, "name": p.name, "benchmark": p.benchmark}
-                    for p in s.scalars(select(Portfolio).order_by(Portfolio.id))]
+    def _shared_ids(self, s):
+        """Ids of the portfolios shared with this call's account (a subquery)."""
+        return select(PortfolioShare.portfolio_id).where(PortfolioShare.account_id == access.account_id(s))
 
-    def get_portfolio(self, ref: str | int) -> Portfolio:
+    def list_portfolios(self) -> list[dict]:
+        """Your portfolios (with whom each is shared), then those shared with you (`shared`, read-only)."""
         with session_scope(self.engine) as s:
+            names = dict(s.execute(select(Account.id, Account.username)).all())
+            shares: dict[int, list[str]] = {}
+            for pid, aid in s.execute(select(PortfolioShare.portfolio_id, PortfolioShare.account_id)
+                                      .order_by(PortfolioShare.created_at)):
+                shares.setdefault(pid, []).append(names.get(aid, str(aid)))
+            own = list(s.scalars(select(Portfolio).where(access.owned(s, Portfolio.account_id)).order_by(Portfolio.id)))
+            shared = [] if access.account_id(s) == access.SYSTEM else list(s.scalars(
+                select(Portfolio).where(Portfolio.id.in_(self._shared_ids(s))).order_by(Portfolio.id)))
+            return ([{"id": p.id, "name": p.name, "benchmark": p.benchmark, "shared_with": shares.get(p.id, [])}
+                     for p in own]
+                    + [{"id": p.id, "name": p.name, "benchmark": p.benchmark, "shared": True,
+                        "owner": names.get(p.account_id)} for p in shared])
+
+    def get_portfolio(self, ref: str | int, write: bool = False) -> Portfolio:
+        """A portfolio you own, or (unless `write`) one shared with you, by id or name. A name finds your
+        own first. Anyone else's is NOT_FOUND, so its existence doesn't leak."""
+        with session_scope(self.engine) as s:
+            mine = access.owned(s, Portfolio.account_id)
+            visible = or_(mine, Portfolio.id.in_(self._shared_ids(s)))
             p = None
             if isinstance(ref, int) or str(ref).isdigit():
-                p = s.get(Portfolio, int(ref))
+                p = s.scalar(select(Portfolio).where(Portfolio.id == int(ref), visible))
             if p is None:
-                p = s.scalar(select(Portfolio).where(Portfolio.name == str(ref)))
+                p = (s.scalar(select(Portfolio).where(Portfolio.name == str(ref), mine))
+                     or s.scalar(select(Portfolio).where(Portfolio.name == str(ref), visible).order_by(Portfolio.id)))
             if p is None and str(ref).lower() == ALL:
                 raise ArgusError("INVALID_ARG", f"'{ALL}' is a read-only combined view.",
                                  hint="Pick a single portfolio for transactions, targets and what-if trades.")
             if p is None:
-                names = [x.name for x in s.scalars(select(Portfolio))]
+                names = [x.name for x in s.scalars(select(Portfolio).where(visible))]
                 raise ArgusError("NOT_FOUND", f"No portfolio '{ref}'.",
                                  hint=f"Existing: {', '.join(names)}" if names else "Create one with `argus portfolio create`.")
+            if write and not access.is_mine(s, p.account_id):
+                raise ArgusError("READ_ONLY", f"Portfolio '{p.name}' is shared with you read-only.",
+                                 hint="Only its owner can change it.")
             return p
 
     def view(self, ref: str | int) -> Portfolio:
@@ -150,6 +177,44 @@ class PortfolioService:
         if str(ref).lower() == ALL:
             return Portfolio(id=None, name=ALL, benchmark="SPY")
         return self.get_portfolio(ref)
+
+    def _own_ids(self, s):
+        return select(Portfolio.id).where(access.owned(s, Portfolio.account_id))
+
+    # -- sharing ----------------------------------------------------------------
+    def share(self, ref: str | int, username: str, actor: str = "cli") -> dict:
+        """Let another account see one of your portfolios, read-only."""
+        p = self.get_portfolio(ref, write=True)
+        with session_scope(self.engine) as s:
+            a = s.scalar(select(Account).where(Account.username == (username or "").strip().lower()))
+            if a is None:
+                raise ArgusError("NOT_FOUND", f"No account '{username}'.", hint="See `argus user list`.")
+            if a.id == p.account_id:
+                raise ArgusError("INVALID_ARG", f"'{a.username}' already owns '{p.name}'.")
+            if s.get(PortfolioShare, (p.id, a.id)) is None:
+                s.add(PortfolioShare(portfolio_id=p.id, account_id=a.id))
+                s.add(AuditLog(actor=actor, action="share", entity="portfolio", entity_id=str(p.id),
+                               after={"with": a.username}))
+        return self.shares(p.id)
+
+    def unshare(self, ref: str | int, username: str, actor: str = "cli") -> dict:
+        p = self.get_portfolio(ref, write=True)
+        with session_scope(self.engine) as s:
+            a = s.scalar(select(Account).where(Account.username == (username or "").strip().lower()))
+            row = s.get(PortfolioShare, (p.id, a.id)) if a else None
+            if row is None:
+                raise ArgusError("NOT_FOUND", f"'{p.name}' isn't shared with '{username}'.")
+            s.delete(row)
+            s.add(AuditLog(actor=actor, action="unshare", entity="portfolio", entity_id=str(p.id),
+                           before={"with": a.username}))
+        return self.shares(p.id)
+
+    def shares(self, ref: str | int) -> dict:
+        p = self.get_portfolio(ref, write=True)
+        with session_scope(self.engine) as s:
+            names = list(s.scalars(select(Account.username).join(PortfolioShare, PortfolioShare.account_id == Account.id)
+                                   .where(PortfolioShare.portfolio_id == p.id).order_by(PortfolioShare.created_at)))
+        return {"portfolio": p.name, "shared_with": names}
 
     # -- transactions ---------------------------------------------------------
     def _active_txns(self, s, portfolio_id: int) -> list[Transaction]:
@@ -171,7 +236,7 @@ class PortfolioService:
         Items whose external_id already exists are skipped (idempotent retries/re-imports).
         Returns positions before/after for the affected symbols.
         """
-        p = self.get_portfolio(portfolio)
+        p = self.get_portfolio(portfolio, write=True)
         for it in items:
             it.symbol = normalize_symbol(it.symbol)
             it.type = TxnType(it.type.upper()).value
@@ -225,11 +290,21 @@ class PortfolioService:
             self.revision += 1
             return result
 
+    def _own_txn(self, s, txn_id: int) -> Transaction:
+        """An active transaction in a portfolio you own (in one shared with you: READ_ONLY)."""
+        t = s.get(Transaction, txn_id)
+        if t is None or t.deleted or not s.scalar(select(Portfolio.id).where(
+                Portfolio.id == t.portfolio_id, or_(Portfolio.id.in_(self._own_ids(s)),
+                                                     Portfolio.id.in_(self._shared_ids(s))))):
+            raise ArgusError("NOT_FOUND", f"No active transaction {txn_id}.")
+        if not s.scalar(select(Portfolio.id).where(Portfolio.id == t.portfolio_id, Portfolio.id.in_(self._own_ids(s)))):
+            raise ArgusError("READ_ONLY", f"Transaction {txn_id} is in a portfolio shared with you read-only.",
+                             hint="Only its owner can change it.")
+        return t
+
     def delete_transaction(self, txn_id: int, source: str = "cli", dry_run: bool = False) -> dict:
         with session_scope(self.engine) as s:
-            t = s.get(Transaction, txn_id)
-            if t is None or t.deleted:
-                raise ArgusError("NOT_FOUND", f"No active transaction {txn_id}.")
+            t = self._own_txn(s, txn_id)
             remaining = [x for x in self._active_txns(s, t.portfolio_id) if x.id != txn_id]
             build_positions(remaining)  # e.g. deleting a BUY that a later SELL depends on fails here
             out = {"deleted": txn_to_dict(t), "dry_run": dry_run}
@@ -248,9 +323,7 @@ class PortfolioService:
         Only qty, price, fee, time and note change; the type, symbol and portfolio stay as they were.
         """
         with session_scope(self.engine) as s:
-            t = s.get(Transaction, txn_id)
-            if t is None or t.deleted:
-                raise ArgusError("NOT_FOUND", f"No active transaction {txn_id}.")
+            t = self._own_txn(s, txn_id)
             fixed = TxnInput(type=t.type, symbol=t.symbol, ts=_aware(ts).astimezone(UTC) if ts else t.ts,
                              qty=t.qty if qty is None else qty, price=t.price if price is None else price,
                              fee=t.fee if fee is None else fee, amount=t.amount,
@@ -281,9 +354,8 @@ class PortfolioService:
         p = self.view(portfolio)
         with session_scope(self.engine) as s:
             names = {x.id: x.name for x in s.scalars(select(Portfolio))}
-            q = select(Transaction)
-            if p.id is not None:
-                q = q.where(Transaction.portfolio_id == p.id)
+            q = select(Transaction).where(Transaction.portfolio_id == p.id if p.id is not None
+                                          else Transaction.portfolio_id.in_(self._own_ids(s)))
             if symbol:
                 q = q.where(Transaction.symbol == normalize_symbol(symbol))
             if not include_deleted:
@@ -292,11 +364,12 @@ class PortfolioService:
                     for t in s.scalars(q.order_by(Transaction.ts, Transaction.id))]
 
     def active_transactions(self, portfolio: str | int) -> list[Transaction]:
-        """Active transactions; ALL returns every portfolio's (fine for value series, not for FIFO)."""
+        """Active transactions; ALL returns those of every portfolio you own (fine for value series, not FIFO)."""
         p = self.view(portfolio)
         with session_scope(self.engine) as s:
             if p.id is None:
-                return list(s.scalars(select(Transaction).where(Transaction.deleted.is_(False))))
+                return list(s.scalars(select(Transaction).where(Transaction.deleted.is_(False),
+                                                                Transaction.portfolio_id.in_(self._own_ids(s)))))
             return self._active_txns(s, p.id)
 
     # -- positions ------------------------------------------------------------
@@ -307,7 +380,7 @@ class PortfolioService:
                 return build_positions(self._active_txns(s, p.id))
             # FIFO runs per portfolio; the combined view merges the resulting lots by symbol.
             merged: dict[str, PositionState] = {}
-            for pid in s.scalars(select(Portfolio.id)):
+            for pid in s.scalars(self._own_ids(s)):
                 for sym, pos in build_positions(self._active_txns(s, pid)).items():
                     m = merged.setdefault(sym, PositionState(sym))
                     m.lots += pos.lots

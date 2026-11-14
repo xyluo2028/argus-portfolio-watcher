@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   type Fundamentals,
+  type FundamentalSeries,
   type HistoryResponse,
   type Position,
   type Quote,
@@ -11,7 +12,7 @@ import {
   type SecCoverage,
   type StreamUpdate,
 } from "../api";
-import { CandleChart, OVERLAY_COLOR, type Overlay, type Pane } from "../components/CandleChart";
+import { CandleChart, METRIC_COLOR, METRIC_PANES, OVERLAY_COLOR, type MetricPane, type Overlay, type Pane } from "../components/CandleChart";
 import { CompanyCard } from "../components/CompanyCard";
 import { EventsCard } from "../components/EventsCard";
 import { FinancialsCard, SecStale } from "../components/FinancialsCard";
@@ -82,7 +83,14 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   const [overlays, setOverlays] = useState<Overlay[]>(["sma50", "sma200"]);
   const [panes, setPanes] = useState<Pane[]>(["volume"]);
   const [history, setHistory] = useState<HistoryResponse | null>(null);
+  const [metricPanes, setMetricPanes] = useState<MetricPane[]>(() => {
+    try { return JSON.parse(localStorage.getItem("argus.chart.metrics") ?? "[]"); } catch { return []; }
+  });
+  const [fundSeries, setFundSeries] = useState<FundamentalSeries | null>(null);
   const [historyErr, setHistoryErr] = useState<ApiError | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyRequest, setHistoryRequest] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(() => matchMedia("(min-width: 641px)").matches);
   const [fund, setFund] = useState<Fundamentals | null>(null);
   const [fundErr, setFundErr] = useState<ApiError | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
@@ -93,10 +101,29 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
   useEffect(() => {
     let stale = false;
     setHistoryErr(null);
+    setHistoryLoading(true);
     api.history(symbol, range.period, range.interval, indicators).then(
-      (h) => !stale && setHistory(h), (e) => !stale && setHistoryErr(e));
+      (h) => { if (!stale) { setHistory(h); setHistoryLoading(false); } },
+      (e) => { if (!stale) { setHistoryErr(e); setHistoryLoading(false); } });
     return () => { stale = true; };
-  }, [symbol, range, indicators]);
+  }, [symbol, range, indicators, historyRequest]);
+
+  // Valuation ratios / revenue for the chart's panes: daily ranges only, fetched once any is on.
+  const daily = range.interval === "1d";
+  const wantsFund = daily && metricPanes.length > 0;
+  useEffect(() => {
+    if (!wantsFund) { setFundSeries(null); return; }
+    let stale = false;
+    api.fundamentalSeries(symbol, range.period).then((f) => !stale && setFundSeries(f), () => !stale && setFundSeries(null));
+    return () => { stale = true; };
+  }, [symbol, range, wantsFund]);
+  const toggleMetric = (k: MetricPane) => setMetricPanes((l) => {
+    const next = toggle(l, k);
+    try { localStorage.setItem("argus.chart.metrics", JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
+  const missing = fundSeries ? metricPanes.filter((k) =>
+    k === "revenue" ? !fundSeries.revenue.length : !(fundSeries.ratios[k] ?? []).some(([, v]) => v != null)) : [];
 
   const loadPosition = useCallback(() => {
     api.portfolio(portfolio).then(
@@ -146,7 +173,10 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
 
   return (
     <div className="stack">
-      <div className="row small"><Link to="/" className="muted">← Dashboard</Link></div>
+      <div className="row small" style={{ justifyContent: "space-between" }}>
+        <Link to="/" className="muted">← Dashboard</Link>
+        <Link to={`/dcf/${encodeURIComponent(symbol)}`}>DCF calculator →</Link>
+      </div>
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end" }}>
           <div>
@@ -179,9 +209,8 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
         </div>
       </section>
 
-      <section className="card">
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-          <div className="seg ranges" role="group" aria-label="Range">
+      <section className="card ticker-chart" aria-label={`${symbol} price chart`}>
+          <div className="seg ranges chart-ranges" role="group" aria-label="Chart range">
             {RANGES.map((r) => {
               const ret = rangeReturn(r.label);
               const base = r.label === "1D" ? null : bases?.bases[r.label];
@@ -196,7 +225,12 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
               );
             })}
           </div>
-          <div className="row">
+          <div className="chart-status small muted" role="status">
+            {historyLoading ? `Loading ${range.label} chart…` : `${range.label} chart`}
+          </div>
+        <details className="chart-settings" open={settingsOpen} onToggle={(e) => setSettingsOpen(e.currentTarget.open)}>
+          <summary>Indicators <span className="small muted">{overlays.length + panes.length + metricPanes.length} selected</span></summary>
+          <div className="row indicator-options" role="group" aria-label="Technical indicators">
             {OVERLAYS.map((o) => (
               <button key={o.key} className="chip" aria-pressed={overlays.includes(o.key)}
                       onClick={() => setOverlays((l) => toggle(l, o.key))}>
@@ -208,10 +242,33 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                       onClick={() => setPanes((l) => toggle(l, p.key))}>{p.label}</button>
             ))}
           </div>
+        <div className="row small" style={{ gap: 8, marginBottom: 8 }} role="group" aria-label="Fundamentals panes">
+          <span className="muted" title="Each in its own pane under the price">Fundamentals</span>
+          {METRIC_PANES.map((m) => (
+            <button key={m.key} className="chip" aria-pressed={metricPanes.includes(m.key)} disabled={!daily}
+                    title={daily ? m.title : "Daily ranges only (1M and up)"} onClick={() => toggleMetric(m.key)}>
+              <span className="key" style={{ background: METRIC_COLOR[m.key] }} />{m.label}
+            </button>
+          ))}
+          {!daily && metricPanes.length > 0 && <span className="muted">· shown on daily ranges (1M and up)</span>}
+          {daily && missing.length > 0 && (
+            <span className="muted">· no {missing.map((k) => METRIC_PANES.find((m) => m.key === k)!.label).join(", ")} history for {symbol}</span>
+          )}
         </div>
-        {historyErr ? <div className="error">{historyErr.message}</div>
-          : history ? <CandleChart data={history} overlays={overlays} panes={panes} live={quote} />
+        </details>
+        <div aria-busy={historyLoading}>
+        {historyErr ? <div className="error">{historyErr.message}{" "}
+            <button className="btn" onClick={() => setHistoryRequest((n) => n + 1)}>Retry chart</button></div>
+          : history ? <CandleChart data={history} overlays={overlays} panes={panes} live={quote}
+                                   metrics={metricPanes} fundamentals={wantsFund ? fundSeries : null} />
           : <div className="chart-box muted">Loading chart…</div>}
+        </div>
+        {wantsFund && fundSeries && metricPanes.some((k) => k !== "revenue") && (
+          <p className="small muted" style={{ margin: "6px 0 0" }}>
+            Ratios move with the daily price over each quarter's trailing figures (Finnhub), applied from the quarter's end;
+            dashed line = 5-year median. Revenue: quarterly, as filed with the SEC.
+          </p>
+        )}
       </section>
 
       <CompanyCard symbol={symbol} />

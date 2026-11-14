@@ -331,7 +331,7 @@ function YieldCurve({ yc }: { yc: NonNullable<MarketContext["yield_curve"]> }) {
       <div style={{ position: "relative" }}>
         <svg viewBox={`0 0 ${W} ${H}`} className="curve" role="img"
              aria-label={`Yield curve: ${yc.lines.map((l) => `${l.label} ${l.points.map((p) => `${p.tenor} ${p.yield}%`).join(", ")}`).join("; ")}`}
-             onMouseLeave={() => setHover(null)}>
+             onPointerLeave={() => setHover(null)} onPointerCancel={() => setHover(null)}>
           {ticks.map((t) => (
             <g key={t}>
               <line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
@@ -356,7 +356,7 @@ function YieldCurve({ yc }: { yc: NonNullable<MarketContext["yield_curve"]> }) {
           })}
           {tenors.map((t, i) => (
             <rect key={t} x={x(i) - (W - L - R) / (tenors.length - 1) / 2} y={T} width={(W - L - R) / (tenors.length - 1)} height={H - T - B}
-                  fill="transparent" onMouseEnter={() => setHover(i)} />
+                  fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)} />
           ))}
         </svg>
         {hover != null && (

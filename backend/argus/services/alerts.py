@@ -2,7 +2,7 @@
 
 Each alert fires at most once per trading session (unique alert_id + session_date), and
 fired alerts show up in the UI, the MCP daily brief and `list_alerts`. There are no push
-notifications by design.
+notifications by design. Each account has its own alerts; cost alerts compare with its own holdings.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Callable
 from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError
 
+from argus import access
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.models import Alert, AlertEvent, AuditLog
@@ -102,7 +103,7 @@ class AlertService:
         if threshold < 0:
             raise ArgusError("INVALID_ARG", "Threshold must be >= 0 (direction is part of the kind).")
         with session_scope(self.engine) as s:
-            a = Alert(symbol=sym, kind=kind, threshold=threshold, note=note, created_by=actor)
+            a = Alert(account_id=access.owner(s), symbol=sym, kind=kind, threshold=threshold, note=note, created_by=actor)
             s.add(a)
             s.flush()
             s.add(AuditLog(actor=actor, action="create", entity="alert", entity_id=str(a.id),
@@ -112,7 +113,7 @@ class AlertService:
     def set_active(self, alert_id: int, active: bool, actor: str = "cli") -> dict:
         with session_scope(self.engine) as s:
             a = s.get(Alert, alert_id)
-            if a is None:
+            if a is None or not access.is_mine(s, a.account_id):
                 raise ArgusError("NOT_FOUND", f"No alert {alert_id}.")
             a.active = active
             s.add(AuditLog(actor=actor, action="enable" if active else "disable", entity="alert", entity_id=str(a.id)))
@@ -120,7 +121,7 @@ class AlertService:
 
     def list(self, include_inactive: bool = False) -> list[dict]:
         with session_scope(self.engine) as s:
-            q = select(Alert).order_by(Alert.symbol, Alert.id)
+            q = select(Alert).where(access.owned(s, Alert.account_id)).order_by(Alert.symbol, Alert.id)
             if not include_inactive:
                 q = q.where(Alert.active.is_(True))
             alerts = list(s.scalars(q))
@@ -135,23 +136,26 @@ class AlertService:
     def fired(self, since: date) -> list[dict]:
         with session_scope(self.engine) as s:
             rows = s.execute(select(AlertEvent, Alert).join(Alert, Alert.id == AlertEvent.alert_id)
-                             .where(AlertEvent.session_date >= since).order_by(AlertEvent.ts.desc()))
-            return [{"alert_id": a.id, "symbol": a.symbol, "kind": a.kind, "threshold": a.threshold,
+                             .where(AlertEvent.session_date >= since, access.owned(s, Alert.account_id))
+                             .order_by(AlertEvent.ts.desc()))
+            return [{"alert_id": a.id, "account_id": a.account_id, "symbol": a.symbol, "kind": a.kind, "threshold": a.threshold,
                      "session_date": ev.session_date.isoformat(), "ts": ev.ts.isoformat(), "value": ev.value,
                      "message": ev.message, "note": a.note} for ev, a in rows]
 
-    def evaluate(self, quotes: dict[str, Quote], metrics: Callable[[str], dict], costs: dict[str, float],
+    def evaluate(self, quotes: dict[str, Quote], metrics: Callable[[str], dict], costs: Callable[[int], dict[str, float]],
                  next_earnings: dict[str, date], session_date: date) -> list[dict]:
-        """Check every active alert; record and return the ones that newly fired this session."""
+        """Check every active alert you can see (all, for SYSTEM); record and return the ones that newly
+        fired this session. `costs(account_id)` is that account's average cost per symbol."""
         new = []
         with session_scope(self.engine) as s:
-            alerts = list(s.scalars(select(Alert).where(Alert.active.is_(True))))
+            alerts = list(s.scalars(select(Alert).where(Alert.active.is_(True), access.owned(s, Alert.account_id))))
             done = {ev.alert_id for ev in s.scalars(select(AlertEvent).where(AlertEvent.session_date == session_date))}
         for a in alerts:
             if a.id in done:
                 continue
             m = metrics(a.symbol) if KINDS[a.kind].needs == "fundamentals" else {}
-            res = check(a.kind, a.threshold, quotes.get(a.symbol), m, costs.get(a.symbol),
+            cost = costs(a.account_id).get(a.symbol) if KINDS[a.kind].needs == "cost" else None
+            res = check(a.kind, a.threshold, quotes.get(a.symbol), m, cost,
                         next_earnings.get(a.symbol), session_date)
             if not res or not res[0]:
                 continue
@@ -162,7 +166,7 @@ class AlertService:
                     s.add(AlertEvent(alert_id=a.id, session_date=session_date, value=value, message=message))
             except IntegrityError:
                 continue  # another process recorded it first
-            new.append({"alert_id": a.id, "symbol": a.symbol, "kind": a.kind, "message": message, "note": a.note})
+            new.append({"alert_id": a.id, "account_id": a.account_id, "symbol": a.symbol, "kind": a.kind, "message": message, "note": a.note})
         return new
 
     @staticmethod

@@ -12,10 +12,12 @@ interface Props {
   required?: boolean;
   /** Applied to the wrapper, e.g. a maxWidth in a form row (the suggestion list may be wider). */
   style?: React.CSSProperties;
+  /** Called with the chosen symbol instead of completing it into the text, e.g. to open its page. */
+  onPick?: (symbol: string) => void;
 }
 
 /** Text input for one or more tickers ("TSLA, COST") that suggests completions for the last one. */
-export function TickerInput({ value, onChange, placeholder, "aria-label": label, required, style }: Props) {
+export function TickerInput({ value, onChange, placeholder, "aria-label": label, required, style, onPick }: Props) {
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -45,7 +47,8 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
   const shown = open && token ? hits : [];
 
   const pick = (h: SearchHit) => {
-    onChange(head + h.symbol);
+    if (onPick) onPick(h.symbol);
+    else onChange(head + h.symbol);
     setOpen(false);
   };
 
@@ -55,7 +58,7 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
       setActive((a) => (a + step + shown.length) % shown.length);
-    } else if (e.key === "Enter" && shown[active] && shown[active].symbol !== token.toUpperCase()) {
+    } else if (e.key === "Enter" && shown[active] && (onPick || shown[active].symbol !== token.toUpperCase())) {
       e.preventDefault(); // complete first; a second Enter submits the form
       pick(shown[active]);
     } else if (e.key === "Escape") {
@@ -66,6 +69,7 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
   return (
     <div className="combo" style={style}>
       <input className="input" value={value} placeholder={placeholder} aria-label={label} autoComplete="off" required={required}
+             autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="go"
              role="combobox" aria-expanded={shown.length > 0} aria-controls={listId} aria-autocomplete="list"
              aria-activedescendant={shown.length ? `${listId}-${active}` : undefined}
              onChange={(e) => { onChange(e.target.value); setOpen(true); }}
@@ -75,7 +79,8 @@ export function TickerInput({ value, onChange, placeholder, "aria-label": label,
           {shown.map((h, i) => (
             <li key={h.symbol} id={`${listId}-${i}`} role="option" aria-selected={i === active}
                 className={i === active ? "active" : undefined}
-                onMouseDown={(e) => { e.preventDefault(); pick(h); }} onMouseEnter={() => setActive(i)}>
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => pick(h)} onPointerEnter={() => setActive(i)}>
               <strong>{h.symbol}</strong>
               <span className="combo-name">{h.name}</span>
               {h.type && h.type !== "Common Stock" && <span className="tag">{h.type === "ETP" ? "ETF" : h.type}</span>}

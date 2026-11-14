@@ -9,6 +9,8 @@ __pycache__/
 # frontend
 node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 .DS_Store
 # Claude Code: share the agents and project settings, keep local notes and screenshots private
 .claude/*
