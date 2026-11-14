@@ -17,7 +17,8 @@ reading the code, and an investor using the product.
   rounds, 48 fixed, 119 still open (48 bugs, 42 usability, 26 features, 2 performance, 1 removal).
 
 Item IDs below (B = bug, S = security, O = operations, P = performance, C = code, I = investing,
-F = feature) are used in the roadmap at the end. Effort is S (a day or less), M (a few days),
+F = feature) are used in the roadmap at the end, and in the implementation plans under
+[`plans/`](plans/README.md), which say how to build each item. Effort is S (a day or less), M (a few days),
 L (a week or more).
 
 ## Summary
@@ -76,7 +77,7 @@ Confirmed in this review unless marked as from the backlog.
 | B6 | The DCF calculator's defaults produce absurd answers for fast growers. | NVDA opens at "fair value 349% above today's price": 30% growth for five years with no decay, valued at the 5-year median multiple (54.9x against 29.3x today). | See I7: conservative defaults and a sensitivity grid. | M |
 | B7 | Economic calendar rows with the same name can't be told apart (two "Core PPI", two "PPI"), and the yield curve's end labels overlap. | Markets page; backlog B-091. | Name month-on-month and year-on-year server-side; offset the labels. | S |
 | B8 | Two phone tests fail on WebKit: tapping an autocomplete suggestion leaves the typed text, and tapping the comparison chart doesn't show values in the legend. | `frontend/tests/mobile.spec.ts`; both fail on older commits too. Likely real iPhone touch bugs. | Reproduce on WebKit, fix the touch handlers. | S–M |
-| B9 | The stock page says "Not held in <portfolio>" when another of your portfolios holds it. | Backlog B-081. | Say where it is held. | S |
+| B9 | The stock page says "Not held in <portfolio>" when another of your portfolios holds it. For a portfolio shared with you it prints the portfolio's id ("Not held in 2"). | Backlog B-081; `PositionCard.tsx` prints its raw prop. | Say where it is held, by name. | S |
 | B10 | The open backlog: 48 bugs. | Most are disagreements between two sources for one figure; see I5. | Triage first: many are duplicates or fixed since. | L |
 
 ## Security and multi-account hardening
@@ -141,7 +142,7 @@ Measured on about 70 positions, market closed:
 |---|---|---|---|
 | C1 | `app.py` is 1,932 lines: orchestration, caching and business rules for every domain in one class. | Keep `Argus` as the facade, and move each domain's logic into its service (research, dividends, events, valuation, peers). | L |
 | C2 | The API has no typed contract. Routes return dicts, and `api.ts` re-declares every shape by hand in 633 lines that can drift. | Response models on the routes; generate the TypeScript types from the OpenAPI schema. | L |
-| C3 | No linter, type checker or coverage. | Ruff and a type checker on the backend, run in CI (O7). Start lenient. | S–M |
+| C3 | No linter, type checker or coverage. A basic lint run finds about 30 unreachable leftover lines in `app.py` (after the `return` in `_holding_quotes`), an unused variable and unused imports. | Ruff on the backend, run in CI (O7). Start with the checks that find real leftovers; widen later. | S–M |
 | C4 | The frontend has no unit tests. The DCF projection math lives only in `dcf.ts`, untested, and can't be reached from the CLI or MCP. | Move the projection to the backend (one definition, testable, usable by agents), or add a unit-test runner for `dcf.ts`, `format.ts` and `metrics.ts`. | M |
 | C5 | 33 broad `except Exception` blocks. Most are deliberate ("never block the summary on metadata"), but they hide real failures. | Log each with context (O3), and count them in health. | S |
 | C6 | Adding an owned table takes several manual steps (the owner column, `OWNED`, both snapshot formats, the leak test). | A test that fails when a table has `account_id` but isn't registered in each place. | S |
@@ -222,6 +223,8 @@ Nice to have, roughly in order of value for the effort.
 | F11 | **Postgres option** | Only if Argus ever runs as more than one process or hosts many active users. SQLite is the right choice today. | L |
 
 ## Roadmap
+
+Each stage's items have an implementation plan in [`plans/`](plans/README.md).
 
 ### Now: make the multi-account server safe and usable (one to two weeks)
 
