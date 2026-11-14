@@ -38,11 +38,15 @@ def _close_on_or_before(closes: dict[date, float], d: date) -> tuple[date, float
 
 
 def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], bench: str = "SPY",
-            factors: dict[date, dict[str, float]] | None = None) -> dict:
+            factors: dict[date, dict[str, float]] | None = None,
+            book_day: tuple[date, float, float | None] | None = None) -> dict:
     """`values`: market value per holding. `closes`: daily closes per symbol, the benchmark included
-    (with enough history for the stress windows)."""
+    (with enough history for the stress windows). `book_day`: (session, Day P&L, Day P&L %) of the
+    shares actually held through that session; used for `last_day` when it is the latest session."""
     total = sum(v for v in values.values() if v and v > 0)
     syms = [s for s, v in values.items() if v and v > 0]
+    if not syms:
+        return {"available": False, "reason": "No holdings with a market value to analyze."}
     if total <= 0 or bench not in closes or len(closes[bench]) < MIN_OBS + 1:
         return {"available": False, "reason": "Not enough price history yet."}
     w = np.array([values[s] / total for s in syms])
@@ -68,7 +72,7 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
 
     vol = float(np.std(rp, ddof=1) * np.sqrt(TRADING_DAYS))
     beta = float(np.cov(rp, rm)[0, 1] / np.var(rm, ddof=1)) if np.var(rm, ddof=1) > 0 else float(w @ betas)
-    cov = np.cov(filled, rowvar=False) * TRADING_DAYS
+    cov = np.atleast_2d(np.cov(filled, rowvar=False)) * TRADING_DAYS  # one holding: np.cov gives a scalar
     port_var = float(w @ cov @ w)
     risk_share = (w * (cov @ w)) / port_var if port_var > 0 else np.zeros(len(syms))
     asset_vol = np.sqrt(np.diag(cov))
@@ -78,6 +82,20 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         tail = rp[rp <= cut]
         return {"var_pct": float(-cut * 100), "cvar_pct": float(-tail.mean() * 100),
                 "var_value": float(-cut * total), "cvar_value": float(-tail.mean() * total)}
+
+    var99 = var_cvar(0.99)
+    # The latest session's P&L against the 99% VaR shown beside it. It's the book's Day P&L (the
+    # shares held through that session, so a trade after the close doesn't change it, B-152); only
+    # when that isn't available for this session, today's holdings over it, in dollars of their
+    # value before it.
+    if book_day and book_day[0] == days[-1]:
+        move, move_pct, basis = book_day[1], book_day[2], "session_holdings"
+    else:
+        last_r = filled[-1]
+        move = float(np.sum(w * total * last_r / (1 + last_r)))
+        move_pct, basis = move / (total - move) * 100, "current_holdings"
+    last_day = {"date": days[-1].isoformat(), "return_pct": move_pct, "value": move, "basis": basis,
+                "exceeds_var_99": bool(-move > var99["var_value"])}
 
     growth = np.cumprod(1 + rp)
     drawdown = float((growth / np.maximum.accumulate(growth) - 1).min() * 100)
@@ -128,7 +146,8 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         "volatility_pct": vol * 100,
         "benchmark_volatility_pct": float(np.std(rm, ddof=1) * np.sqrt(TRADING_DAYS) * 100),
         "max_drawdown_pct": drawdown,
-        "var": {"95": var_cvar(0.95), "99": var_cvar(0.99)},
+        "var": {"95": var_cvar(0.95), "99": var99},
+        "last_day": last_day,
         "positions": positions,
         "correlation": {"symbols": [syms[i] for i in top],
                         "matrix": [[None if np.isnan(x) else float(x) for x in row] for row in np.atleast_2d(corr)]},

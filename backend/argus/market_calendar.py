@@ -128,3 +128,13 @@ def session_on_or_after(d: date) -> date:
     while d.weekday() >= 5:  # past the calendar's span: weekends are all we know
         d += timedelta(days=1)
     return d
+
+
+def session_before(d: date) -> date:
+    """The last trading day before `d` (Friday for a Saturday, Sunday or Monday; a holiday is skipped)."""
+    if _cal().first_session.date() < d <= _cal().last_session.date():
+        return _cal().date_to_session(pd.Timestamp(d) - pd.Timedelta(days=1), "previous").date()
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:  # past the calendar's span: weekends are all we know
+        d -= timedelta(days=1)
+    return d

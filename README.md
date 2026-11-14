@@ -57,11 +57,47 @@ During market hours prices stream live (Finnhub WebSocket for the largest ~48 po
 refresh for the rest each minute). Set `ARGUS_PORT` in `.env` to use another port. For UI
 development, run `npm run dev` in `frontend/` alongside `argus serve` (Vite proxies `/api`).
 
+## Accounts and bots
+
+Argus starts without sign-in, for use on your own machine. Create an account to turn sign-in on for
+every request: the web UI asks for a username and password (or the server token), and bots, scripts
+and MCP clients send an account's API key.
+
+Every account is the same kind, whether a person or a bot uses it; none manages another. In the web UI:
+
+- **The first account:** sign in with `ARGUS_TOKEN` (without one, the UI is open anyway) and create it
+  on the **Account** page. It takes over everything recorded so far, so make it yours.
+- **Any later account:** **Create an account** on the sign-in page, with a username and password. It
+  starts empty. For a bot, create its account there, then make an API key on its Account page.
+  `ARGUS_SIGNUP=off` removes that button; accounts then come from the CLI only.
+- **Your own account:** the Account page changes your password, manages your API keys and shares
+  your portfolios.
+
+Or from the terminal (also where an account is disabled or its password reset):
+
+```bash
+uv run argus user add me                                  # asks for a password
+uv run argus user add trader-bot --no-password            # a bot is just another account
+uv run argus key create trader-bot --name "sim routine"   # shown once: Authorization: Bearer <key>
+```
+
+Each account has its own portfolios, watchlists, alerts, notes, peer lists and saved DCF models;
+market data is shared. The first account takes over everything recorded before it, so make it
+yours. To watch a bot's portfolio, have it share the portfolio with you, read-only:
+
+```bash
+uv run argus --as trader-bot portfolio share "Bot sim" --with me   # or the bot's share_portfolio MCP tool
+```
+
+The CLI and `argus mcp` act as the oldest account; `argus --as <user> ...` acts as another.
+`ARGUS_TOKEN`, if set, keeps working and acts as the oldest account. More in
+[docs/deployment.md](docs/deployment.md#accounts-and-api-keys).
+
 ## Use it from Claude (MCP)
 
-Argus exposes 37 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
+Argus exposes 38 tools: portfolio, quotes, history with indicators, fundamentals, company profile & peers, ETF holdings, dividends, risk, research, market context, a stock screener, SEC
 financials, compare, performance, transactions (add, edit, delete), watchlist, events, alerts, notes, exposure,
-drift/targets, what-if (`simulate_trades`), and
+drift/targets, what-if (`simulate_trades`), sharing a portfolio, and
 `get_daily_brief_data`, which gathers everything for a brief in one call. Write tools default
 to `dry_run=true` and accept an `idempotency_key`. The prompts `daily_brief` and
 `position_review` package common routines.
@@ -72,6 +108,7 @@ claude mcp add argus -- uv run --directory ~/Documents/github/project-hatching/a
 
 # or over HTTP while `argus serve` is running (uses the live price stream)
 claude mcp add --transport http argus http://localhost:8787/mcp/
+# with accounts: add --header "Authorization: Bearer <API key>"
 ```
 
 For Claude Desktop, add the same stdio command under `mcpServers` in
@@ -105,7 +142,8 @@ Every command accepts `--json` and returns `{"ok": true, "data": ...}` or
 `{"ok": false, "error": {"code", "message", "hint"}}`, which is the format agents use.
 
 The web UI's **Data** page does the same: choose a CSV, pick the "already owned through" date from
-the lot dates, check the preview, then import. It also downloads and restores snapshots.
+the lot dates, check the preview, then import. It also backs up and restores your own account's
+records (below).
 
 ## Back up and move your data
 
@@ -116,14 +154,21 @@ uv run argus snapshot load backup.json           # restore into an empty instanc
 uv run argus snapshot load backup.json --replace # wipe existing records first (backed up automatically)
 ```
 
-A snapshot holds your records: portfolios, transactions (including deleted ones), watchlists,
-notes, alerts, targets and the audit log. Market data caches are not included; they refill on use.
+That snapshot is the whole server: every account's portfolios, transactions (including deleted
+ones), watchlists, notes, alerts, targets, shares and the audit log, plus the accounts and API keys
+(as hashes). That's why it's CLI only. A snapshot from before accounts existed loads into the oldest
+account.
+
+The web UI's **Data** page backs up and restores only your own account: your portfolios,
+transactions, targets, watchlists, notes, alerts, peer lists and DCF models. Restoring replaces only
+your records (saved to `data/snapshots/` first) and never touches another account; the file loads
+into any account on any instance. Market data caches are in neither; they refill on use.
 
 ## Running it always-on
 
 To run Argus on a server, a home box or your PC and reach it from other devices (Tailscale,
-Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: access token
-(`ARGUS_TOKEN`) and allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
+Cloudflare Tunnel), see **[docs/deployment.md](docs/deployment.md)**: accounts, API keys
+and the access token (`ARGUS_TOKEN`), allowed hostnames, systemd units and Docker (`deploy/`, `compose.yaml`),
 nightly `argus backup`, schema migrations, and moving your data.
 
 ## Development

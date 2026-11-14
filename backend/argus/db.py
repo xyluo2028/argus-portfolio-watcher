@@ -59,18 +59,31 @@ def migrate(engine: Engine) -> None:
 
     cfg = _alembic_config()
     head = ScriptDirectory.from_config(cfg).get_current_head()
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         current = MigrationContext.configure(conn).get_current_revision()
+        conn.rollback()
         if current == head:
             return
-        cfg.attributes["connection"] = conn
-        if current is None and not inspect(conn).get_table_names():
-            # Brand new: build from the models (identical to head; tests/test_migrations.py) and stamp.
-            Base.metadata.create_all(conn)
-            command.stamp(cfg, "head")
-        else:
-            # Pre-migration databases have no version: the idempotent baseline adopts them.
-            command.upgrade(cfg, "head")
+        # Some migrations rebuild a table (SQLite can't drop a constraint in place), which foreign keys
+        # would block; SQLite's way is to switch them off outside the transaction and check after.
+        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        conn.commit()  # ends SQLAlchemy's autobegun transaction (SQLite itself began none for a PRAGMA)
+        try:
+            with conn.begin():
+                cfg.attributes["connection"] = conn
+                if current is None and not inspect(conn).get_table_names():
+                    # Brand new: build from the models (identical to head; tests/test_migrations.py) and stamp.
+                    Base.metadata.create_all(conn)
+                    command.stamp(cfg, "head")
+                else:
+                    # Pre-migration databases have no version: the idempotent baseline adopts them.
+                    command.upgrade(cfg, "head")
+                broken = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+                if broken:
+                    raise RuntimeError(f"Migration left rows pointing at missing parents: {broken[:5]}")
+        finally:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+            conn.commit()
 
 
 @contextmanager

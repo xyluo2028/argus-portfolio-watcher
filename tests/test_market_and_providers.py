@@ -1,6 +1,6 @@
 import dataclasses
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -40,6 +40,57 @@ def test_daily_history_is_cached(make_argus):
     second = a.market.get_history("AAA", "6mo")
     assert hist.calls == 1
     assert 360 <= len(first) <= 367 and len(second) < len(first)
+
+
+def test_yahoo_history_drops_bars_without_a_close(monkeypatch):
+    # Yahoo served SPY's 2026-11-02 bar (the first session after DST ended) with Close NaN.
+    import pandas as pd
+
+    from argus.providers import yahoo
+
+    nan = float("nan")
+    idx = pd.DatetimeIndex(["2026-10-29", "2026-10-30", "2026-11-02"]).tz_localize("America/New_York")
+    df = pd.DataFrame({"Open": [768.79, 761.38, 759.45], "High": [770.76, 761.46, 763.85],
+                       "Low": [765.0, 754.0, 757.0], "Close": [769.36, 755.72, nan],
+                       "Volume": [40299600, nan, 50778592]}, index=idx)
+
+    class Ticker:
+        def __init__(self, sym):
+            pass
+
+        def history(self, **kw):
+            return df
+
+    monkeypatch.setattr(yahoo, "_yf", lambda: type("yf", (), {"Ticker": Ticker}))
+    bars = yahoo.YahooProvider().get_history("SPY", datetime(2026, 10, 28, tzinfo=UTC), None)
+    assert [b.c for b in bars] == [769.36, 755.72]
+    assert bars[1].v == 0.0
+
+
+def test_incomplete_bar_is_skipped_and_filled_once_the_close_arrives(make_argus, monkeypatch):
+    from argus.market_calendar import market_status
+    from argus.services import market
+
+    last_close = datetime.fromisoformat(market_status()["last_close"])
+    good = [Bar(last_close - timedelta(days=i), 1, 2, 0.5, 1.5, 100) for i in range(40, 0, -1)]
+    hist = FakeHistory(good + [Bar(last_close, 1.4, 1.6, 1.3, float("nan"), 100)])
+    a = make_argus(history=hist)
+
+    bars = a.market.get_history("AAA", "1mo")
+    assert bars and bars[-1].ts < last_close and all(b.c == 1.5 for b in bars)
+    a.market.get_history("AAA", "1mo")
+    assert hist.calls == 1  # the missing session isn't re-asked on every read
+
+    # A bad bar never replaces a stored good one; the good bars of the same batch still land.
+    a.market._store_bars("AAA", "1d", [Bar(good[-1].ts, 1, 2, 0.5, None, 1), Bar(good[-1].ts + timedelta(hours=1), 1, 2, 0.5, 1.7, 1)])
+    stored = {b.ts: b.c for b in a.market.get_history("AAA", "1mo")}
+    assert stored[good[-1].ts] == 1.5 and stored[good[-1].ts + timedelta(hours=1)] == 1.7
+
+    # Yahoo fills the close in later: the next attempt after the back-off stores it.
+    hist.bars = good + [Bar(last_close, 1.4, 1.6, 1.3, 1.55, 100)]
+    a.market._behind["AAA"] -= market.BEHIND_RETRY_S
+    bars = a.market.get_history("AAA", "1mo")
+    assert hist.calls == 2 and bars[-1].ts == last_close and bars[-1].c == 1.55
 
 
 def test_finnhub_quote_parsing_and_unknown_symbol():
@@ -298,7 +349,7 @@ def test_sec_ttm_figures_share_one_window():
     assert "revenue_growth_q_yoy_pct" not in ttm_figures(build_financials(_quarterly_facts(), "quarterly", 4))
     # Foreign-currency revenue doesn't sit beside dollar prices:
     eur = {"units": {**fin["units"], "revenue": "EUR"}, "periods": fin["periods"]}
-    assert set(ttm_figures(eur)) == {"eps_ttm"}
+    assert set(ttm_figures(eur)) == {"eps_ttm", "eps_growth_q_yoy_pct"}
 
 
 def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
@@ -345,6 +396,79 @@ def test_valuation_card_takes_sec_quarters_when_providers_lag(settings):
     out = a.fundamentals("SPY", fields)
     assert out["sources"]["revenue_ttm"] == "yahoo" and out["metrics"]["eps_ttm"] == 2.42
     assert out["metrics"]["fcf_margin_pct"] == pytest.approx(202.3 / 756.331 * 100)
+
+
+def _eps_facts(eps):
+    """Back-to-back quarters ending 2024-09-30 onward with the given diluted EPS (oldest first) and revenue."""
+    ends = ["2024-09-30", "2024-12-31", "2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31",
+            "2026-06-30", "2026-09-30"][-len(eps):]
+    starts = [(date.fromisoformat(e) - timedelta(days=89)).replace(day=1).isoformat() for e in ends]
+    q = list(zip(starts, ends, eps))
+    return {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [_fact(a, b, 100.0) for a, b, _ in q]}},
+        "EarningsPerShareDiluted": {"units": {"USD/shares": [_fact(a, b, v) for a, b, v in q]}},
+    }}}
+
+
+# TGTX's SEC quarters: 0.67 TTM through 2026-09-30 vs 2.79 a year earlier; the latest 0.35 vs 2.43.
+TGTX_EPS = [0.02, 0.16, 0.03, 0.17, 2.43, 0.15, 0.12, 0.05, 0.35]
+
+
+def test_sec_eps_growth_and_when_it_is_not_meaningful():
+    from argus.providers.sec_edgar import eps_growth_pct, ttm_figures
+
+    t = ttm_figures(build_financials(_eps_facts(TGTX_EPS), "quarterly", 8))
+    assert t["eps_growth_yoy_pct"] == pytest.approx((0.67 / 2.79 - 1) * 100)  # -76.0%
+    assert t["eps_growth_q_yoy_pct"] == pytest.approx((0.35 / 2.43 - 1) * 100)  # -85.6%
+    # Fewer than eight quarters: a quarter's growth, no TTM growth.
+    assert "eps_growth_yoy_pct" not in ttm_figures(build_financials(_eps_facts(TGTX_EPS[-5:]), "quarterly", 8))
+    # From a loss, or from a base near zero (TGTX's 0.02 -> 2.43 would be +12,050%): not meaningful,
+    # present as None so no provider's figure stands in.
+    assert eps_growth_pct(0.5, -0.2) is None and eps_growth_pct(0.5, 0.0) is None
+    assert eps_growth_pct(2.43, 0.02) is None and eps_growth_pct(-1.0, 0.05) is None
+    assert eps_growth_pct(-0.1, 0.4) == pytest.approx(-125.0)  # into a loss from a real base: shown
+    t = ttm_figures(build_financials(_eps_facts([-0.3, -0.2, -0.1, -0.1, -0.1, 0.2, 0.2, 0.3, 0.4]), "quarterly", 8))
+    assert t["eps_growth_yoy_pct"] is None and "eps_growth_yoy_pct" in t
+    assert t["eps_growth_q_yoy_pct"] is None and "eps_growth_q_yoy_pct" in t
+
+
+def test_eps_growth_comes_from_sec_quarters_with_finnhub_as_fallback(settings):
+    """TGTX: Finnhub's "EPS growth YoY +633.7%" sat beside SEC's $0.67 TTM EPS, down from 2.79 (-76%);
+    latest quarter -71.5% vs SEC's -85.6%. SEC's quarters now supply both, as B-009 did for revenue."""
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    st = dataclasses.replace(settings, sec_user_agent="argus test@example.com")
+    finnhub = _Fund("finnhub", {"eps_growth_yoy_pct": 633.73, "eps_growth_q_yoy_pct": -71.45, "eps_ttm": 0.9})
+    yahoo = _Fund("yahoo", {"_period_end": "2026-09-30"})
+    sec = _FakeSec(_eps_facts(TGTX_EPS))
+    a = Argus(st, market_factory=lambda engine, s: MarketService(engine, s, [], None, [finnhub, yahoo], sec=sec))
+    fields = ["eps_ttm", "eps_growth_yoy_pct", "eps_growth_q_yoy_pct"]
+    out = a.fundamentals("TGTX", fields)
+    m, src = out["metrics"], out["sources"]
+    assert m["eps_growth_yoy_pct"] == pytest.approx(-75.99, abs=0.01)
+    assert m["eps_growth_q_yoy_pct"] == pytest.approx(-85.60, abs=0.01)
+    assert {k: src[k] for k in fields} == dict.fromkeys(fields, "sec")
+    # The dashboard's tabs show the same figures:
+    assert a.symbol_fundamentals(["TGTX"])["metrics"]["TGTX"]["eps_growth_yoy_pct"] == pytest.approx(-75.99, abs=0.01)
+
+    # A provider a quarter ahead of SEC's XBRL: Finnhub's figures, labeled as Finnhub's.
+    yahoo.data = {"_period_end": "2026-12-31"}
+    out = a.fundamentals("TGTX", fields, refresh=True)
+    assert (out["metrics"]["eps_growth_yoy_pct"], out["sources"]["eps_growth_yoy_pct"]) == (633.73, "finnhub")
+    assert out["sources"]["eps_growth_q_yoy_pct"] == "finnhub"
+
+    # SEC's growth isn't meaningful (from a loss): blank with source sec, not Finnhub's figure.
+    yahoo.data = {"_period_end": "2026-09-30"}
+    sec.facts = _eps_facts([-0.3, -0.2, -0.1, -0.1, -0.1, 0.2, 0.2, 0.3, 0.4])
+    out = a.fundamentals("LOSS", fields)
+    assert out["metrics"]["eps_growth_yoy_pct"] is None and out["sources"]["eps_growth_yoy_pct"] == "sec"
+    assert out["metrics"]["eps_growth_q_yoy_pct"] is None and out["sources"]["eps_growth_q_yoy_pct"] == "sec"
+
+    # Not in EDGAR: Finnhub's.
+    sec.error = "sec: SPY not found in EDGAR (ETFs and funds have no financials)."
+    out = a.fundamentals("SPY", fields)
+    assert (out["metrics"]["eps_growth_yoy_pct"], out["sources"]["eps_growth_yoy_pct"]) == (633.73, "finnhub")
 
 
 def test_pe_is_the_current_price_over_the_eps_shown(settings):

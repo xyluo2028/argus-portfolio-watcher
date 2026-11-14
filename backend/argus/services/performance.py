@@ -14,7 +14,8 @@ bought years ago doesn't show up as a one-day gain. Chaining (1 + r_d) gives the
 TWR index; deposits never count as performance.
 
 Closes are split-adjusted (Yahoo), so quantities before a recorded SPLIT are scaled
-by the split ratio to stay on the same basis.
+by the split ratio to stay on the same basis. Closes stored before Yahoo adjusted them
+still jump by the ratio on the split day; for those the quantities aren't scaled.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from typing import Iterable
 from argus.market_calendar import NY, trade_session
 from argus.models import TxnType
 from argus.services.lots import TxnLike
+from argus.services.splits import unadjusted
 
 TRADING_DAYS = 252
 # Annualized volatility and Sharpe from fewer daily returns than this are noise (a 4-session
@@ -69,7 +71,8 @@ def compute_series(txns: Iterable[TxnLike], sessions: list[date], closes: dict[s
     txns = sorted(txns, key=lambda t: (t.ts, t.id or 0))
     if not txns or not sessions:
         return []
-    splits = _split_factors(txns)
+    splits = {sym: [(d, r) for d, r in ev if not unadjusted(closes.get(sym, {}), d, r)]
+              for sym, ev in _split_factors(txns).items()}
 
     def adj(sym: str, when: date) -> float:
         # Pre-split quantities are scaled up to match split-adjusted closes.

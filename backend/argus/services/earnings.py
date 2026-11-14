@@ -16,6 +16,7 @@ closed, the latest price (after-hours/pre-market included) gives a provisional f
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from itertools import pairwise
 
 from argus.market_calendar import NY
 from argus.providers.base import Quote
@@ -125,7 +126,7 @@ def build(periods: list[str], yahoo: list[dict], calendar: list[dict], results: 
     paired = _pair_results([d for d in reports if d <= today], by_period)
 
     out = []
-    for p in sorted({date.fromisoformat(x) for x in periods}, reverse=True):
+    for p in sorted(_quarters({date.fromisoformat(x) for x in periods}, reports, paired, today), reverse=True):
         due = sorted(d for d in reports if p < d <= p + timedelta(days=MATCH_DAYS) and d <= today)
         if not due:
             continue
@@ -162,6 +163,43 @@ def build(periods: list[str], yahoo: list[dict], calendar: list[dict], results: 
                "eps_estimate": cal.get("epsEstimate") if cal.get("epsEstimate") is not None else yh.get("eps_estimate"),
                "revenue_estimate": cal.get("revenueEstimate")}
     return {"reports": out, "next": nxt}
+
+
+def _next_quarter(p: date) -> date:
+    """The quarter end after `p`: a month end three months on, or 13 weeks on for 52/53-week years."""
+    if (p + timedelta(days=1)).day != 1:
+        return p + timedelta(weeks=13)
+    y, m = divmod(p.month + 3, 12)  # the 1st of the month after the target, minus a day
+    return date(p.year + y, m + 1, 1) - timedelta(days=1)
+
+
+def _quarters(periods: set[date], reports: dict[date, dict], paired: dict[date, dict], today: date) -> set[date]:
+    """SEC quarter ends plus the ones the filings don't show yet. The 10-Q comes weeks after the
+    earnings release (ABBV reported Q3 on Oct 30, filed later), and some filers' quarterly facts have
+    holes; a quarter whose report is out is listed either way, so /api/earnings matches the calendar."""
+    if not periods:
+        return periods
+    out = set(periods)
+    known = sorted(periods)
+    for a, b in pairwise(known):  # holes between filed quarters
+        p = _next_quarter(a)
+        while p < b - timedelta(days=45):
+            out.add(p)
+            p = _next_quarter(p)
+    last = known[-1]
+    taken = min((d for d in reports if last < d <= min(today, last + timedelta(days=MATCH_DAYS))), default=None)
+    if taken is None:
+        return out
+    p = last
+    for d in sorted(d for d in reports if taken < d <= today and (_reported(reports[d]) or d in paired)):
+        nxt = _next_quarter(p)
+        if d <= nxt:  # not a later quarter's report
+            continue
+        if d > nxt + timedelta(days=MATCH_DAYS):
+            break
+        p = nxt
+        out.add(p)
+    return out
 
 
 def _reported(rep: dict) -> bool:

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ApiError, api, type Quote, type StreamUpdate, type WatchItem } from "../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ApiError, api, type Quote, type StreamUpdate, type WatchItem, type WatchlistSummary } from "../api";
 import { HoldingsTabs, PickCell, type Selection } from "../components/HoldingsTabs";
 import { TickerInput } from "../components/TickerInput";
 import { big, extLabel, pct, price, ratio, tone } from "../format";
+import { DEFAULT_WATCHLIST, pickWatchlist, rememberWatchlist, savedWatchlist, withDefault } from "../watchlists";
 
 const pctCell = (v: number | null | undefined) => (v == null ? "–" : `${v.toFixed(1)}%`);
 
@@ -101,26 +102,58 @@ function WatchTable({ items, live, sel, onRemove }: {
 }
 
 export function Watchlist({ live }: { live: StreamUpdate | null }) {
+  const [lists, setLists] = useState<WatchlistSummary[] | null>(null);
   const [items, setItems] = useState<WatchItem[] | null>(null);
   const [input, setInput] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [params, setParams] = useSearchParams();
 
-  const load = useCallback(() => api.watchlist().then((w) => setItems(w.items), (e: ApiError) => setError(e.message)), []);
+  // ?list= wins (shareable), then the remembered choice; a new list typed by the user exists
+  // only in the URL until its first ticker is added.
+  const wanted = params.get("list");
+  const known = lists ? withDefault(lists) : null;
+  const options = known && wanted && !known.some((l) => l.name === wanted) ? [...known, { name: wanted, count: 0 }] : known;
+  const selected = options ? pickWatchlist(options, wanted ?? savedWatchlist()) : null;
+
+  const select = (name: string) => {
+    rememberWatchlist(name);
+    setParams(name === DEFAULT_WATCHLIST && !wanted ? {} : { list: name }, { replace: true });
+  };
+  const newList = () => {
+    const name = window.prompt("Name of the new watchlist")?.trim();
+    if (name) select(name);
+  };
+
+  const loadLists = useCallback(() => api.watchlists().then(setLists, (e: ApiError) => setError(e.message)), []);
+  useEffect(() => { loadLists(); }, [loadLists]);
+
+  const current = useRef(selected);
+  current.current = selected;
+  const load = useCallback(() => {
+    if (!selected) return;
+    const exists = (lists ?? []).some((l) => l.name === selected);
+    if (!exists && selected !== DEFAULT_WATCHLIST) { setItems([]); return; }  // not created yet
+    // A slow answer for the list switched away from must not overwrite the new one.
+    return api.watchlist(selected).then((w) => current.current === selected && setItems(w.items),
+                                        (e: ApiError) => current.current === selected && setError(e.message));
+  }, [selected, lists]);
+  useEffect(() => { setItems(null); setError(null); }, [selected]);
   useEffect(() => { load(); }, [load]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const symbols = input.split(/[\s,]+/).filter(Boolean);
-    if (!symbols.length) return;
+    if (!symbols.length || !selected) return;
     setBusy(true);
     setError(null);
     try {
-      await api.watchAdd(symbols, note || undefined);
+      await api.watchAdd(symbols, note || undefined, selected);
+      rememberWatchlist(selected);
       setInput("");
       setNote("");
-      await load();
+      await loadLists();
     } catch (err) {
       setError((err as ApiError).message);
     } finally {
@@ -129,14 +162,25 @@ export function Watchlist({ live }: { live: StreamUpdate | null }) {
   };
 
   const remove = async (symbol: string) => {
-    await api.watchRemove(symbol).catch((e: ApiError) => setError(e.message));
-    load();
+    if (!selected) return;
+    await api.watchRemove(symbol, selected).catch((e: ApiError) => setError(e.message));
+    loadLists();
   };
 
   return (
     <div className="stack">
       <section className="card">
-        <h2>Add to watchlist</h2>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <div className="seg tabs" role="group" aria-label="Watchlists">
+            {(options ?? []).map((l) => (
+              <button key={l.name} aria-pressed={l.name === selected} onClick={() => select(l.name)}>
+                {l.name} <span className="muted">· {l.count}</span>
+              </button>
+            ))}
+          </div>
+          <button className="btn ghost small" onClick={newList}>+ New list</button>
+        </div>
+        <h2>Add to {selected ?? "watchlist"}</h2>
         <form className="row" onSubmit={add}>
           <TickerInput placeholder="Tickers or company, e.g. TSLA, COST" value={input} onChange={setInput}
                        aria-label="Tickers" />
@@ -149,13 +193,13 @@ export function Watchlist({ live }: { live: StreamUpdate | null }) {
 
       {!items ? <section className="card"><p className="muted">Loading…</p></section> : items.length === 0 ? (
         <section className="card">
-          <h2>Watchlist</h2>
+          <h2>{selected}</h2>
           <p className="muted">Nothing yet. Add tickers above, or ask Claude: “add TSLA to my Argus watchlist”.</p>
         </section>
       ) : (
-        <HoldingsTabs source={{ kind: "watchlist", name: "Watchlist" }}
+        <HoldingsTabs key={selected} source={{ kind: "watchlist", name: selected! }}
                       rows={items.map((i) => ({ symbol: i.symbol, name: null, price: (live?.quotes[i.symbol] ?? i.quote)?.price ?? null }))}
-                      first={{ label: `Watchlist · ${items.length}`, content: (_rows, sel) => (
+                      first={{ label: `${selected} · ${items.length}`, content: (_rows, sel) => (
                         <WatchTable items={items} live={live} sel={sel} onRemove={remove} />
                       ) }} />
       )}

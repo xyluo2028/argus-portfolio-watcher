@@ -1,4 +1,4 @@
-"""Watchlists: symbols you track without holding them."""
+"""Watchlists: symbols you track without holding them. Each account has its own."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from sqlalchemy import Engine, select
 
+from argus import access
 from argus.db import session_scope
 from argus.errors import ArgusError
 from argus.models import AuditLog, Instrument, Watchlist, WatchlistItem
@@ -19,15 +20,21 @@ class WatchlistService:
         """`resolve` maps symbols to {symbol: reason} for those no provider knows; None skips the check."""
         self.engine = engine
         self.resolve = resolve
+        self.revision = 0  # bumped on every change; lets callers cache what depends on watchlists
+
+    @staticmethod
+    def _find(s, name: str) -> Watchlist | None:
+        return s.scalar(select(Watchlist).where(Watchlist.name == name, access.owned(s, Watchlist.account_id))
+                        .order_by(Watchlist.id))
 
     def _get(self, s, name: str, create: bool) -> Watchlist:
-        w = s.scalar(select(Watchlist).where(Watchlist.name == name))
+        w = self._find(s, name)
         if w is None:
             if not create:
-                names = [x.name for x in s.scalars(select(Watchlist))]
+                names = [x.name for x in s.scalars(select(Watchlist).where(access.owned(s, Watchlist.account_id)))]
                 raise ArgusError("NOT_FOUND", f"No watchlist '{name}'.",
                                  hint=f"Existing: {', '.join(names)}" if names else "Add a symbol to create it.")
-            w = Watchlist(name=name)
+            w = Watchlist(account_id=access.owner(s), name=name)
             s.add(w)
             s.flush()
         return w
@@ -35,14 +42,14 @@ class WatchlistService:
     def list_watchlists(self) -> list[dict]:
         with session_scope(self.engine) as s:
             out = []
-            for w in s.scalars(select(Watchlist).order_by(Watchlist.id)):
+            for w in s.scalars(select(Watchlist).where(access.owned(s, Watchlist.account_id)).order_by(Watchlist.id)):
                 n = len(list(s.scalars(select(WatchlistItem).where(WatchlistItem.watchlist_id == w.id))))
                 out.append({"name": w.name, "count": n})
             return out
 
     def items(self, name: str = DEFAULT) -> list[dict]:
         with session_scope(self.engine) as s:
-            w = s.scalar(select(Watchlist).where(Watchlist.name == name))
+            w = self._find(s, name)
             if w is None:
                 if name == DEFAULT:
                     return []
@@ -58,7 +65,7 @@ class WatchlistService:
             raise ArgusError("INVALID_SYMBOL", f"Not a US ticker: {', '.join(bad)}")
         if self.resolve:
             with session_scope(self.engine) as s:
-                w = s.scalar(select(Watchlist).where(Watchlist.name == name))
+                w = self._find(s, name)
                 new = [x for x in dict.fromkeys(syms) if w is None or s.get(WatchlistItem, (w.id, x)) is None]
             unknown = self.resolve(new) if new else {}
             if unknown:
@@ -79,6 +86,7 @@ class WatchlistService:
                     s.add(Instrument(symbol=sym))
                 added.append(sym)
             if added:
+                self.revision += 1
                 s.add(AuditLog(actor=actor, action="watch", entity="watchlist", entity_id=name, after={"added": added}))
         return {"watchlist": name, "added": added, "already_present": existing}
 
@@ -95,6 +103,7 @@ class WatchlistService:
                     s.delete(item)
                     removed.append(sym)
             if removed:
+                self.revision += 1
                 s.add(AuditLog(actor=actor, action="unwatch", entity="watchlist", entity_id=name,
                                before={"removed": removed}))
         return {"watchlist": name, "removed": removed, "not_found": missing}

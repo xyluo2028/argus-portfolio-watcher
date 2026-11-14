@@ -3,28 +3,32 @@
 Freshness rules:
 - Quotes: served from cache if fetched within `quote_max_age_s`, or if the market
   is closed and the cached quote already reflects the last session's close.
-- Daily bars: cached permanently; only bars after the last cached one are fetched.
+- Daily bars: cached permanently; only bars after the last cached one are fetched. When Yahoo's
+  fresh bars disagree with cached ones for the same session by a split-like factor (it re-based the
+  history after a split), the symbol's cached bars are replaced with Yahoo's whole adjusted history.
 - Fundamentals: cached for `fundamentals_max_age_s` (default 24h).
 """
 
 from __future__ import annotations
 
 import logging
-import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert
 
 from argus.config import Settings
 from argus.db import session_scope, upsert
 from argus.errors import ArgusError
-from argus.market_calendar import NY, market_status
-from argus.models import ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog
+from argus.market_calendar import NY, market_status, session_before, session_date
+from argus.models import (DividendHistory, ExtQuote, Fundamental, Instrument, PriceBar, QuoteCache, RefreshLog,
+                          StockSplit)
 from argus.providers.base import Bar, ProviderError, Quote
 from argus.providers.sec_edgar import freshness, ttm_figures, ttm_free_cash_flow
+from argus.services.splits import clean_ratio, rebased
 
 METRIC_FIELDS = (
     "pe_ttm", "pe_forward", "peg", "peg_ttm", "pb", "ps_ttm", "ev_ebitda", "eps_ttm", "eps_forward", "market_cap",
@@ -49,13 +53,20 @@ EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
 BATCH_FIRST_MIN = 5  # quote lookups at least this big go to a batch provider first
 # Trailing figures SEC's quarters supply when they're at least as recent as the providers', so the
 # valuation card agrees with the quarterly statements (Yahoo's revenue and Finnhub's quarterly growth can
-# lag a 10-Q by weeks; Finnhub's margins too). fcf_ttm and fcf_margin_pct come from SEC whenever it has them.
+# lag a 10-Q by weeks; Finnhub's margins and EPS growth too). fcf_ttm and fcf_margin_pct come from SEC whenever
+# it has them. An EPS growth SEC supplies as None is "not meaningful" (loss or near-zero base) and stays blank.
 SEC_WINDOW_FIELDS = ("revenue_ttm", "eps_ttm", "revenue_growth_q_yoy_pct", "gross_margin_pct",
-                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct")
+                     "operating_margin_pct", "net_margin_pct", "ocf_margin_pct", "eps_growth_yoy_pct",
+                     "eps_growth_q_yoy_pct")
+SEC_NOT_MEANINGFUL = ("eps_growth_yoy_pct", "eps_growth_q_yoy_pct")
 SEC_PERIOD_SLACK_DAYS = 7  # 52/53-week fiscal quarters end on slightly different dates
-FUNDAMENTALS_VERSION = 10 # bump to invalidate cached rows when merge rules change
+FUNDAMENTALS_VERSION = 11  # bump to invalidate cached rows when merge rules change
 
 log = logging.getLogger("argus.market")
+
+# A symbol whose bars stop short of the last session (Yahoo withheld the latest bar, e.g. a NaN
+# close) is re-asked at most this often, not on every read.
+BEHIND_RETRY_S = 15 * 60
 
 PERIODS = {"1d": 1, "5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
@@ -105,6 +116,12 @@ def with_pe(metrics: dict, sources: dict, price: float | None) -> tuple[dict, di
     return metrics, sources
 
 
+def with_range(metrics: dict, sources: dict, rng: tuple[float, float]) -> tuple[dict, dict]:
+    """The 52-week low/high replaced by the range of split-adjusted daily bars (post_split_ranges)."""
+    return ({**metrics, "low_52w": rng[0], "high_52w": rng[1]},
+            {**sources, "low_52w": "history", "high_52w": "history"})
+
+
 def provider_ahead_of_sec(sec_latest: str | None, provider_periods: list[str]) -> bool:
     """Whether a provider's trailing figures run through a newer quarter than SEC's: an earnings release
     is out but its 10-Q isn't in SEC's XBRL yet. Without a provider period, SEC counts as behind only
@@ -121,6 +138,19 @@ def _aware(dt: datetime) -> datetime:
     """Aggregates (min/max) bypass the UTC column type and come back naive."""
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
+def session_close_from_quote(last_bar: date | None, quote: Quote | None, session: date) -> float | None:
+    """`session`'s close from a quote while the stored daily history still ends before it.
+
+    Yahoo can withhold the last completed session's daily bar for hours (a NaN close, B-128) while
+    quotes already carry that close as their regular price (`price`, never the extended one). Callers
+    use it for computations only and never store it, so the real bar replaces it once it arrives and a
+    later bar is never overwritten. None when there's a bar for `session` already, no history to extend,
+    or the quote belongs to another session (e.g. today's, mid-session)."""
+    if quote is None or not quote.price or last_bar is None or last_bar >= session:
+        return None
+    return quote.price if session_date(quote.as_of) == session else None
+
+
 class MarketService:
     def __init__(self, engine: Engine, settings: Settings, quote_providers: list, history_provider,
                  fundamentals_providers: list, sec=None, directory=None, profile_provider=None, figi=None):
@@ -133,6 +163,7 @@ class MarketService:
         self.directory = directory  # FinnhubProvider (symbol_directory) or None
         self.profile_provider = profile_provider  # YahooProvider (get_info) or None
         self.figi = figi  # OpenFigiProvider (ISIN/CUSIP -> ticker) or None
+        self._behind: dict[str, float] = {}  # symbol -> monotonic time bars last came back short of the last session
 
     # -- quotes ---------------------------------------------------------------
     def get_quotes(self, symbols: list[str], max_age_s: int | None = None) -> tuple[dict[str, Quote], dict[str, str]]:
@@ -305,7 +336,7 @@ class MarketService:
                 todo[sym] = start
             elif first > start + timedelta(days=5) and not (earliest and first <= earliest + timedelta(days=1)):
                 todo[sym] = start
-            elif last < last_session:
+            elif last < last_session and time.monotonic() - self._behind.get(sym, -BEHIND_RETRY_S) >= BEHIND_RETRY_S:
                 todo[sym] = last - timedelta(days=3)  # re-fetch a few bars to pick up late corrections
         if not todo:
             return
@@ -316,7 +347,23 @@ class MarketService:
                 fetched = dict(zip(todo, pool.map(lambda kv: self._fetch_history(kv[0], kv[1], None, "1d"),
                                                   todo.items())))
         for sym, bars in fetched.items():
-            self._store_bars(sym, "1d", bars)
+            if sym in cov and self._rebased(sym, bars):
+                # Yahoo re-based the history (a split): every cached bar is on the old basis, so the
+                # symbol's whole range is downloaded again and replaces them.
+                try:
+                    bars = self._fetch_history(sym, min(_aware(cov[sym][0]), todo[sym]), None, "1d")
+                except ArgusError as e:  # keep the old bars; retried after BEHIND_RETRY_S
+                    log.warning("re-based history %s: %s", sym, e)
+                    self._behind[sym] = time.monotonic()
+                    continue
+                log.info("%s: Yahoo re-based its history (split); replacing the cached daily bars", sym)
+                self._store_bars(sym, "1d", bars, replace=True)
+            else:
+                self._store_bars(sym, "1d", bars)
+            if not any(b.ts >= last_session and b.complete for b in bars):
+                self._behind[sym] = time.monotonic()
+            else:
+                self._behind.pop(sym, None)
             if bars and todo[sym] == start and bars[0].ts > start + timedelta(days=5):
                 with session_scope(self.engine) as s:
                     upsert(s, RefreshLog, key=f"bars-first:{sym}", at=bars[0].ts)
@@ -329,20 +376,71 @@ class MarketService:
         except ProviderError as e:
             raise ArgusError("PROVIDER_ERROR", str(e), hint="Yahoo may be rate limiting; retry shortly.") from e
 
-    def _store_bars(self, symbol: str, interval: str, bars: list[Bar]) -> None:
-        # A bar without a real close can't be stored (the column is NOT NULL, and SQLite turns NaN into
-        # NULL) and would fail the whole batch, so it's dropped; the next fetch can bring it back.
-        ok = lambda v: v is not None and math.isfinite(v)  # noqa: E731
-        bars = [b for b in bars if ok(b.c)]
-        if not bars:
-            return
-        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o if ok(b.o) else b.c, h=b.h if ok(b.h) else b.c,
-                     l=b.l if ok(b.l) else b.c, c=b.c, v=b.v if ok(b.v) else 0.0) for b in bars]
+    def _rebased(self, symbol: str, bars: list[Bar]) -> bool:
+        """True when fetched daily bars disagree with the cached closes for the same sessions by a
+        split-like factor: Yahoo has adjusted the history for a split the cache predates (B-140)."""
+        fresh = {b.ts.astimezone(NY).date(): b.c for b in bars if b.complete}
+        if not fresh:
+            return False
+        lo = min(b.ts for b in bars) - timedelta(days=1)
         with session_scope(self.engine) as s:
+            for ts, c in s.execute(select(PriceBar.ts, PriceBar.c).where(
+                    PriceBar.symbol == symbol, PriceBar.interval == "1d", PriceBar.ts >= lo)):
+                d = _aware(ts).astimezone(NY).date()
+                if d in fresh and rebased(c, fresh[d]):
+                    return True
+        return False
+
+    def _store_bars(self, symbol: str, interval: str, bars: list[Bar], replace: bool = False) -> None:
+        """Upsert bars and record the splits they carry. `replace` drops the symbol's cached bars
+        first (a re-based history) and expires its cached dividend history, whose per-share amounts
+        were on the old basis too."""
+        # An incomplete bar is skipped, never stored over a good one; the rest of the batch still lands.
+        rows = [dict(symbol=symbol, interval=interval, ts=b.ts, o=b.o, h=b.h, l=b.l, c=b.c, v=b.v)
+                for b in bars if b.complete]
+        if not rows:
+            return
+        splits = {b.ts.astimezone(NY).date(): b.split for b in bars if b.split and b.split > 0}
+        with session_scope(self.engine) as s:
+            if replace:
+                s.execute(delete(PriceBar).where(PriceBar.symbol == symbol, PriceBar.interval == interval))
+                expired = datetime(1970, 1, 1, tzinfo=UTC)
+                s.execute(update(DividendHistory).where(DividendHistory.symbol == symbol).values(as_of=expired))
+            for d, ratio in splits.items():
+                upsert(s, StockSplit, symbol=symbol, d=d, ratio=ratio)
             for i in range(0, len(rows), 500):
                 stmt = insert(PriceBar).values(rows[i:i + 500])
                 s.execute(stmt.on_conflict_do_update(index_elements=["symbol", "interval", "ts"], set_={
                     c: stmt.excluded[c] for c in ("o", "h", "l", "c", "v")}))
+
+    def splits(self, symbols: list[str]) -> dict[str, list[tuple[date, float]]]:
+        """Splits Yahoo has reported for these symbols (as recorded from downloaded history), oldest first."""
+        out: dict[str, list[tuple[date, float]]] = {}
+        with session_scope(self.engine) as s:
+            for sym, d, ratio in s.execute(select(StockSplit.symbol, StockSplit.d, StockSplit.ratio)
+                                           .where(StockSplit.symbol.in_(symbols)).order_by(StockSplit.d)):
+                out.setdefault(sym, []).append((d, ratio))
+        return out
+
+    def split_suspects(self, quotes: dict[str, Quote]) -> dict[str, tuple[date, float]]:
+        """Symbols whose quote's previous close disagrees with the stored close of that same session by a
+        split-like factor: a split Yahoo's history hasn't caught up with (its quotes adjust first).
+        Maps symbol -> (the quote's session, likely ratio). Reads the cache only."""
+        prev = {sym: session_before(session_date(q.as_of)) for sym, q in quotes.items() if q.prev_close}
+        if not prev:
+            return {}
+        lo = datetime.combine(min(prev.values()) - timedelta(days=3), datetime.min.time(), UTC)
+        stored: dict[str, dict[date, float]] = {}
+        with session_scope(self.engine) as s:
+            for sym, ts, c in s.execute(select(PriceBar.symbol, PriceBar.ts, PriceBar.c).where(
+                    PriceBar.symbol.in_(list(prev)), PriceBar.interval == "1d", PriceBar.ts >= lo)):
+                stored.setdefault(sym, {})[_aware(ts).astimezone(NY).date()] = c
+        out = {}
+        for sym, d in prev.items():
+            c, pc = stored.get(sym, {}).get(d), quotes[sym].prev_close
+            if c and rebased(c, pc):
+                out[sym] = (session_date(quotes[sym].as_of), clean_ratio(c / pc))
+        return out
 
     # -- fundamentals ---------------------------------------------------------
     def get_fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
@@ -361,6 +459,8 @@ class MarketService:
             else:
                 raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
         metrics, sources = with_pe(metrics, sources, self.last_prices([symbol]).get(symbol))
+        if rng := self.post_split_ranges([symbol]).get(symbol):
+            metrics, sources = with_range(metrics, sources, rng)
         wanted = fields or list(METRIC_FIELDS)
         return {
             "symbol": symbol,
@@ -375,9 +475,27 @@ class MarketService:
         worked out from the latest price (with_pe)."""
         out = self._cached_rows(symbols)
         prices = self.last_prices(list(out))
+        ranges = self.post_split_ranges(list(out))
         for sym, c in out.items():
             c["metrics"], c["sources"] = with_pe(c["metrics"], c["sources"], prices.get(sym))
+            if sym in ranges:
+                c["metrics"], c["sources"] = with_range(c["metrics"], c["sources"], ranges[sym])
         return out
+
+    def post_split_ranges(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
+        """52-week (low, high) from the cached daily bars for symbols that split within the last year:
+        providers keep serving pre-split extremes for a while (Yahoo still gave QUAL 54.75-228.13 after
+        its 4:1), while the cached bars are on the post-split basis once the history is re-based."""
+        since = datetime.now(UTC) - timedelta(days=365)
+        recent = [sym for sym, ev in self.splits(symbols).items() if any(d > since.date() for d, _ in ev)]
+        if not recent:
+            return {}
+        with session_scope(self.engine) as s:
+            rows = s.execute(select(PriceBar.symbol, func.min(PriceBar.ts), func.min(PriceBar.l), func.max(PriceBar.h))
+                             .where(PriceBar.symbol.in_(recent), PriceBar.interval == "1d", PriceBar.ts >= since)
+                             .group_by(PriceBar.symbol)).all()
+        # Only a full year of bars gives the 52-week range.
+        return {sym: (lo, hi) for sym, first, lo, hi in rows if _aware(first) <= since + timedelta(days=7)}
 
     def last_prices(self, symbols: list[str]) -> dict[str, float]:
         """The latest price Argus holds for each symbol, without calling a provider: the cached quote or
@@ -443,7 +561,7 @@ class MarketService:
         if self.sec is None or not self.settings.sec_user_agent:
             return {}
         try:
-            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 5 for the quarter's growth
+            fin = self.sec.get_financials(symbol, "quarterly", 8)  # 8 for TTM EPS growth
         except ProviderError as e:
             if "not found in EDGAR" in str(e) or "no XBRL" in str(e):
                 return {}  # ETFs, funds and foreign filers: the providers' figures stand
@@ -486,7 +604,7 @@ class MarketService:
             order = ["sec", *order] if "sec" in by_provider else order
             for n in order:
                 v = by_provider[n].get(field)
-                if v is not None:
+                if v is not None or (n == "sec" and field in SEC_NOT_MEANINGFUL and field in by_provider[n]):
                     metrics[field], sources[field] = v, n
                     break
         if metrics and by_provider.get("sec", {}).get("_sec"):

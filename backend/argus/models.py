@@ -11,6 +11,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
+    event,
     Boolean,
     Date,
     DateTime,
@@ -58,11 +59,15 @@ class TxnType(StrEnum):
     FEE = "FEE"  # cash amount in `amount`
 
 
+# Owned tables carry `account_id`: the account they belong to (argus.access; 0 = made before any
+# account existed). No foreign key, so 0 needs no account row.
 class Portfolio(Base):
     __tablename__ = "portfolio"
+    __table_args__ = (UniqueConstraint("account_id", "name", name="uq_portfolio_account_name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(80), unique=True)
+    account_id: Mapped[int] = mapped_column(default=0, server_default="0", index=True)
+    name: Mapped[str] = mapped_column(String(80))
     benchmark: Mapped[str] = mapped_column(String(16), default="SPY")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -104,12 +109,23 @@ class Transaction(Base):
     portfolio: Mapped[Portfolio] = relationship(back_populates="transactions")
 
 
+class PortfolioShare(Base):
+    """A portfolio its owner lets another account see, read-only."""
+
+    __tablename__ = "portfolio_share"
+
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolio.id"), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("account.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ts: Mapped[datetime] = mapped_column(default=utcnow)
     actor: Mapped[str] = mapped_column(String(16))
+    account_id: Mapped[int | None] = mapped_column()  # who made the change; None for background work
     action: Mapped[str] = mapped_column(String(40))
     entity: Mapped[str] = mapped_column(String(40))
     entity_id: Mapped[str | None] = mapped_column(String(40))
@@ -156,9 +172,11 @@ class Fundamental(Base):
 
 class Watchlist(Base):
     __tablename__ = "watchlist"
+    __table_args__ = (UniqueConstraint("account_id", "name", name="uq_watchlist_account_name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(80), unique=True)
+    account_id: Mapped[int] = mapped_column(default=0, server_default="0", index=True)
+    name: Mapped[str] = mapped_column(String(80))
 
 
 class WatchlistItem(Base):
@@ -188,6 +206,7 @@ class Alert(Base):
     __tablename__ = "alert"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(default=0, server_default="0", index=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
     kind: Mapped[str] = mapped_column(String(24))  # see argus.services.alerts.KINDS
     threshold: Mapped[float] = mapped_column(Float)
@@ -217,6 +236,7 @@ class Note(Base):
     __tablename__ = "note"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(default=0, server_default="0", index=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
     kind: Mapped[str] = mapped_column(String(12), default="note")  # thesis | note
     text: Mapped[str] = mapped_column(Text)
@@ -301,11 +321,22 @@ class DividendHistory(Base):
     data: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class StockSplit(Base):
+    """Splits Yahoo reports in the daily history Argus downloads (the "Stock Splits" column)."""
+
+    __tablename__ = "stock_split"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    d: Mapped[date] = mapped_column(Date, primary_key=True)
+    ratio: Mapped[float] = mapped_column(Float)  # new shares per old share
+
+
 class PeerList(Base):
     """Your own peer list for a symbol; without one, the suggested peers are shown."""
 
     __tablename__ = "peer_list"
 
+    account_id: Mapped[int] = mapped_column(primary_key=True, default=0, server_default="0")
     symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
     peers: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
@@ -316,6 +347,7 @@ class ValuationModel(Base):
 
     __tablename__ = "valuation_model"
 
+    account_id: Mapped[int] = mapped_column(primary_key=True, default=0, server_default="0")
     symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
@@ -333,9 +365,65 @@ class NavDaily(Base):
     income: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class Account(Base):
+    """Someone (or a bot) who signs in to the web UI, API or MCP. See argus.services.accounts."""
+
+    __tablename__ = "account"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(40), unique=True)  # lowercase
+    password_hash: Mapped[str | None] = mapped_column(String(200))  # None: API keys only
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class LoginSession(Base):
+    """A web sign-in. The cookie holds a random id; only its SHA-256 is stored."""
+
+    __tablename__ = "login_session"
+
+    id_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("account.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column()
+
+
+class ApiKey(Base):
+    """A bearer key for scripts, bots and MCP clients. Only its SHA-256 is stored; `prefix` identifies it."""
+
+    __tablename__ = "api_key"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("account.id"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column()
+    last_used_at: Mapped[datetime | None] = mapped_column()
+    revoked_at: Mapped[datetime | None] = mapped_column()
+
+
+@event.listens_for(AuditLog, "before_insert")
+def _audit_account(mapper, connection, target: AuditLog) -> None:
+    """Record which account made each change (none for background work or code outside any account)."""
+    from argus import access
+
+    if target.account_id is None:
+        try:
+            who = access.account_id(connection)
+        except RuntimeError:
+            return
+        target.account_id = None if who == access.SYSTEM else who
+
+
+OWNED = (Portfolio, Watchlist, Alert, Note, PeerList, ValuationModel)
+
 __all__ = [
+    "Account",
     "Alert",
     "AlertEvent",
+    "ApiKey",
     "AuditLog",
     "CompanyProfile",
     "DividendHistory",
@@ -346,12 +434,16 @@ __all__ = [
     "FundProfile",
     "Fundamental",
     "Instrument",
+    "LoginSession",
     "NavDaily",
+    "OWNED",
     "PeerList",
     "Portfolio",
+    "PortfolioShare",
     "PriceBar",
     "RefreshLog",
     "SecurityMap",
+    "StockSplit",
     "Target",
     "QuoteCache",
     "Transaction",

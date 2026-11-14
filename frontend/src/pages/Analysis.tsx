@@ -5,6 +5,7 @@ import { RiskCard } from "../components/RiskCard";
 import { ALL, ApiError, api, type Drift, type Exposure, type SimResult, type SimTrade } from "../api";
 import { BarList, topN } from "../components/BarList";
 import { money, tone } from "../format";
+import { useSharedBy } from "../portfolioAccess";
 
 function ExposureSection({ portfolio }: { portfolio: string }) {
   const [e, setE] = useState<Exposure | null>(null);
@@ -60,6 +61,7 @@ function ExposureSection({ portfolio }: { portfolio: string }) {
 }
 
 function DriftSection({ portfolio }: { portfolio: string }) {
+  const sharedBy = useSharedBy();
   const [level, setLevel] = useState<"symbol" | "sector">("sector");
   const [drift, setDrift] = useState<Drift | null>(null);
   const [edit, setEdit] = useState<Record<string, string>>({});
@@ -103,7 +105,7 @@ function DriftSection({ portfolio }: { portfolio: string }) {
                     <td>{r.key}</td>
                     <td>{r.weight_pct.toFixed(1)}%</td>
                     <td><input className="input" type="number" step="any" min="0" max="100" style={{ width: 80, minWidth: 0, textAlign: "right" }}
-                               value={edit[r.key] ?? ""} aria-label={`Target for ${r.key}`}
+                               value={edit[r.key] ?? ""} aria-label={`Target for ${r.key}`} disabled={!!sharedBy}
                                onChange={(e) => setEdit({ ...edit, [r.key]: e.target.value })} /></td>
                     <td className={r.outside_band ? tone(-(r.drift_pp ?? 0)) : "muted"}>
                       {r.drift_pp == null ? "–" : `${r.drift_pp > 0 ? "+" : r.drift_pp < 0 ? "−" : ""}${Math.abs(r.drift_pp).toFixed(1)} pp`}{r.outside_band ? " ⚑" : ""}
@@ -117,8 +119,10 @@ function DriftSection({ portfolio }: { portfolio: string }) {
           <div className="row" style={{ marginTop: 10 }}>
             <span className={`small ${Math.abs(sum - 100) > 0.5 && sum > 0 ? "down" : "text-2"}`}>Targets sum to {sum.toFixed(1)}%</span>
             <div className="spacer" />
-            <button className="btn" onClick={() => apply(true)}>Preview</button>
-            <button className="btn primary" onClick={() => apply(false)}>Save targets</button>
+            {sharedBy ? <span className="small muted">Read-only: shared by {sharedBy}</span> : <>
+              <button className="btn" onClick={() => apply(true)}>Preview</button>
+              <button className="btn primary" onClick={() => apply(false)}>Save targets</button>
+            </>}
           </div>
           {msg && <p className="small text-2">{msg} {drift.warnings.join(" ")}</p>}
         </>

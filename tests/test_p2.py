@@ -189,15 +189,18 @@ def test_todays_earnings_count_as_happened_once_reported_or_past_their_time(hour
     assert _event_happened({**e, "date": "2026-10-21", "epsActual": None}, now) is False
 
 
-def test_dividend_events_follow_ex_date_ownership_and_projection(make_argus):
+@pytest.mark.parametrize("day", [None, "2026-10-28", "2026-11-27", "2026-11-30", "2026-12-24", "2026-12-28",
+                                 "2026-12-31", "2027-01-30", "2027-02-26", "2027-02-28", "2027-03-01",
+                                 "2027-05-28", "2027-07-29"])
+def test_dividend_events_follow_ex_date_ownership_and_projection(make_argus, freeze_today, day):
     from argus.db import session_scope
-    from argus.market_calendar import NY, session_on_or_after
+    from argus.market_calendar import NY, session_before, session_on_or_after
     from argus.models import DividendHistory, Event
     from argus.services.dividends import add_months
 
+    if day:
+        freeze_today(date.fromisoformat(day))
     today = datetime.now(NY).date()
-    if (today + timedelta(days=10)).year != today.year:
-        pytest.skip("projections stop at the year end")
     a = make_argus([FakeQuotes("fake", {s: (100, 100) for s in ("JJJ", "MMM", "AAA", "SPY")})])
     ex, pay = today - timedelta(days=20), today + timedelta(days=3)
     a.portfolios.create_portfolio("late")
@@ -206,8 +209,16 @@ def test_dividend_events_follow_ex_date_ownership_and_projection(make_argus):
                                            TxnInput("BUY", "MMM", datetime.now(UTC) - timedelta(days=200), 10, 90),
                                            TxnInput("BUY", "AAA", datetime.now(UTC) - timedelta(days=200), 10, 90)])
     a.portfolios.add_transactions("early", [TxnInput("BUY", "JJJ", datetime.now(UTC) - timedelta(days=30), 5, 90)])
-    target = today + timedelta(days=3)  # MMM and AAA pay monthly; their next ex-date lands about here
-    monthly = [[add_months(target, -k).isoformat(), 0.25] for k in range(6, 0, -1)]
+    # MMM and AAA pay monthly; their next ex-date lands about here: on the same day of the month as
+    # their history when every month has that day, else (the 29th-31st) they're month-end payers
+    # going ex on each month's last trading day, and so is their next ex-date.
+    def usual(d: date) -> date:
+        return session_before(add_months(d.replace(day=1), 1)) if month_end else d
+
+    target = today + timedelta(days=3)
+    while (month_end := target.day > 28) and usual(target) <= today:  # a holiday 05-31 moves May's to today
+        target += timedelta(days=1)
+    monthly = [[usual(add_months(target, -k)).isoformat(), 0.25] for k in range(6, 0, -1)]
     a.events.refresh(["JJJ", "MMM", "AAA"])  # mark fresh so the rows below stay
     with session_scope(a.engine) as s:
         for sym, data in (("JJJ", [[add_months(ex, -3).isoformat(), 1.0], [ex.isoformat(), 1.0]]),
@@ -226,7 +237,7 @@ def test_dividend_events_follow_ex_date_ownership_and_projection(make_argus):
 
     # (2) + (3) MMM's projected ex-date (moved to a trading day) shows as an estimate, the same date as
     # the Dividends page; AAA's announced ex-date replaces its estimate
-    est = session_on_or_after(add_months(target, 0)).isoformat()
+    est = session_on_or_after(usual(target)).isoformat()
     div = {h["symbol"]: h for h in a.dividends("late")["holdings"]}
     assert div["MMM"]["next_ex_date_est"] == est
     rows = [(e["symbol"], e["date"], e.get("estimated", False), e["held"]) for e in b["dividends_upcoming"]]
@@ -274,3 +285,26 @@ def test_announced_ex_date_replaces_a_distant_estimate_and_projections_cross_the
            if e["symbol"] == "JJJ"]
     assert any(e["date"] > f"{today.year}-12-31" and e["estimated"] for e in jjj)
     assert div["JJJ"]["next_ex_date_est"] is not None
+
+
+@pytest.mark.parametrize("day", ["2026-11-06", "2026-12-05", "2026-12-19", "2026-12-28", "2027-01-05",
+                                 "2027-02-03"])
+def test_december_double_payer_on_the_dividends_page(make_argus, freeze_today, day):
+    # A Vanguard bond fund's two December payments both land in December, none in January (B-141)
+    from argus.db import session_scope
+    from argus.models import DividendHistory
+    from tests.test_dividends import _vanguard_bond_history
+
+    today = freeze_today(date.fromisoformat(day))
+    a = make_argus([FakeQuotes("fake", {s: (72, 72) for s in ("BND", "SPY")})])
+    a.portfolios.create_portfolio("inc")
+    a.portfolios.add_transactions("inc", [TxnInput("BUY", "BND", datetime.now(UTC) - timedelta(days=900), 100, 72)])
+    with session_scope(a.engine) as s:
+        s.add(DividendHistory(symbol="BND", as_of=datetime.now(UTC),
+                              data=[list(x) for x in _vanguard_bond_history(today - timedelta(days=2))]))
+    d = a.dividends("inc")
+    ev = [e["ex_date"] for e in d["holdings"][0]["events"]]
+    assert [x for x in ev if x[5:7] == "01"] == []
+    second = {2026: "2026-12-18", 2027: "2027-12-20"}[today.year]  # 12-18-2027 is a Saturday
+    assert [x for x in ev if x[5:7] == "12"] == [f"{today.year}-12-01", second]
+    assert d["by_month"][11]["projected"] + d["by_month"][11]["received"] == pytest.approx(2 * 24.0)

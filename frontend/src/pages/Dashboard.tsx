@@ -7,6 +7,7 @@ import { HoldingsTable } from "../components/HoldingsTable";
 import { HoldingsTabs } from "../components/HoldingsTabs";
 import { PortfolioHeatmap } from "../components/PortfolioHeatmap";
 import { extLabel, money, pct, tone } from "../format";
+import { useSharedBy } from "../portfolioAccess";
 
 // The chart library is the biggest dependency: let the numbers render first.
 const PerformanceCard = lazy(() => import("../components/PerformanceCard").then((m) => ({ default: m.PerformanceCard })));
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function Dashboard({ portfolio, live }: Props) {
+  const sharedBy = useSharedBy();
   const [initial, setInitial] = useState<Summary | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -49,7 +51,11 @@ export function Dashboard({ portfolio, live }: Props) {
   return (
     <div className="stack">
       <section className="card">
-        <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <div className="hero-label">{summary.portfolio.name === ALL ? "All portfolios" : summary.portfolio.name} · total value</div>
+          {sharedBy ? <span className="tag" title="You can view it; only its owner can change it">Shared by {sharedBy} · read-only</span>
+            : summary.portfolio.name !== ALL && <Link className="btn ghost small" to="/account#sharing">Share</Link>}
+        </div>
         <div className="hero-value">{money(t.market_value)}</div>
         <div className={`hero-delta ${tone(t.day_pnl)}`}>
           {money(t.day_pnl, { signed: true })} ({pct(t.day_pnl_pct)}) {["closed", "pre"].includes(summary.market.session) ? "last session" : "today"}
@@ -102,6 +108,21 @@ export function Dashboard({ portfolio, live }: Props) {
 
       {summary.quote_errors && Object.keys(summary.quote_errors).length > 0 && (
         <div className="error">No quote for {Object.keys(summary.quote_errors).join(", ")}; their value is missing from totals.</div>
+      )}
+
+      {/* The pushed summary skips this check; the fetched one has it (B-140). */}
+      {initial?.split_warnings && initial.split_warnings.length > 0 && (
+        <div className="warn-box split-warn" role="status">
+          <strong>Unrecorded stock split</strong>
+          <ul>
+            {initial.split_warnings.map((w) => (
+              <li key={`${w.portfolio}-${w.symbol}-${w.date}`}>
+                {w.message}{" "}
+                {w.source === "yahoo" && <>Record it on <Link to="/transactions">Transactions</Link>: Split {w.symbol}, ratio {w.ratio}, dated <span className="nowrap">{w.date}</span>{initial.portfolio.name === ALL ? ` in ${w.portfolio}` : ""} ({w.qty_before} → {w.qty_after} shares), or <code>{w.record}</code>.</>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* Refetch once per session day (and when the session changes), not on every tick. */}

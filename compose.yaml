@@ -7,7 +7,7 @@ services:
       ARGUS_DATA_DIR: /data
       # The container must listen on 0.0.0.0 for the port mapping; the mapping below publishes it on
       # the host's loopback only, so the guard against token-less public listening can be relaxed.
-      # If you publish it more widely, remove this line and set ARGUS_TOKEN.
+      # If you publish it more widely, remove this line and turn on sign-in (`argus user add`, or ARGUS_TOKEN).
       ARGUS_INSECURE_BIND: "1"
     ports:
       - "127.0.0.1:8787:8787"

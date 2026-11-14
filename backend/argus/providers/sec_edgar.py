@@ -345,18 +345,41 @@ def ttm_free_cash_flow(financials: dict) -> tuple[float, str] | None:
 
 def _last_four_quarters(financials: dict) -> list[dict] | None:
     """The four newest quarters of build_financials' quarterly output, if back to back."""
-    last4 = financials.get("periods", [])[:4]
-    if len(last4) < 4:
+    return _newest_quarters(financials, 4)
+
+
+def _newest_quarters(financials: dict, n: int) -> list[dict] | None:
+    """The n newest quarters of build_financials' quarterly output, if back to back."""
+    last = financials.get("periods", [])[:n]
+    if len(last) < n:
         return None
-    ends = [date.fromisoformat(p["period_end"]) for p in last4]
-    return last4 if all(_is_quarter((a - b).days) for a, b in pairwise(ends)) else None
+    ends = [date.fromisoformat(p["period_end"]) for p in last]
+    return last if all(_is_quarter((a - b).days) for a, b in pairwise(ends)) else None
 
 
-def ttm_figures(financials: dict) -> dict[str, float]:
+# EPS growth beyond this (either way) means the base was close to zero: 0.02 -> 2.43 is "+12,050%",
+# which says nothing a reader can use. Such growth, and growth from a loss (base <= 0), is not meaningful.
+EPS_GROWTH_MAX_PCT = 1000.0
+
+
+def eps_growth_pct(current: float, base: float) -> float | None:
+    """Growth from base to current EPS, or None when it isn't meaningful: a zero or negative base
+    (a loss turning into a profit, or a smaller loss) or a base near zero (|growth| > EPS_GROWTH_MAX_PCT)."""
+    if base <= 0:
+        return None
+    g = (current / base - 1) * 100
+    return g if abs(g) <= EPS_GROWTH_MAX_PCT else None
+
+
+def ttm_figures(financials: dict) -> dict[str, float | None]:
     """Trailing figures over the same four newest quarters as ttm_free_cash_flow, so they agree with
     each other and with the quarterly statements: revenue_ttm, eps_ttm (the quarters' diluted EPS
     summed), gross/operating/net margin and fcf_margin_pct (the quarters' sums ÷ their revenue) and
-    revenue_growth_q_yoy_pct (the newest quarter vs the one ending a year earlier). Without capex in
+    revenue_growth_q_yoy_pct (the newest quarter vs the one ending a year earlier), and from the same
+    diluted EPS eps_growth_yoy_pct (TTM vs the four quarters before) and eps_growth_q_yoy_pct (the
+    newest quarter vs a year earlier). An EPS growth SEC can work out but that isn't meaningful (a loss
+    or near-zero base, see eps_growth_pct) is present as None, so no provider's figure stands in for it.
+    Without capex in
     every quarter there's no FCF margin; ocf_margin_pct (operating cash flow ÷ revenue) stands in, so
     nothing divides another source's FCF by SEC revenue. A figure is left out when a quarter lacks it
     or it isn't in US dollars (it sits beside prices)."""
@@ -380,6 +403,16 @@ def ttm_figures(financials: dict) -> dict[str, float]:
         prior = next((p for p in periods[1:] if _is_year((newest - date.fromisoformat(p["period_end"])).days)), None)
         if prior and prior.get("revenue", 0) > 0:
             out["revenue_growth_q_yoy_pct"] = (periods[0]["revenue"] / prior["revenue"] - 1) * 100
+    if units.get("eps_diluted") == "USD/shares":
+        last8 = _newest_quarters(financials, 8)
+        if last8 and all(p.get("eps_diluted") is not None for p in last8):
+            out["eps_growth_yoy_pct"] = eps_growth_pct(sum(p["eps_diluted"] for p in last8[:4]),
+                                                       sum(p["eps_diluted"] for p in last8[4:]))
+        if periods and periods[0].get("eps_diluted") is not None:
+            newest = date.fromisoformat(periods[0]["period_end"])
+            prior = next((p for p in periods[1:] if _is_year((newest - date.fromisoformat(p["period_end"])).days)), None)
+            if prior and prior.get("eps_diluted") is not None:
+                out["eps_growth_q_yoy_pct"] = eps_growth_pct(periods[0]["eps_diluted"], prior["eps_diluted"])
     return out
 
 

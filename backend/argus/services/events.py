@@ -23,6 +23,8 @@ LOOKBACK_DAYS = 100  # a full quarter back, so the last report is always known
 HORIZON_DAYS = 100
 REFRESH_KEY = "events100"  # RefreshLog prefix; renamed when the window changes so stored events refetch
 NEWS_TTL = timedelta(hours=1)
+CALENDAR_KINDS = ("earnings", "ex_dividend", "dividend_pay")  # what `refresh` stores
+REPORTS = ("earnings", "eps_report")  # kinds whose past rows are reports that happened
 
 
 def _to_date(v) -> date | None:
@@ -36,6 +38,26 @@ def _to_date(v) -> date | None:
         return date.fromisoformat(str(v)[:10])
     except ValueError:
         return None
+
+
+def _store(s, sym: str, rows: list[Event], today: date, actual: str, stored) -> None:
+    """Replace the `stored` rows (a select of Event) with a provider's answer. Dates the answer no
+    longer lists are dropped (a moved or cancelled report or dividend), except a past earnings report
+    with its actual: providers' answers for past weeks come and go, and a report that happened stays
+    happened. A row the answer still lists keeps the stored figures it now leaves out."""
+    got = {(r.kind, r.d): r for r in rows}
+    reported = [r.d for r in rows if r.kind in REPORTS and (r.data or {}).get(actual) is not None]
+    for old in s.scalars(stored):
+        new = got.get((old.kind, old.d))
+        if new is not None:
+            new.data = {**(old.data or {}), **{k: v for k, v in (new.data or {}).items() if v is not None}}
+            new.hour = new.hour or old.hour
+        elif not (old.kind in REPORTS and old.d <= today and (old.data or {}).get(actual) is not None) \
+                or any(abs((d - old.d).days) <= 3 for d in reported):  # the same report, re-dated
+            s.delete(old)
+    s.flush()
+    for r in rows:
+        s.merge(r)
 
 
 class EventsService:
@@ -69,10 +91,10 @@ class EventsService:
                 failed[sym] = str(e)
                 continue
             with session_scope(self.engine) as s:
-                # Replace this symbol's window so moved/cancelled dates don't linger.
-                s.execute(delete(Event).where(Event.symbol == sym, Event.d >= start, Event.d <= end))
-                for r in rows:
-                    s.merge(r)
+                # Only the kinds this calendar fills: Yahoo's report dates and Finnhub's EPS history
+                # share the table, and wiping them here lost last quarter's report on every refresh.
+                _store(s, sym, rows, today, "epsActual", select(Event).where(
+                    Event.symbol == sym, Event.kind.in_(CALENDAR_KINDS), Event.d >= start, Event.d <= end))
                 s.merge(RefreshLog(key=f"{REFRESH_KEY}:{sym}", at=datetime.now(UTC)))
         return {"refreshed": [x for x in todo if x not in failed], "failed": failed}
 
@@ -167,14 +189,13 @@ class EventsService:
                 rows = None
             if rows is not None:
                 from argus.services.earnings import timing
+                events = [Event(symbol=symbol, kind="eps_report", d=r["at"].astimezone(NY).date(),
+                                hour=timing(r["at"], None), source="yahoo",
+                                data={"eps_estimate": r.get("eps_estimate"), "eps_actual": r.get("eps_actual"),
+                                      "surprise_pct": r.get("surprise_pct")}) for r in rows]
                 with session_scope(self.engine) as s:
-                    s.execute(delete(Event).where(Event.symbol == symbol, Event.kind == "eps_report"))
-                    for r in rows:
-                        at = r["at"]
-                        s.merge(Event(symbol=symbol, kind="eps_report", d=at.astimezone(NY).date(),
-                                      hour=timing(at, None), source="yahoo",
-                                      data={"eps_estimate": r.get("eps_estimate"), "eps_actual": r.get("eps_actual"),
-                                            "surprise_pct": r.get("surprise_pct")}))
+                    _store(s, symbol, events, now.astimezone(NY).date(), "eps_actual",
+                           select(Event).where(Event.symbol == symbol, Event.kind == "eps_report"))
                     s.merge(RefreshLog(key=key, at=now))
         with session_scope(self.engine) as s:
             return [{"date": e.d.isoformat(), "hour": e.hour, **(e.data or {})}

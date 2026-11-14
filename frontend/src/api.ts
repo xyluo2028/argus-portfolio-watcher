@@ -101,9 +101,20 @@ export interface Summary {
   };
   positions: Position[];
   quote_errors?: Record<string, string>;
+  split_warnings?: SplitWarning[];
 }
 
-export interface PortfolioRef { id: number; name: string; benchmark: string }
+/** A held symbol's split that no SPLIT transaction records (from Yahoo, or a quote's previous close). */
+export interface SplitWarning {
+  symbol: string; portfolio: string; date: string; ratio: number; label: string; source: "yahoo" | "quote";
+  qty_before: number; qty_after: number; message: string; record: string; hint: string;
+}
+
+export interface PortfolioRef {
+  id: number; name: string; benchmark: string;
+  shared_with?: string[];  // your portfolio: the accounts it's shared with
+  shared?: boolean; owner?: string;  // shared with you by `owner`, read-only
+}
 
 export interface HistoryResponse {
   symbol: string;
@@ -127,6 +138,8 @@ export interface Fundamentals {
   sources: Record<string, string>;
   /** Coverage of the SEC-based figures; null when SEC has nothing for the symbol. */
   sec?: SecCoverage | null;
+  /** Parts that failed while the rest still loaded, e.g. price_history (returns, CAGR left null). */
+  errors?: Record<string, string>;
 }
 
 /** How current SEC's XBRL data is: `stale` once its latest period is older than a newer report should be. */
@@ -212,7 +225,27 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired when the server wants a token (ARGUS_TOKEN set and the cookie missing or stale). */
+export type SignInMethod = "password" | "token";
+
+export interface AuthStatus {
+  required: boolean;
+  authenticated: boolean;
+  // How you can sign in: "password" once an account exists, "token" when ARGUS_TOKEN is set.
+  methods: SignInMethod[];
+  account: { id: number; username: string } | null;
+  setup?: boolean;  // no account yet: the first one can be made from the UI (with the token, when one is set)
+  signup?: boolean;  // the sign-in page offers Create account (every account is the same kind)
+}
+
+export interface AccountInfo { id: number; username: string; has_password: boolean; disabled: boolean; created_at: string; keys?: number }
+export interface ApiKeyInfo {
+  id: number; account_id: number; username?: string; name: string; prefix: string; created_at: string;
+  expires_at: string | null; last_used_at: string | null; revoked_at: string | null; active: boolean;
+}
+/** A key just made: `key` is shown this once. */
+export interface NewApiKey extends ApiKeyInfo { key: string }
+
+/** Fired when the server wants a sign-in (an account exists or ARGUS_TOKEN is set, and the cookie is missing or stale). */
 export const UNAUTHORIZED_EVENT = "argus:unauthorized";
 
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
@@ -221,7 +254,10 @@ async function get<T>(path: string, init?: RequestInit): Promise<T> {
   if (r.status === 401 && !path.startsWith("/api/auth/")) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!r.ok) {
     const e = body?.error ?? {};
-    throw new ApiError(e.code ?? `HTTP_${r.status}`, e.message ?? r.statusText, e.hint);
+    // A crash outside Argus's own errors has no JSON body: say so in words, not "Internal Server Error".
+    throw new ApiError(e.code ?? `HTTP_${r.status}`, e.message ?? (r.status >= 500
+      ? `Argus hit an unexpected error loading this (HTTP ${r.status}).` : `Request failed (HTTP ${r.status}).`),
+      e.hint ?? (r.status >= 500 ? "Try again in a moment; details are in the server log." : undefined));
   }
   return body as T;
 }
@@ -272,7 +308,7 @@ export interface ImportReport {
 }
 
 export interface RestoreReport {
-  created_at: string | null; dry_run: boolean; replace: boolean;
+  created_at: string | null; account?: string | null; dry_run: boolean; replace: boolean;
   will_remove: Record<string, number>; counts: Record<string, number>; backup?: string;
 }
 
@@ -292,6 +328,8 @@ export interface TxnResult {
   portfolio: string; dry_run: boolean; to_insert: number; skipped_existing: string[]; inserted_ids: number[];
   positions: { before: PositionPreview; after: PositionPreview }[];
 }
+
+export interface WatchlistSummary { name: string; count: number }
 
 export interface WatchItem {
   symbol: string; note: string | null; added_at: string; quote: Quote | null; metrics: Record<string, number | null> | null;
@@ -401,6 +439,10 @@ export interface RiskReport {
   as_of: string; lookback_days: number; benchmark: string; total_value: number;
   beta: number; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
   var: Record<"95" | "99", { var_pct: number; cvar_pct: number; var_value: number; cvar_value: number }>;
+  // session_holdings: the book's Day P&L (shares held through that session); current_holdings: today's
+  // holdings over it, when quotes of that session aren't available for every position.
+  last_day: { date: string; return_pct: number | null; value: number; basis: "session_holdings" | "current_holdings"; exceeds_var_99: boolean };
+  closes_from_quotes: { date: string; symbols: string[] } | null;
   positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; vol_pct: number; history_days: number; proxied: boolean }[];
   correlation: { symbols: string[]; matrix: (number | null)[][] };
   scenarios: { key: string; label: string; start: string | null; end: string | null; spy_pct: number; portfolio_pct: number; value: number; proxied: string[] }[];
@@ -477,6 +519,10 @@ export interface ScreenResult { status: ScreenerStatus; matches: number; rows: S
 
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),
+  sharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("PUT", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
+  unsharePortfolio: (ref: string, username: string) =>
+    send<{ portfolio: string; shared_with: string[] }>("DELETE", `/api/portfolios/${enc(ref)}/shares/${enc(username)}`),
   portfolio: (name: string, lots = false) => get<Summary>(`/api/portfolios/${enc(name)}${lots ? "?lots=true" : ""}`),
   fundamentalSeries: (symbol: string, period: string) =>
     get<FundamentalSeries>(`/api/fundamental-series/${enc(symbol)}?period=${period}`),
@@ -500,12 +546,22 @@ export const api = {
   },
   importInvesting: (body: { filename: string; content: string; portfolio?: string; opening_through?: string; dry_run: boolean }) =>
     send<ImportReport>("POST", "/api/import/investing", body),
-  authStatus: () => get<{ required: boolean; authenticated: boolean }>("/api/auth/status"),
-  login: (token: string) => send<{ ok: boolean }>("POST", "/api/auth/login", { token }),
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  login: (creds: { username: string; password: string } | { token: string }) =>
+    send<{ ok: boolean }>("POST", "/api/auth/login", creds),
   logout: () => send<{ ok: boolean }>("POST", "/api/auth/logout"),
   snapshotUrl: "/api/snapshot",
   restoreSnapshot: (doc: unknown, replace: boolean, dryRun: boolean) =>
     send<RestoreReport>("POST", `/api/snapshot/restore?replace=${replace}&dry_run=${dryRun}`, doc),
+  setup: (body: { username: string; password: string; token?: string }) =>
+    send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/setup", body),
+  signup: (username: string, password: string) =>
+    send<{ ok: boolean; account: { id: number; username: string } }>("POST", "/api/auth/signup", { username, password }),
+  account: () => get<{ account: AccountInfo; via: string; keys: ApiKeyInfo[] }>("/api/account"),
+  changePassword: (current_password: string, new_password: string) =>
+    send<AccountInfo>("PUT", "/api/account/password", { current_password, new_password }),
+  createKey: (name: string, expires_days?: number) => send<NewApiKey>("POST", "/api/account/keys", { name, expires_days }),
+  revokeKey: (id: number) => send<ApiKeyInfo>("DELETE", `/api/account/keys/${id}`),
   editTransaction: (id: number, edit: TxnEdit) => send<TxnEditResult>("PATCH", `/api/transactions/${id}`, edit),
   addTransaction: (name: string, draft: TxnDraft) =>
     send<TxnResult>("POST", `/api/portfolios/${enc(name)}/transactions`, draft),
@@ -514,6 +570,7 @@ export const api = {
       (confirm != null ? `&confirm=${enc(confirm)}` : "")),
   deleteTransaction: (id: number, dryRun: boolean) =>
     send<{ deleted: Txn; dry_run: boolean }>("DELETE", `/api/transactions/${id}?dry_run=${dryRun}`),
+  watchlists: () => get<WatchlistSummary[]>("/api/watchlists"),
   watchlist: (name = "Watchlist") => get<{ watchlist: string; items: WatchItem[]; errors: Record<string, string> }>(`/api/watchlists/${enc(name)}`),
   watchAdd: (symbols: string[], note?: string, name = "Watchlist") =>
     send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),

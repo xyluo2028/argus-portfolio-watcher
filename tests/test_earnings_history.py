@@ -102,3 +102,107 @@ def test_finnhub_results_pair_with_the_nearest_report_even_when_mislabeled():
     out = build(["2026-07-26", "2026-04-26"], yahoo, [], results, {}, date(2026, 10, 1))
     assert [(r["period_end"], r["eps_estimate"], r["eps_basis"]) for r in out["reports"]] == \
         [("2026-07-26", 2.14, "adjusted"), ("2026-04-26", 1.79, "adjusted")]
+
+
+class _Calendar:
+    """Finnhub's earnings calendar, answering whatever `rows` holds at the time."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def earnings_calendar(self, symbol, start, end):
+        return list(self.rows)
+
+
+def _earnings_rows(ev, sym="AAA"):
+    return [(r["date"], r.get("epsEstimate"), r.get("epsActual"))
+            for r in ev.between([sym], date(2000, 1, 1), date(2027, 12, 31), ["earnings"])]
+
+
+def test_events_refresh_keeps_past_reports_and_drops_moved_dates(make_argus):
+    from argus.services.events import EventsService
+    a = make_argus()
+    today = date(2026, 11, 2)
+    q2 = {"date": "2026-08-05", "hour": "amc", "epsEstimate": 0.0612, "epsActual": 0.11, "quarter": 2, "year": 2026}
+    q3 = {"date": "2026-11-09", "hour": "", "epsEstimate": 0.09, "quarter": 3, "year": 2026}
+    fh = _Calendar([q2, q3])
+    ev = EventsService(a.engine, fh, None)
+    ev.refresh(["AAA"], force=True, today=today)
+    assert _earnings_rows(ev) == [("2026-08-05", 0.0612, 0.11), ("2026-11-09", 0.09, None)]
+
+    # (a) the calendar's next answer leaves the past report out: it stays.
+    fh.rows = [q3]
+    ev.refresh(["AAA"], force=True, today=today)
+    assert _earnings_rows(ev) == [("2026-08-05", 0.0612, 0.11), ("2026-11-09", 0.09, None)]
+
+    # (b) a newer actual updates the stored report; an answer missing the estimate doesn't erase it.
+    fh.rows = [q2 | {"epsActual": 0.12, "epsEstimate": None}, q3]
+    ev.refresh(["AAA"], force=True, today=today)
+    assert _earnings_rows(ev)[0] == ("2026-08-05", 0.0612, 0.12)
+
+    # (c) the upcoming report moves: no stale duplicate is left behind.
+    fh.rows = [q3 | {"date": "2026-11-12"}]
+    ev.refresh(["AAA"], force=True, today=today)
+    assert _earnings_rows(ev) == [("2026-08-05", 0.0612, 0.12), ("2026-11-12", 0.09, None)]
+    assert ev.next_earnings(["AAA"], today) == {"AAA": date(2026, 11, 12)}
+
+    # Yahoo's report dates and Finnhub's EPS history share the table; the calendar refresh leaves them be.
+    from argus.db import session_scope
+    from argus.models import Event
+    with session_scope(a.engine) as s:
+        s.add(Event(symbol="AAA", kind="eps_report", d=date(2026, 8, 5), hour="amc", source="yahoo",
+                    data={"eps_estimate": 0.08, "eps_actual": 0.1}))
+        s.add(Event(symbol="AAA", kind="eps_result", d=date(2026, 9, 30), source="finnhub",
+                    data={"epsActual": 0.11, "epsEstimate": 0.0612}))
+    fh.rows = [q3 | {"date": "2026-11-12"}]
+    ev.refresh(["AAA"], force=True, today=today)
+    assert [r["kind"] for r in ev.between(["AAA"], date(2026, 8, 1), date(2026, 10, 1))] == \
+        ["earnings", "eps_report", "eps_result"]
+
+    # A past date without an actual was only a placeholder; the same report re-dated replaces the old row.
+    fh.rows = [q2 | {"date": "2026-08-04", "epsActual": 0.12}, q3 | {"date": "2026-11-12"}]
+    ev.refresh(["AAA"], force=True, today=today)
+    assert _earnings_rows(ev) == [("2026-08-04", 0.0612, 0.12), ("2026-11-12", 0.09, None)]
+
+
+def test_yahoo_report_dates_keep_past_reports_it_leaves_out(make_argus):
+    from argus.db import session_scope
+    from argus.models import RefreshLog
+    from argus.services.events import EventsService
+
+    class Yahoo:
+        def __init__(self):
+            self.rows = [{"at": datetime(2026, 8, 5, 16, tzinfo=NY), "eps_estimate": 0.08, "eps_actual": 0.1},
+                         {"at": datetime(2026, 3, 24, 16, tzinfo=NY), "eps_estimate": 0.03, "eps_actual": 0.02},
+                         {"at": datetime(2027, 3, 1, 16, tzinfo=NY), "eps_estimate": 0.2, "eps_actual": None}]
+
+        def get_earnings_dates(self, symbol, limit=24):
+            return list(self.rows)
+
+    a = make_argus()
+    y = Yahoo()
+    ev = EventsService(a.engine, None, y)
+    assert [r["date"] for r in ev.report_history("AAA")] == ["2026-03-24", "2026-08-05", "2027-03-01"]
+    y.rows = [y.rows[1], {"at": datetime(2027, 3, 3, 16, tzinfo=NY), "eps_estimate": 0.2, "eps_actual": None}]
+    with session_scope(a.engine) as s:
+        s.delete(s.get(RefreshLog, "epsdates:AAA"))
+    assert [(r["date"], r["eps_actual"]) for r in ev.report_history("AAA")] == \
+        [("2026-03-24", 0.02), ("2026-08-05", 0.1), ("2027-03-03", None)]
+
+
+def test_a_report_out_before_its_10q_is_listed():
+    # ABBV-style: Q3 reported Oct 30, SEC's newest quarter is still Jun 30. XOM-style holes in the
+    # filed quarters are filled when a report covers them.
+    calendar = [{"date": "2026-10-30", "hour": "bmo", "epsEstimate": 3.823, "epsActual": 3.82},
+                {"date": "2027-02-02", "hour": "amc", "epsEstimate": 3.96}]
+    yahoo = [{"date": "2026-01-30", "hour": "bmo", "eps_estimate": 1.69, "eps_actual": 1.71},
+             {"date": "2026-05-01", "hour": "bmo", "eps_estimate": 1.01, "eps_actual": 2.09},
+             {"date": "2026-07-31", "hour": "bmo", "eps_estimate": 3.61, "eps_actual": 3.65}]
+    out = build(["2026-06-30", "2025-12-31"], yahoo, calendar, [], {}, date(2026, 11, 2))
+    assert [(r["period_end"], r["report_date"], r["eps_actual"]) for r in out["reports"]] == [
+        ("2026-09-30", "2026-10-30", 3.82), ("2026-06-30", "2026-07-31", 3.65),
+        ("2026-03-31", "2026-05-01", 2.09), ("2025-12-31", "2026-01-30", 1.71)]
+    assert out["next"]["date"] == "2027-02-02"
+    # Before the report is out, no quarter is made up.
+    out = build(["2026-06-30"], yahoo, calendar[1:], [], {}, date(2026, 11, 2))
+    assert [r["period_end"] for r in out["reports"]] == ["2026-06-30"]

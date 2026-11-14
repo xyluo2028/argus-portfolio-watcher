@@ -74,3 +74,154 @@ def test_factor_regression_recovers_loadings():
 def test_french_csv_parsing():
     text = "This file was created...\n\n,Mkt-RF,SMB,HML,RMW,CMA,RF\n20260828,  0.50, -0.10,  0.20, 0.00, 0.10, 0.01\n\nCopyright 2026\n"
     assert parse_csv(text) == {"2026-08-28": {"Mkt-RF": 0.005, "SMB": -0.001, "HML": 0.002, "RMW": 0.0, "CMA": 0.001, "RF": 0.0001}}
+
+# -- B-146: one holding (np.cov returns a scalar) and none -----------------------------------------
+
+def test_single_holding_carries_all_the_risk():
+    days, rm = _walk(1, 400, start=date(2025, 1, 1))
+    _, ra = _walk(2, 400, beta_to=rm, beta=2.0)
+    out = risk.analyze({"A": 100.0}, {"SPY": _closes(days, rm), "A": _closes(days, ra)})
+    assert out["available"]
+    [pos] = out["positions"]
+    assert pos["symbol"] == "A" and pos["weight_pct"] == pytest.approx(100) and pos["risk_pct"] == pytest.approx(100)
+    assert out["beta"] == pytest.approx(pos["beta"]) and pos["beta"] == pytest.approx(2.0, abs=0.15)
+    assert out["volatility_pct"] == pytest.approx(pos["vol_pct"]) and pos["vol_pct"] > 0
+    assert out["var"]["99"]["var_pct"] > out["var"]["95"]["var_pct"] > 0
+    assert out["correlation"] == {"symbols": ["A"], "matrix": [[1.0]]}
+
+
+def test_no_holdings_is_a_clear_empty_result():
+    days, rm = _walk(1, 400, start=date(2025, 1, 1))
+    for values in ({}, {"A": 0.0}):
+        out = risk.analyze(values, {"SPY": _closes(days, rm)})
+        assert out == {"available": False, "reason": "No holdings with a market value to analyze."}
+
+
+def test_risk_endpoint_with_one_holding_and_with_none(make_argus, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from argus.api.server import create_app
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X"))}
+    at_close = datetime.combine(days[-1], time(16, 5), NY)
+    quotes = {s: Quote(s, c[days[-1]], c[days[-2]], c[days[-2]], c[days[-1]], c[days[-2]], at_close, "fake")
+              for s, c in closes.items()}
+    a = _risk_argus(make_argus, monkeypatch, closes, days[-1], quotes, held=("X",))
+    a.portfolios.create_portfolio("empty")
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        r = c.get("/api/portfolios/p/risk")
+        assert r.status_code == 200 and r.json()["available"], r.json()
+        assert [(p["symbol"], round(p["risk_pct"], 6)) for p in r.json()["positions"]] == [("X", 100.0)]
+        r = c.get("/api/portfolios/empty/risk")
+        assert r.status_code == 200 and not r.json()["available"] and "No holdings" in r.json()["reason"]
+
+
+# -- B-142: the last session's close from quotes while Yahoo lags its daily bar --------------------
+
+def _risk_argus(make_argus, monkeypatch, closes, last, quotes, held=("X", "Y")):
+    from datetime import datetime, time
+
+    import argus.app as app_mod
+    from argus.providers.base import ProviderError
+    from argus.market_calendar import NY
+    from argus.services.portfolio import TxnInput
+
+    class Provider:
+        name = "fake"
+
+        def get_quotes(self, symbols):
+            return {s: q for s, q in quotes.items() if s in symbols}
+
+    a = make_argus([Provider()])
+    a.portfolios.create_portfolio("p")
+    t0 = datetime.combine(min(closes["X"]), time(16), NY)
+    a.portfolios.add_transactions("p", [TxnInput("BUY", s, t0, 10, 100) for s in held])
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": last.isoformat(), "session": "closed",
+                                                              "is_trading_day": False})
+    monkeypatch.setattr(a.market, "daily_closes_many", lambda syms, start: {s: dict(closes.get(s, {})) for s in syms})
+    monkeypatch.setattr(a.factors, "daily", lambda: (_ for _ in ()).throw(ProviderError("offline")))
+    return a
+
+
+def test_risk_values_the_last_session_from_quotes_until_its_bar_arrives(make_argus, monkeypatch):
+    """Yahoo's bars end a session before the quotes': risk takes that session's close from the quotes,
+    as performance does, says so, and flags a latest-day loss beyond the 99% VaR; once the real bar is
+    stored it wins, and the filled close is never stored."""
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    walks = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X", "Y"))}
+    last, hist = days[-1], days[:-1]
+    stored = {s: {d: c[d] for d in hist} for s, c in walks.items()}
+    prev = {s: c[hist[-1]] for s, c in stored.items()}
+    at_close = datetime.combine(last, time(16, 5), NY)
+    quotes = {s: Quote(s, prev[s] * k, prev[s], prev[s], prev[s] * k, prev[s], at_close, "fake")
+              for s, k in (("X", 0.9), ("Y", 0.9), ("SPY", 0.95))}
+
+    a = _risk_argus(make_argus, monkeypatch, stored, last, quotes)
+    r = a.risk("p")
+    assert r["as_of"] == last.isoformat()
+    assert r["closes_from_quotes"] == {"date": last.isoformat(), "symbols": ["SPY", "X", "Y"]}
+    ld = r["last_day"]
+    assert ld["date"] == last.isoformat() and ld["return_pct"] == pytest.approx(-10.0)
+    # In dollars of the value before the fall: today's value is 90% of it.
+    assert ld["value"] == pytest.approx(-r["total_value"] / 9) and ld["exceeds_var_99"]
+    assert all(last not in c for c in stored.values())  # computed from, never stored
+
+    # The real bar arrives (a smaller fall than the quote said): it's what risk's history uses.
+    for s, c in stored.items():
+        c[last] = prev[s] * 0.99
+    r = a.risk("p")
+    assert r["closes_from_quotes"] is None and r["as_of"] == last.isoformat()
+    # The last session itself stays the book's Day P&L, from the same quotes as the dashboard (B-152).
+    assert r["last_day"]["value"] == pytest.approx(a.portfolio("p")["totals"]["day_pnl"])
+
+
+def test_risk_last_session_is_day_pnl_after_an_evening_sell(make_argus, monkeypatch):
+    """B-152: shares sold after the close were held through the session; risk's last session is the
+    book's Day P&L, unchanged by the sale, while VaR uses today's (smaller) holdings."""
+    from datetime import datetime, time
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    from argus.services.portfolio import TxnInput
+
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X", "Y"))}
+    last = days[-1]
+    at_close = datetime.combine(last, time(16, 5), NY)
+    quotes = {s: Quote(s, c[last], c[days[-2]], c[days[-2]], c[last], c[days[-2]], at_close, "fake")
+              for s, c in closes.items()}
+    a = _risk_argus(make_argus, monkeypatch, closes, last, quotes)
+    before = a.risk("p")
+    day_pnl = a.portfolio("p")["totals"]["day_pnl"]
+    assert before["last_day"]["value"] == pytest.approx(day_pnl) and before["last_day"]["basis"] == "session_holdings"
+
+    a.portfolios.add_transactions("p", [TxnInput("SELL", "X", datetime.combine(last, time(17, 30), NY), 5,
+                                                 closes["X"][last])])
+    after = a.risk("p")
+    totals = a.portfolio("p")["totals"]
+    assert totals["day_pnl"] == pytest.approx(day_pnl)
+    assert after["last_day"]["value"] == pytest.approx(totals["day_pnl"])
+    assert after["last_day"]["return_pct"] == pytest.approx(totals["day_pnl_pct"])
+    assert after["total_value"] < before["total_value"]  # forward-looking risk: today's holdings
+    assert after["var"]["99"]["var_value"] != pytest.approx(before["var"]["99"]["var_value"])
+
+
+def test_last_session_falls_back_to_current_holdings_for_another_session():
+    days = [date(2026, 6, 1) + timedelta(days=i) for i in range(120) if (date(2026, 6, 1) + timedelta(days=i)).weekday() < 5]
+    closes = {s: _closes(days, _walk(seed, len(days))[1]) for seed, s in enumerate(("SPY", "X"))}
+    r = risk.analyze({"X": 1000.0}, closes, book_day=(days[-2], 123.0, 1.0))
+    assert r["last_day"]["basis"] == "current_holdings" and r["last_day"]["value"] != 123.0
+    r = risk.analyze({"X": 1000.0}, closes, book_day=(days[-1], 123.0, 1.0))
+    assert r["last_day"] == {"date": days[-1].isoformat(), "return_pct": 1.0, "value": 123.0,
+                            "basis": "session_holdings", "exceeds_var_99": False}

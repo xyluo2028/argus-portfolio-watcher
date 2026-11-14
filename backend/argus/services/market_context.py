@@ -47,8 +47,9 @@ FG_LABELS = [(25, "Extreme fear"), (45, "Fear"), (55, "Neutral"), (75, "Greed"),
 
 PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 # Releases that move markets, matched as whole words. Fed speakers are left out except the Chair.
+# Nasdaq calls the minutes "FOMC Meeting Minutes"; other feeds say "FOMC Minutes".
 MAJOR = re.compile(r"\b(CPI|PPI|Nonfarm Payrolls|Unemployment Rate|GDP|PCE|Retail Sales|ISM|JOLTS|"
-                   r"Michigan Consumer Sentiment|Initial Jobless Claims|Fed Chair|Powell|FOMC (Statement|Minutes|"
+                   r"Michigan Consumer Sentiment|Initial Jobless Claims|Fed Chair|Powell|FOMC (Statement|(Meeting )?Minutes|"
                    r"Economic Projections)|Fed Interest Rate Decision|Durable Goods|Housing Starts|"
                    r"Consumer Confidence|Average Hourly Earnings|Industrial Production|Employment Cost Index)\b", re.I)
 SPEAKER = re.compile(r"\bSpeaks\b", re.I)

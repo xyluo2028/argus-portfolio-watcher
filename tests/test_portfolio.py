@@ -341,13 +341,15 @@ def test_earnings_overview_uses_calendar_then_eps_history(make_argus):
     assert FH.calls == 1  # NVDA only, then cached
 
 
-def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch):
+def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch, freeze_today):
     """PG goes ex $1.089 on 10-23: the quote's previous close is dividend-adjusted (Day P&L leaves the
     dividend out), the price-only close history isn't, so the dividend must count as income there."""
     from datetime import date
 
     import argus.app as app_mod
     from tests.conftest import FakeQuotes
+
+    freeze_today(date(2026, 10, 24))  # the day after; later, PG's January estimate would count too
 
     class Divs:
         def get_dividends(self, symbol):
@@ -382,3 +384,61 @@ def test_ex_dividend_day_reconciles_with_day_pnl(make_argus, monkeypatch):
     a.portfolios.add_transactions("inc", [TxnInput("DIVIDEND", "PG", at(2026, 10, 24), amount=33.76)])
     tot = a.portfolio("inc")["totals"]
     assert tot["dividends_accrued"] == 0 and tot["dividends"] == pytest.approx(33.76)
+
+
+def test_passed_estimated_ex_date_counts_before_the_history_shows_it(make_argus):
+    """B-129: a monthly fund went ex days ago (the quote's previous close already dropped by the
+    dividend) but the dividend history still ends a month back: count the estimate as income."""
+    from datetime import date
+
+    from argus.market_calendar import NY, session_on_or_after
+    from argus.services.dividends import add_months
+    from tests.conftest import FakeQuotes
+
+    today = datetime.now(NY).date()
+    last = add_months(today - timedelta(days=5), -1)
+    hist = [(add_months(last, -k).isoformat(), 0.22) for k in range(6)]
+    est = session_on_or_after(add_months(last, 1))
+
+    class Divs:
+        rows = hist
+
+        def get_dividends(self, symbol):
+            return self.rows if symbol == "BND" else []
+
+        def get_info(self, symbol):
+            return {}
+
+    a = make_argus([FakeQuotes("fake", {"BND": (71.3, 71.52)})])
+    a.market.profile_provider = Divs()
+    a.portfolios.create_portfolio("inc")
+    a.portfolios.add_transactions("inc", [TxnInput("BUY", "BND", at(*add_months(last, -2).timetuple()[:3]), 100, 72)])
+    tot = a.portfolio("inc")["totals"]
+    assert tot["dividends_accrued"] == pytest.approx(3 * 22.0)  # two months of history + the estimate
+    received = [x for h in a.dividends("inc")["holdings"] for x in h["events"] if x["ex_date"] == est.isoformat()]
+    if est.year == today.year:  # the Dividends page counts this calendar year's
+        assert len(received) == 1 and received[0]["estimated"] and received[0]["amount"] == pytest.approx(22.0)
+    assert date.fromisoformat(a.dividends("inc")["holdings"][0]["next_ex_date_est"]) > today
+
+
+def test_dividend_refresh_keeps_a_row_yahoo_dropped(make_argus):
+    """B-133: Yahoo's answer lost the last ex-date it served yesterday; the stored row is kept."""
+    from argus.db import session_scope
+    from argus.models import DividendHistory
+
+    day = datetime.now(UTC).date()
+    d1, d2, d3 = ((day - timedelta(days=n)).isoformat() for n in (95, 65, 35))
+
+    class Divs:
+        def get_dividends(self, symbol):
+            return [(d1, 0.25), (d2, 0.254)]
+
+    a = make_argus([])
+    a.market.profile_provider = Divs()
+    stored = [[d1, 0.25], [d2, 0.253], [d3, 0.255]]
+    with session_scope(a.engine) as s:
+        s.add(DividendHistory(symbol="BND", as_of=datetime.now(UTC) - a.DIVIDEND_MAX_AGE * 2, data=stored))
+    want = [(d1, 0.25), (d2, 0.254), (d3, 0.255)]  # d2 restated by the new answer, d3 kept
+    assert a.dividend_histories(["BND"])["BND"] == want
+    with session_scope(a.engine) as s:
+        assert [tuple(x) for x in s.get(DividendHistory, "BND").data] == want

@@ -26,8 +26,14 @@ const rel = (a: number | null | undefined, b: number | null | undefined) => (a !
 const peTtm = (m: Metrics, p: number | null | undefined) =>
   m.eps_ttm == null ? m.pe_ttm ?? null : m.eps_ttm > 0 ? (p ? p / m.eps_ttm : m.pe_ttm ?? null) : null;
 
-/** A figure with no meaningful value (P/E on zero or negative EPS): shown as "n/m", not left out. */
+// EPS growth SEC's quarters could work out but that means nothing (from a loss, or a base near zero): the
+// API sends it as null rather than leaving it out, so no provider's figure takes its place.
+const SEC_NM_GROWTH = new Set(["eps_growth_yoy_pct", "eps_growth_q_yoy_pct"]);
+
+/** A figure with no meaningful value (P/E on zero or negative EPS, EPS growth from a loss or near-zero
+ * base): shown as "n/m", not left out. */
 export function notMeaningful(key: string, m: Metrics | undefined): boolean {
+  if (SEC_NM_GROWTH.has(key)) return !!m && key in m && m[key] === null;
   return key === "pe_ttm" && m?.eps_ttm != null && m.eps_ttm <= 0;
 }
 
@@ -56,8 +62,10 @@ const DEFS: MetricDef[] = [
   { key: "revenue_growth_q_yoy_pct", short: "Rev Q YoY", label: "Revenue growth, latest quarter", kind: "signed", title: "Latest quarter vs the same quarter a year earlier (from SEC filings when they're as recent as the data provider's)" },
   { key: "revenue_growth_3y_pct", short: "Rev CAGR 3Y", label: "Revenue CAGR 3Y", kind: "signed", title: "Compound annual growth over 3 years" },
   { key: "revenue_growth_5y_pct", short: "Rev CAGR 5Y", label: "Revenue CAGR 5Y", kind: "signed", title: "Compound annual growth over 5 years" },
-  { key: "eps_growth_yoy_pct", short: "EPS YoY", label: "EPS growth YoY", kind: "signed" },
-  { key: "eps_growth_q_yoy_pct", short: "EPS Q YoY", label: "EPS growth, latest quarter", kind: "signed" },
+  { key: "eps_growth_yoy_pct", short: "EPS YoY", label: "EPS growth YoY", kind: "signed",
+    title: "Diluted EPS over the last four quarters vs the four before, from SEC filings when they're as recent as the data provider's (else Finnhub); n/m from a loss or a base near zero" },
+  { key: "eps_growth_q_yoy_pct", short: "EPS Q YoY", label: "EPS growth, latest quarter", kind: "signed",
+    title: "Latest quarter's diluted EPS vs the same quarter a year earlier, from SEC filings when they're as recent as the data provider's (else Finnhub); n/m from a loss or a base near zero" },
   { key: "eps_growth_3y_pct", short: "EPS CAGR 3Y", label: "EPS CAGR 3Y", kind: "signed" },
   { key: "eps_growth_5y_pct", short: "EPS CAGR 5Y", label: "EPS CAGR 5Y", kind: "signed" },
   // profitability

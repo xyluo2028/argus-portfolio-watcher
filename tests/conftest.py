@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from argus import access
 from argus.app import Argus
 from argus.config import Settings
 from argus.providers.base import Bar, ProviderError, Quote
@@ -43,6 +44,13 @@ class FakeHistory:
         return [b for b in self.bars if b.ts >= start]
 
 
+@pytest.fixture(autouse=True)
+def default_account():
+    """Tests call services directly, like the CLI: as the oldest account (argus.access)."""
+    with access.acting_as(access.DEFAULT):
+        yield
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(data_dir=tmp_path, db_path=tmp_path / "test.sqlite", finnhub_api_key=None, sec_user_agent=None)
@@ -54,3 +62,31 @@ def make_argus(settings):
         return Argus(settings, market_factory=lambda engine, st: MarketService(
             engine, st, list(quote_providers), history, list(fundamentals)))
     return _make
+
+
+@pytest.fixture
+def freeze_today(monkeypatch):
+    """`freeze_today(date(2026, 10, 28))` makes `datetime.now()` in Argus and the tests return that
+    day at noon New York time, the clock moving on from there, so date-dependent tests can be run
+    on any calendar day. Every module that imported `datetime` gets a subclass whose now() is shifted."""
+    import sys
+    from datetime import date, time
+    from zoneinfo import ZoneInfo
+
+    real, frozen = datetime, []
+
+    def _freeze(day: date):
+        offset = real.combine(day, time(12), ZoneInfo("America/New_York")) - real.now(UTC)
+
+        class Frozen(real):
+            @classmethod
+            def now(cls, tz=None):
+                t = real.now(UTC) + offset
+                return t.astimezone(tz) if tz else t.astimezone().replace(tzinfo=None)
+
+        frozen.append(Frozen)
+        for name, mod in list(sys.modules.items()):
+            if name.split(".")[0] in ("argus", "tests") and getattr(mod, "datetime", None) in (real, *frozen):
+                monkeypatch.setattr(mod, "datetime", Frozen)
+        return day
+    return _freeze

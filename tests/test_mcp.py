@@ -74,6 +74,11 @@ def test_analysis_tools(mcp):
     assert e["concentration"]["positions"] == 1
     sim = call(mcp, "simulate_trades", {"portfolio": "growth", "trades": [{"symbol": "AAA", "side": "SELL", "qty": 5}]})
     assert sim["saved"] is False and sim["net_cash"] == 550
+    sim = call(mcp, "simulate_trades", {"portfolio": "growth", "trades": [{"symbol": "AAA", "type": "sell", "qty": 5}]})
+    assert sim["net_cash"] == 550  # `type` is an alias for side (B-147)
+    from mcp.server.mcpserver.exceptions import ToolError
+    with pytest.raises(ToolError, match=r"INVALID_ARG: Trade 1 \(AAA\): give side"):
+        call(mcp, "simulate_trades", {"portfolio": "growth", "trades": [{"symbol": "AAA", "qty": 5}]})
     prev = call(mcp, "set_targets", {"portfolio": "growth", "level": "symbol", "weights": {"AAA": 100}})
     assert prev["dry_run"] is True
     assert call(mcp, "get_drift", {"portfolio": "growth"})["rows"][0]["target_pct"] is None  # not saved

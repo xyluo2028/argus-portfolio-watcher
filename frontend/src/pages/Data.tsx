@@ -4,9 +4,11 @@ import { ImportCard } from "../components/ImportCard";
 import { nyTime } from "../format";
 
 // What a snapshot holds, in the order people care about. Instruments are metadata, so not listed.
+// It is your account's records only; other accounts' are never in it, nor changed by a restore.
 const LABELS: [string, string][] = [
   ["portfolio", "portfolios"], ["txn", "transactions"], ["watchlist_item", "watchlist items"], ["note", "notes"],
-  ["alert", "alerts"], ["target", "targets"], ["alert_event", "alert history"], ["audit_log", "audit entries"],
+  ["alert", "alerts"], ["target", "targets"], ["alert_event", "alert history"], ["peer_list", "peer lists"],
+  ["valuation_model", "DCF models"],
 ];
 const summary = (counts: Record<string, number>) =>
   LABELS.filter(([k]) => counts[k]).map(([k, label]) => `${counts[k]} ${label}`).join(", ") || "no records";
@@ -30,7 +32,7 @@ function DeletePortfolioCard({ onDeleted }: { onDeleted: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.portfolios().then(setPortfolios, () => setPortfolios([]));
+  const load = () => api.portfolios().then((ps) => setPortfolios(ps.filter((p) => !p.shared)), () => setPortfolios([]));
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
@@ -132,7 +134,7 @@ export function Data({ onPortfoliosChanged }: { onPortfoliosChanged?: () => void
   const restore = async () => {
     if (!preview) return;
     const replacing = Object.keys(preview.will_remove).length > 0;
-    if (replacing && !window.confirm(`Replace ${summary(preview.will_remove)} with the snapshot? Your current records are backed up first.`)) return;
+    if (replacing && !window.confirm(`Replace your ${summary(preview.will_remove)} with the snapshot? Your current records are backed up first.`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -153,15 +155,19 @@ export function Data({ onPortfoliosChanged }: { onPortfoliosChanged?: () => void
       <section className="card">
         <h2>Back up</h2>
         <p style={{ marginTop: 0 }}>
-          Download one file with your portfolios, transactions (including deleted ones), watchlists, notes, alerts,
-          targets and audit log. Market data isn't included; it refills on its own.
+          Download one file with your account's portfolios, transactions (including deleted ones), watchlists, notes,
+          alerts, targets, peer lists and saved DCF models. Other accounts' records aren't in it, and market data
+          isn't either; it refills on its own.
         </p>
         <a className="btn primary" href={api.snapshotUrl} download>Download snapshot</a>
       </section>
 
       <section className="card">
         <h2>Restore</h2>
-        <p style={{ marginTop: 0 }}>Load a snapshot file, for example on a new machine. You'll see what it contains before anything changes.</p>
+        <p style={{ marginTop: 0 }}>
+          Load a snapshot file into your account, for example on a new machine. You'll see what it contains before
+          anything changes, and only your own records are replaced; other accounts are never touched.
+        </p>
         <div className="row">
           <input ref={fileInput} type="file" accept=".json,application/json" hidden
                  onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
@@ -176,8 +182,8 @@ export function Data({ onPortfoliosChanged }: { onPortfoliosChanged?: () => void
             </div>
             {replacing && (
               <div className="warn-box">
-                This instance already has {summary(preview.will_remove)}. Restoring replaces them; they're saved to a backup file in
-                {" "}<code>data/snapshots/</code> first.
+                Your account already has {summary(preview.will_remove)}. Restoring replaces them; they're saved to a backup file in
+                {" "}<code>data/snapshots/</code> on the server first.
               </div>
             )}
             <div className="row">
@@ -197,6 +203,10 @@ export function Data({ onPortfoliosChanged }: { onPortfoliosChanged?: () => void
           </div>
         )}
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
+        <p className="small muted" style={{ marginBottom: 0 }}>
+          Moving the whole server (every account) is done on it: <code>uv run argus snapshot dump</code> and
+          {" "}<code>argus snapshot load</code>.
+        </p>
       </section>
 
       <DeletePortfolioCard onDeleted={() => onPortfoliosChanged?.()} />

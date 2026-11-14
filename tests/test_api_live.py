@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from argus.api.server import create_app
 from argus.live import LiveHub
+from argus.providers.base import ProviderError
+from argus.services.portfolio import TxnInput
 from tests.conftest import FakeQuotes
 
 
@@ -33,6 +35,16 @@ def test_errors_map_to_http_status(client):
     assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
     r = client.post("/api/portfolios/growth/transactions", json={"type": "SELL", "symbol": "AAA", "qty": 1, "price": 1})
     assert r.status_code == 400 and r.json()["error"]["code"] == "INSUFFICIENT_SHARES"
+
+
+def test_simulate_takes_type_and_rejects_a_trade_without_side(client):
+    client.post("/api/portfolios/growth/transactions",
+                json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
+    r = client.post("/api/portfolios/growth/simulate", json={"trades": [{"symbol": "AAA", "type": "SELL", "qty": 5}]})
+    assert r.status_code == 200 and r.json()["net_cash"] == 550
+    r = client.post("/api/portfolios/growth/simulate", json={"trades": [{"symbol": "AAA", "qty": 5}]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_ARG"
+    assert r.json()["error"]["message"].startswith("Trade 1 (AAA)")
 
 
 def test_ws_trade_updates_quote_and_keeps_prev_close(make_argus):
@@ -91,12 +103,13 @@ def test_edit_transaction_endpoint_and_all_view_listing(client):
     assert client.patch(f"/api/transactions/{txn_id}", json={"qty": 1}).status_code == 404  # replaced row
 
 
-def test_snapshot_download_and_restore(client):
+def test_snapshot_download_and_restore_your_own_records(client):
     client.post("/api/portfolios/growth/transactions",
                 json={"type": "BUY", "symbol": "AAA", "qty": 10, "price": 90, "date": "2026-09-01"})
     r = client.get("/api/snapshot")
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     doc = r.json()
+    assert doc["format"] == "argus-account-snapshot" and "account" not in doc["tables"]
     preview = client.post("/api/snapshot/restore", json=doc).json()  # dry run by default
     assert preview["dry_run"] and preview["will_remove"] == {"portfolio": 1, "txn": 1}
     assert client.post("/api/snapshot/restore?dry_run=false", json=doc).status_code == 409
@@ -104,6 +117,9 @@ def test_snapshot_download_and_restore(client):
     assert done["backup"].endswith(".json")
     assert client.get("/api/portfolios/growth").json()["totals"]["position_count"] == 1
     assert client.post("/api/snapshot/restore", json={"nope": 1}).status_code == 400
+    whole = {"format": "argus-snapshot", "version": 2, "tables": {"account": []}}
+    assert "argus snapshot load" in client.post("/api/snapshot/restore", json=whole).json()["error"]["hint"]
+    assert client.get("/api/no-such-route").json()["error"]["code"] == "NOT_FOUND"  # not the web UI's page
 
 
 def test_import_investing_upload(make_argus):
@@ -122,3 +138,46 @@ def test_import_investing_upload(make_argus):
         assert again["skipped_existing"] == 5
         bad = c.post("/api/import/investing", json=body | {"opening_through": "Jan 2"})
         assert bad.status_code == 400
+
+
+class _BrokenHistory:
+    name = "broken"
+
+    def __init__(self, error: Exception):
+        self.error = error
+
+    def get_history(self, symbol, start, end, interval):
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [ProviderError("yahoo: 429"), RuntimeError("NOT NULL constraint failed: price_bar.c")])
+def test_history_failure_leaves_the_rest_of_the_response(make_argus, error):
+    # B-130: a broken price-history write (B-128) made these 500 though only some figures need bars.
+    class Fund:
+        name = "finnhub"
+
+        def get_metrics(self, symbol):
+            return {"pe_ttm": 20.0, "market_cap": 1e9}
+
+    a = make_argus([FakeQuotes("fake", {"AAA": (110, 100)})], _BrokenHistory(error), [Fund()])
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "AAA", datetime(2026, 9, 1, 20, tzinfo=UTC), 10, 90)])
+    a.watchlists.add(["AAA"])
+    with TestClient(create_app(a, start_hub=False), base_url="http://localhost") as c:
+        r = c.get("/api/fundamentals/AAA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["metrics"]["market_cap"] == 1e9 and body["metrics"]["return_1m_pct"] is None
+        assert "Price history unavailable" in body["errors"]["price_history"]
+
+        for path in ("/api/portfolios/growth/fundamentals", "/api/watchlists/Watchlist/fundamentals"):
+            r = c.get(path)
+            assert r.status_code == 200, path
+            assert "return_1y_pct" not in r.json()["metrics"].get("AAA", {}) and r.json()["errors"]["price_history"]
+
+        r = c.get("/api/research/AAA")
+        assert r.status_code == 200
+        assert r.json()["errors"]["price_history"] and r.json()["partial"] and r.json()["price"] == 110
+
+        r = c.get("/api/earnings/AAA")
+        assert r.status_code == 200 and r.json()["errors"]["price_history"] and "reports" in r.json()
