@@ -1,11 +1,11 @@
 # The improvement loop
 
-Argus improves itself in rounds that run as a Claude Code cloud scheduled task, once a day after the
-US market has closed. Two bots do the work:
+Argus improves itself in rounds that run as a Claude Code cloud scheduled task, once every weekday
+after the US market has closed. Two bots do the work:
 
 1. **The trader bot** (`.claude/agents/trader.md`) runs a $10,000 paper account in Argus, signed in
    as the account `bot0`. On a trading day it researches, decides and trades at the last session's
-   mid price; on a day off (weekend, holiday) it doesn't trade, and reviews its portfolio and Argus
+   mid price; on a day off (no new US session since the last round) it doesn't trade, and reviews its portfolio and Argus
    itself. Either way it reports bugs, friction and missing features with evidence.
 2. **The round lead** (the scheduled session itself) merges the findings into the backlog and picks
    at most three items.
@@ -207,10 +207,12 @@ Paste this as the task's prompt at claude.ai/code/routines:
      API key only. Never put the password in the repository.
    - **Setup script**: `uvx --from playwright playwright install --with-deps chromium || true`
 2. **Scheduled task** at claude.ai/code/routines: this repository, the `argus-loop` environment, no
-   connectors, and the prompt above. Schedule it **every day, after the US close and before the next
-   open**: around 10:00 Asia/Tokyo is 20:00 or 21:00 in New York. Tuesday to Saturday (Tokyo) are
-   trading days; Sunday, Monday and US holidays are days off. It must not run between 9:30 and 16:00
-   New York time: the trader can't trade then. **Run now** once and read the transcript before
+   connectors, and the prompt above. Schedule it **on weekdays, after the US close and before the
+   next open**: 10:00 Asia/Tokyo, Monday to Friday, is 20:00 or 21:00 in New York the evening before.
+   Tuesday to Friday (Tokyo) trade the session that closed a few hours earlier; Monday trades
+   Friday's session, which no round has traded yet (there is no Saturday run). So every scheduled
+   round is a trading day except after a US market holiday, which is a day off. It must not run
+   between 9:30 and 16:00 New York time: the trader can't trade then. **Run now** once and read the transcript before
    enabling the schedule.
 3. **Protect `main`** on GitHub (a ruleset requiring pull requests) so no run can push to it.
 4. **Kill switches**, from gentlest to hardest:
