@@ -5,7 +5,7 @@ frontend, a JSON CLI (`argus`) and an MCP server, built to be used by AI agents 
 Design notes: `docs/design.html`; deployment: `docs/deployment.md`.
 
 **This repository is public.** Never commit `.env`, anything under `data/`, API keys, or personal
-financial data. The improvement loop (`docs/loop/`) uses model portfolios only.
+financial data. The improvement loop (`docs/loop/`) uses a paper account with play money only.
 
 ## Layout
 

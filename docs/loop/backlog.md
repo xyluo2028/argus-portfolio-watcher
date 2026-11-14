@@ -1,14 +1,14 @@
 # Backlog
 
-Every finding from the investor reviews, deduplicated. The round lead keeps this file; see
-`README.md` for how items are picked.
+Every finding from the trader bot's rounds (and, up to round 016, the three investor agents'
+reviews), deduplicated. The round lead keeps this file; see `README.md` for how items are picked.
 
 Format, one item per heading, newest IDs at the bottom of their section:
 
 ```markdown
 ### B-001 Short title
 - kind: bug | ux | perf | feature | removal · severity: high | medium | low
-- reported by: macro r001, income r002
+- reported by: trader r017 (earlier items: macro r001, income r002 ...)
 - evidence: one or two lines, or a link to the round report
 - acceptance: what "done" means (written when the item is picked)
 - status: open | in progress rNNN | done (rNNN, <commit>) | blocked: <reason> | won't do: <reason>

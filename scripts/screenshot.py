@@ -9,7 +9,13 @@ import argparse
 import json
 import time
 
+from pathlib import Path
+
 from playwright.sync_api import sync_playwright
+
+# Argus asks for sign-in once an account exists. The loop's bot signs in with its API key
+# (scripts/cloud-session.sh writes it here), sent with every request the page makes.
+KEY_FILE = Path(__file__).resolve().parent.parent / "data" / "bot0.key"
 
 p = argparse.ArgumentParser()
 p.add_argument("path", help="Page path, e.g. / or /markets or /t/MSFT")
@@ -25,8 +31,9 @@ args = p.parse_args()
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
+    headers = {"Authorization": f"Bearer {KEY_FILE.read_text().strip()}"} if KEY_FILE.exists() else {}
     page = browser.new_page(viewport={"width": args.width, "height": args.height},
-                            color_scheme="dark" if args.dark else "light")
+                            color_scheme="dark" if args.dark else "light", extra_http_headers=headers)
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: m.type == "error" and errors.append(m.text))
