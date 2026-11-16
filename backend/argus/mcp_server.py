@@ -280,8 +280,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         benchmark, top gainers/losers and largest $ moves, positions near 52-week highs/lows,
         earnings in the next 7 days (hour: bmo = before open, amc = after close) and results from the
         last 3 days (with EPS surprise), upcoming ex-dividend dates, alerts fired, theses due for
-        review, watchlist movers >= 3%, and headlines for the biggest movers. Write the brief from
-        these facts; say when a section is empty rather than inventing detail."""
+        review, movers >= 3% and earnings (next 7 days, last 3) across every watchlist, each row naming
+        its lists, and headlines for the biggest movers. Write the brief from these facts; say when a section is empty rather than inventing detail."""
         return argus.daily_brief(portfolio, quotes_now(), news=include_news)
 
     @mcp.tool(annotations=READ)
@@ -510,8 +510,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
                 f"(portfolio='{portfolio}') once. Structure: 1) one-line headline (value, day P&L vs benchmark); "
                 "2) what moved most and why, using only the returned headlines; 3) earnings and dividends coming "
                 "up, with timing (before open / after close) and any recent beats or misses; 4) alerts that fired; "
-                "5) theses due for review, quoting my thesis; 6) watchlist movers. Keep it under 250 words, use "
-                "numbers from the data, and skip empty sections. No buy/sell recommendations.")
+                "5) theses due for review, quoting my thesis; 6) watchlist movers and earnings. Keep it under 250 "
+                "words, use numbers from the data, and skip empty sections. No buy/sell recommendations.")
 
     @mcp.prompt()
     def position_review(portfolio: str, symbol: str) -> str:

@@ -385,6 +385,8 @@ def brief(portfolio: str, no_news: Annotated[bool, typer.Option("--no-news")] = 
         console.print(f"Movers: {movers}")
         for e in b["earnings_upcoming"]:
             console.print(f"Earnings {e['date']} {e.get('hour') or ''} {e['symbol']}")
+        for e in b["watchlist_earnings"]["upcoming"]:
+            console.print(f"Watchlist earnings {e['date']} {e.get('hour') or ''} {e['symbol']} ({', '.join(e['lists'])})")
         for a in b["alerts_fired"]:
             console.print(f"[yellow]Alert[/yellow] {a['message']}")
         for n in b["theses_due"]:

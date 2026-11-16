@@ -47,6 +47,18 @@ class WatchlistService:
                 out.append({"name": w.name, "count": n})
             return out
 
+    def memberships(self) -> dict[str, list[str]]:
+        """Every symbol on any of this account's watchlists, with the lists it's on (in list order)."""
+        with session_scope(self.engine) as s:
+            rows = s.execute(select(WatchlistItem.symbol, Watchlist.name)
+                             .join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
+                             .where(access.owned(s, Watchlist.account_id))
+                             .order_by(Watchlist.id, WatchlistItem.added_at))
+            out: dict[str, list[str]] = {}
+            for sym, name in rows:
+                out.setdefault(sym, []).append(name)
+            return out
+
     def items(self, name: str = DEFAULT) -> list[dict]:
         with session_scope(self.engine) as s:
             w = self._find(s, name)

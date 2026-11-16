@@ -70,7 +70,7 @@ def test_unset_account_fails_closed(argus):
 def test_each_account_sees_only_its_own_records(argus, two):
     with access.acting_as(two["bot"]):
         assert argus.portfolios.list_portfolios() == []
-        assert argus.watchlists.list_watchlists() == []
+        assert argus.watchlists.list_watchlists() == [] and argus.watchlists.memberships() == {}
         assert argus.alerts.list(include_inactive=True) == [] and argus.alerts.fired(date(2000, 1, 1)) == []
         assert argus.notes.list(include_archived=True) == []
         assert argus.valuation_models() == []
@@ -97,6 +97,19 @@ def test_each_account_sees_only_its_own_records(argus, two):
         assert list(argus.portfolios.positions("growth")) == ["AAA"]
         assert [i["symbol"] for i in argus.watchlists.items("Tech")] == ["BBB"]
         assert len(argus.notes.list()) == 1 and argus.valuation_models()[0]["symbol"] == "AAA"
+
+
+def test_a_brief_reads_only_its_own_accounts_watchlists(argus, two):
+    with access.acting_as(two["me"]):
+        argus.watchlists.add(["AAA"], name="Tech")  # +10% on the day
+        b = argus.daily_brief("growth", news=False)
+    assert [(m["symbol"], m["lists"]) for m in b["watchlist_movers"]] == [("AAA", ["Tech"])]
+    with access.acting_as(two["bot"]):
+        argus.portfolios.create_portfolio("mine")
+        argus.portfolios.add_transactions("mine", [buy("AAA", 1, 100)])
+        argus.watchlists.add(["KO"], name="Ideas")
+        b = argus.daily_brief("mine", news=False)
+    assert b["watchlist_movers"] == [] and b["watchlist_earnings"] == {"upcoming": [], "recent": []}
 
 
 def test_the_first_account_takes_over_what_was_recorded_before(argus):

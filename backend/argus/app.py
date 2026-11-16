@@ -1192,11 +1192,7 @@ class Argus:
                              if mine is None or a["symbol"] in mine],
             "theses_due": [n for n in self.notes.list(due_by=today + timedelta(days=7))
                            if mine is None or n["symbol"] in mine],
-            "watchlist_movers": [
-                {"symbol": i["symbol"], "change_pct": i["quote"]["change_pct"], "price": i["quote"]["price"]}
-                for i in self.watchlist(live_quotes=live_quotes, with_fundamentals=False)["items"]
-                if i["quote"] and i["quote"]["change_pct"] is not None and abs(i["quote"]["change_pct"]) >= 3
-            ],
+            **self._brief_watchlists(mine, live_quotes),
         }
         if news:
             out["headlines"] = {}
@@ -1204,6 +1200,26 @@ class Argus:
                 if items := self.events.news(p["symbol"], days=2, limit=3):
                     out["headlines"][p["symbol"]] = items
         return out
+
+    def _brief_watchlists(self, held: set[str] | None, live_quotes: dict[str, Quote] | None) -> dict:
+        """Movers >= 3% and earnings (next 7 days, last 3) across every one of the account's watchlists,
+        one row per symbol naming its lists; `held` marks symbols held in the brief's portfolio."""
+        watched = self.watchlists.memberships()
+        syms = list(watched)
+        quotes = {s: live_quotes[s] for s in syms if live_quotes and s in live_quotes}
+        if missing := [s for s in syms if s not in quotes]:
+            quotes |= self.market.get_quotes(missing)[0]
+        held = held if held is not None else set(self.held_positions())
+        is_held = held.__contains__
+        movers = [{"symbol": s, "change_pct": q.change_pct, "price": q.price, "lists": watched[s], "held": is_held(s)}
+                  for s in syms if (q := quotes.get(s)) and q.change_pct is not None and abs(q.change_pct) >= 3]
+        self.events.refresh(syms)
+        now = datetime.now(NY)
+        rows = self.events.between(syms, now.date() - timedelta(days=3), now.date() + timedelta(days=7), ["earnings"])
+        rows = [r | {"lists": watched[r["symbol"]], "held": is_held(r["symbol"])} for r in rows]
+        return {"watchlist_movers": movers,
+                "watchlist_earnings": {"upcoming": [r for r in rows if not _event_happened(r, now)],
+                                       "recent": [r for r in rows if _event_happened(r, now)]}}
 
     # -- analysis: exposure, targets, drift, what-if -------------------------------
     FUND_PROFILE_MAX_AGE = timedelta(days=7)

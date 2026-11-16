@@ -171,6 +171,39 @@ def test_daily_brief_is_scoped_to_its_portfolio(make_argus):
     assert [x["symbol"] for x in g["theses_due"]] == ["AAA"]
 
 
+def test_daily_brief_reads_every_named_watchlist(make_argus):
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event
+
+    a = make_argus([FakeQuotes("fake", {"AAA": (100, 100), "NVDA": (110, 100), "TSLA": (80, 100),
+                                        "KO": (101, 100), "SPY": (500, 495)})])
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "AAA", NOW - timedelta(days=30), 10, 90)])
+    # No list named "Watchlist" at all: only named lists, NVDA on two of them.
+    a.watchlists.add(["NVDA", "KO"], name="candidates")
+    a.watchlists.add(["TSLA", "NVDA", "AAA"], name="growth-candidates")
+    today = datetime.now(NY).date()
+    a.events.refresh(["AAA", "NVDA", "TSLA", "KO"])  # mark fresh so the brief keeps the rows below
+    with session_scope(a.engine) as s:
+        s.add(Event(symbol="NVDA", kind="earnings", d=today + timedelta(days=2), hour="amc", data={}, source="t"))
+        s.add(Event(symbol="TSLA", kind="earnings", d=today - timedelta(days=2), hour="amc",
+                    data={"epsActual": 0.5}, source="t"))
+        s.add(Event(symbol="KO", kind="earnings", d=today + timedelta(days=30), hour="bmo", data={}, source="t"))
+        s.add(Event(symbol="AAA", kind="earnings", d=today + timedelta(days=3), hour="bmo", data={}, source="t"))
+
+    b = a.daily_brief("growth", news=False)
+    assert [(m["symbol"], m["change_pct"], m["lists"]) for m in b["watchlist_movers"]] == [
+        ("NVDA", pytest.approx(10), ["candidates", "growth-candidates"]),
+        ("TSLA", pytest.approx(-20), ["growth-candidates"])]
+    we = b["watchlist_earnings"]
+    assert [(e["symbol"], e["lists"], e["held"]) for e in we["upcoming"]] == [
+        ("NVDA", ["candidates", "growth-candidates"], False), ("AAA", ["growth-candidates"], True)]
+    assert [(e["symbol"], e["date"]) for e in we["recent"]] == [("TSLA", (today - timedelta(days=2)).isoformat())]
+    # The portfolio's own earnings still list only its holdings (B-033).
+    assert [e["symbol"] for e in b["earnings_upcoming"]] == ["AAA"]
+
+
 @pytest.mark.parametrize("hour,hm,actual,happened", [
     ("bmo", (9, 0), None, False), ("bmo", (10, 0), None, True),
     ("amc", (15, 0), None, False), ("amc", (16, 30), None, True),
