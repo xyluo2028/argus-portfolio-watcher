@@ -94,6 +94,10 @@ export interface Summary {
     dividends_accrued: number;  // estimated, from ex-dates held through that no DIVIDEND records yet
     position_count: number;
     fully_priced: boolean;
+    // The benchmark's day change over day_pnl_pct's window: shares bought in the session count from
+    // their fills, so the benchmark does too for that part (its fills, else its session mid).
+    benchmark_day_pct?: number | null;
+    bought_in_session?: boolean;
     ext_pnl: number | null;
     ext_pnl_pct: number | null;
     ext_session: ExtSession | null;

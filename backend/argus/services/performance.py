@@ -16,6 +16,13 @@ TWR index; deposits never count as performance.
 Closes are split-adjusted (Yahoo), so quantities before a recorded SPLIT are scaled
 by the split ratio to stay on the same basis. Closes stored before Yahoo adjusted them
 still jump by the ratio on the split day; for those the quantities aren't scaled.
+
+The benchmark is measured over the same window as the portfolio (B-053). From inception the
+portfolio's first day runs from its fills to the close, so the benchmark's first day does too:
+from the benchmark's own average fill price that session when the portfolio bought it, otherwise
+from its session mid, (high + low) / 2, a neutral stand-in for "when during the day the buys
+filled" (daily bars carry no fill times). A first day of OPENING lots only enters at the close,
+so the benchmark starts at that close, as it does when no range is known.
 """
 
 from __future__ import annotations
@@ -57,6 +64,19 @@ def txn_session(ts: datetime, sessions: list[date]) -> date | None:
     return None
 
 
+def session_mid(high: float | None, low: float | None) -> float | None:
+    return (high + low) / 2 if high and low else None
+
+
+def benchmark_fill_ref(fills: list[tuple[float, float]], mid: float | None) -> float | None:
+    """Where the benchmark starts for money put to work at fills during a session: the share-weighted
+    average of the benchmark's own `fills` (qty, price) that session, else its session `mid`."""
+    shares = sum(q for q, _ in fills)
+    if shares > 0:
+        return sum(q * px for q, px in fills) / shares
+    return mid
+
+
 def _split_factors(txns: list[TxnLike]) -> dict[str, list[tuple[date, float]]]:
     out: dict[str, list[tuple[date, float]]] = {}
     for t in txns:
@@ -66,8 +86,13 @@ def _split_factors(txns: list[TxnLike]) -> dict[str, list[tuple[date, float]]]:
 
 
 def compute_series(txns: Iterable[TxnLike], sessions: list[date], closes: dict[str, dict[date, float]],
-                   bench: dict[date, float] | None = None) -> list[DayPoint]:
-    """Replay transactions over `sessions` (ascending trading days)."""
+                   bench: dict[date, float] | None = None, bench_symbol: str | None = None,
+                   bench_mid: float | None = None) -> list[DayPoint]:
+    """Replay transactions over `sessions` (ascending trading days).
+
+    `bench_symbol` and `bench_mid` (the benchmark's mid on the first session) start the benchmark
+    where the portfolio's first day is measured from (module docstring); without them it starts at
+    the first close."""
     txns = sorted(txns, key=lambda t: (t.ts, t.id or 0))
     if not txns or not sessions:
         return []
@@ -131,11 +156,23 @@ def compute_series(txns: Iterable[TxnLike], sessions: list[date], closes: dict[s
         if started:
             b = None
             if bench and d in bench:
-                bench_base = bench_base or bench[d]
+                if bench_base is None:
+                    bench_base = (_bench_start(by_day.get(d, []), bench_symbol, bench_mid, adj(bench_symbol or "", d))
+                                  if not points else None) or bench[d]
                 b = bench[d] / bench_base
             points.append(DayPoint(d, value, flow_in, flow_out, ret, index, b))
         prev_value = value
     return points
+
+
+def _bench_start(day_txns: list[TxnLike], symbol: str | None, mid: float | None, factor: float) -> float | None:
+    """The benchmark's starting price on the portfolio's first session: None (its close) unless that
+    day's money went in at fills."""
+    if not any(TxnType(t.type) == TxnType.BUY for t in day_txns):
+        return None
+    # Fill prices are on that day's share basis; closes are split-adjusted, so scale them down alike.
+    fills = [(t.qty * factor, t.price / factor) for t in day_txns if TxnType(t.type) == TxnType.BUY and t.symbol == symbol]
+    return benchmark_fill_ref(fills, mid)
 
 
 def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: bool = False) -> dict:
@@ -169,8 +206,10 @@ def summarize(points: list[DayPoint], risk_free_annual: float = 0.0, inception: 
         if sd > 0:
             sharpe = (mean - risk_free_annual / TRADING_DAYS) / sd * math.sqrt(TRADING_DAYS)
     bench = None
-    if start.bench_index and end.bench_index:
-        bench = end.bench_index / start.bench_index - 1
+    # From inception the benchmark index starts at 1.0 before the first day, like the portfolio's.
+    start_bench = 1.0 if inception else start.bench_index
+    if start_bench and end.bench_index:
+        bench = end.bench_index / start_bench - 1
     days = (end.d - start.d).days
     return {
         "start": start.d.isoformat(),

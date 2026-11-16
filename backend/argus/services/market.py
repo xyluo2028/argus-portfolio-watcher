@@ -316,6 +316,17 @@ class MarketService:
                     out[sym][d] = c
         return out
 
+    def session_range(self, symbol: str, d: date) -> tuple[float | None, float | None] | None:
+        """(high, low) of `symbol`'s stored daily bar for New York date `d`, or None (no download)."""
+        lo = datetime.combine(d - timedelta(days=1), datetime.min.time(), UTC)
+        hi = datetime.combine(d + timedelta(days=2), datetime.min.time(), UTC)
+        with session_scope(self.engine) as s:
+            for ts, h, l in s.execute(select(PriceBar.ts, PriceBar.h, PriceBar.l).where(
+                    PriceBar.symbol == symbol, PriceBar.interval == "1d", PriceBar.ts >= lo, PriceBar.ts < hi)):
+                if ts.astimezone(NY).date() == d:
+                    return h, l
+        return None
+
     def _ensure_daily_bars(self, symbols: list[str], start: datetime) -> None:
         """Download whatever daily history the cache lacks from `start` to the last close."""
         now = datetime.now(UTC)

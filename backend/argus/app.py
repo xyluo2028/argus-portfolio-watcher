@@ -237,7 +237,18 @@ class Argus:
         if with_quotes and missing:
             got, errors = self.market.get_quotes(missing)
             quotes |= got
-        out = self.portfolios.summary(ref, quotes if with_quotes else {}, include_lots=include_lots)
+        # The benchmark's quote too, for its day change over the portfolio's window (B-053).
+        bench = self.portfolios.view(ref).benchmark
+        bench_q = {}
+        if with_quotes and bench not in quotes:
+            if live_quotes and bench in live_quotes:
+                bench_q = {bench: live_quotes[bench]}
+            else:
+                try:
+                    bench_q = self.market.get_quotes([bench])[0]
+                except Exception as e:  # noqa: BLE001 - never block the summary on the benchmark
+                    log.warning("benchmark quote: %s", e)
+        out = self.portfolios.summary(ref, quotes | bench_q if with_quotes else {}, include_lots=include_lots)
         out["quote_errors"] = errors
         try:
             out["split_warnings"] = self.split_warnings(ref, quotes)
@@ -1787,6 +1798,21 @@ class Argus:
 
     PERF_RANGES = ("1mo", "3mo", "ytd", "1y", "all")
 
+    def _bench_first_mid(self, benchmark: str, txns: list, sessions: list[date],
+                         live_quotes: dict[str, Quote] | None) -> float | None:
+        """The benchmark's mid on the portfolio's first session (B-053): from its stored daily bar, or
+        from the quote while that session's bar isn't published yet."""
+        opening = [t.ts for t in txns if t.type in ("BUY", "OPENING")]
+        first = performance_mod.txn_session(min(opening), sessions) if opening else None
+        if first is None:
+            return None
+        rng = self.market.session_range(benchmark, first)
+        if rng is None:
+            q = (live_quotes or {}).get(benchmark) or self.market.cached_quotes([benchmark], 86400).get(benchmark)
+            rng = (q.high, q.low) if q and session_date(q.as_of) == first else None
+        return performance_mod.session_mid(*rng) if rng else None
+
+
     def performance(self, ref: str, range_: str = "all", live_quotes: dict[str, Quote] | None = None) -> dict:
         """Daily value and TWR vs the portfolio's benchmark; `range_` slices and rebases the series."""
         if range_ not in self.PERF_RANGES:
@@ -1823,7 +1849,8 @@ class Argus:
         income = [TxnInput("DIVIDEND", x["symbol"], datetime.combine(date.fromisoformat(x["ex_date"]),
                                                                     datetime.min.time(), NY), amount=x["amount"])
                   for x in accrued]
-        points = performance_mod.compute_series([*txns, *income], sessions, closes, bench)
+        bench_mid = self._bench_first_mid(p.benchmark, txns, sessions, live_quotes)
+        points = performance_mod.compute_series([*txns, *income], sessions, closes, bench, p.benchmark, bench_mid)
         cutoff = {"1mo": today - timedelta(days=31), "3mo": today - timedelta(days=92),
                   "ytd": date(today.year, 1, 1) - timedelta(days=1), "1y": today - timedelta(days=366)}.get(range_)
         base = 0
@@ -1834,7 +1861,8 @@ class Argus:
         # A slice from the first flow starts before that day's buys (value 0, index 1.0).
         inception = base == 0
         base_idx = 1.0 if inception else points[0].index if points else 1.0
-        base_bench = points[0].bench_index if points else None
+        # From inception the benchmark, like the portfolio, starts before the first day (at the fills).
+        base_bench = 1.0 if inception else points[0].bench_index if points else None
         # Accruals inside the slice (a rebased slice counts flows after its first close).
         first = points[0].d if points else None
         last = points[-1].d.isoformat() if points else ""

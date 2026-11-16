@@ -17,6 +17,7 @@ from argus.models import (Account, AuditLog, Instrument, NavDaily, Portfolio, Po
                           TxnType)
 from argus.providers.base import Quote
 from argus.services.lots import EPS, Lot, PositionState, build_positions
+from argus.services.performance import benchmark_fill_ref, session_mid
 from argus.symbols import is_plausible_symbol, normalize_symbol
 
 # Read-only view that combines every portfolio you own (positions, summary, performance, exposure);
@@ -390,11 +391,12 @@ class PortfolioService:
             return merged
 
     @staticmethod
-    def _session_day(pos: PositionState, q: Quote, quote_day: date) -> tuple[float, float, bool, list[Lot]]:
+    def _session_day(pos: PositionState, q: Quote, quote_day: date) -> tuple[float, float, bool, list[Lot], float]:
         """Day P&L of the quote's session for the shares held through it, its base, whether any were
-        bought in it, and the lots bought after it closed (next-session money, left out). Shares sold
-        after the close (also next-session money, B-046) still count: they were held through it."""
-        day, day_base, bought_today, after = 0.0, 0.0, False, []
+        bought in it, the lots bought after it closed (next-session money, left out), and the part of
+        the base bought in it (at the fills). Shares sold after the close (also next-session money,
+        B-046) still count: they were held through it."""
+        day, day_base, bought_today, after, fill_base = 0.0, 0.0, False, [], 0.0
         for lot, held_now in [*((l, True) for l in pos.lots), *((l, False) for l in _sold_after(pos, quote_day))]:
             lot_session = trade_session(lot.opened)
             if lot_session > quote_day:
@@ -410,7 +412,29 @@ class PortfolioService:
             ref = lot.cost_per_share if bought_that_day else (q.prev_close or q.price)
             day += lot.qty * (q.price - ref)
             day_base += lot.qty * ref
-        return day, day_base, bought_today, after
+            if bought_that_day:
+                fill_base += lot.qty * ref
+        return day, day_base, bought_today, after, fill_base
+
+    @staticmethod
+    def _benchmark_day_pct(benchmark: str, state: dict[str, PositionState], quotes: dict[str, Quote],
+                           day_base: float, fill_base: float) -> float | None:
+        """The benchmark's day change weighted like the portfolio's (B-053): the part of the day's base
+        held through the prior close moves with the benchmark from its prior close; the part bought in
+        the session moves with it from where the portfolio's fills would have bought it
+        (performance.benchmark_fill_ref: its own fills if it was bought, else its session mid)."""
+        q = quotes.get(benchmark)
+        if not q or not q.prev_close:
+            return None
+        if fill_base <= EPS or day_base <= EPS:
+            return q.change_pct
+        quote_day = session_date(q.as_of)
+        pos = state.get(benchmark)
+        lots = [*pos.lots, *_sold_after(pos, quote_day)] if pos else []
+        fills = [(l.qty, l.cost_per_share) for l in lots if l.kind == TxnType.BUY and trade_session(l.opened) == quote_day]
+        ref = benchmark_fill_ref(fills, session_mid(q.high, q.low)) or q.price
+        held = day_base - fill_base
+        return (held * (q.price / q.prev_close - 1) + fill_base * (q.price / ref - 1)) / day_base * 100
 
     def summary(self, portfolio: str | int, quotes: dict[str, Quote] | None = None,
                 now: datetime | None = None, include_lots: bool = False) -> dict:
@@ -426,6 +450,7 @@ class PortfolioService:
         rows = []
         tot = {"market_value": 0.0, "cost_basis": 0.0, "day_pnl": 0.0, "realized_pnl": 0.0, "dividends": 0.0}
         ext_pnl, ext_mv, ext_sessions, after_mv, sold_mv = 0.0, 0.0, set(), 0.0, 0.0
+        day_base_all, fill_base_all = 0.0, 0.0
         priced_all = True
         for sym, pos in sorted(state.items()):
             tot["realized_pnl"] += pos.realized_pnl
@@ -436,7 +461,10 @@ class PortfolioService:
                 # No row (nothing is held), but the totals keep its session P&L.
                 if q:
                     quote_day = session_date(q.as_of)
-                    tot["day_pnl"] += self._session_day(pos, q, quote_day)[0]
+                    day, day_base, _, _, fill_base = self._session_day(pos, q, quote_day)
+                    tot["day_pnl"] += day
+                    day_base_all += day_base
+                    fill_base_all += fill_base
                     sold_mv += sum(l.qty for l in _sold_after(pos, quote_day)) * q.price
                 continue
             inst = instruments.get(sym)
@@ -456,7 +484,9 @@ class PortfolioService:
             if q:
                 mv = pos.qty * q.price
                 quote_day = session_date(q.as_of)
-                day, day_base, bought_today, after = self._session_day(pos, q, quote_day)
+                day, day_base, bought_today, after, fill_base = self._session_day(pos, q, quote_day)
+                day_base_all += day_base
+                fill_base_all += fill_base
                 sold_mv += sum(l.qty for l in _sold_after(pos, quote_day)) * q.price
                 # Day % on the same base as Day P&L, so a position bought today shows its move since the fill.
                 change_pct = (day / day_base * 100 if day_base > EPS else None) if bought_today else q.change_pct
@@ -503,6 +533,9 @@ class PortfolioService:
             "unrealized_pct": (mv / tot["cost_basis"] - 1) * 100 if priced_all and tot["cost_basis"] else None,
             "day_pnl_pct": tot["day_pnl"] / prev_mv * 100 if priced_all and prev_mv else None,
             "fully_priced": priced_all,
+            # The benchmark's day change over the same window as day_pnl_pct (B-053).
+            "benchmark_day_pct": self._benchmark_day_pct(p.benchmark, state, quotes, day_base_all, fill_base_all),
+            "bought_in_session": fill_base_all > EPS,
             # Pre-market / after-hours move of the positions that traded then (vs the last close).
             "ext_pnl": ext_pnl if ext_sessions else None,
             "ext_pnl_pct": ext_pnl / mv * 100 if ext_sessions and mv else None,

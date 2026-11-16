@@ -102,7 +102,9 @@ export function PerformanceCard({ portfolio, refreshKey }: { portfolio: string; 
           </div>
           <div ref={el} style={{ height: 260 }} />
           <p className="small muted" style={{ marginBottom: 0 }}>
-            Since {s.start}. Buys and holdings you already owned count as money in, so adding money isn't performance.
+            Since {s.start}{s.start_value === 0
+              ? <>, from that day's fills (holdings already owned enter at its close); {perf.benchmark} alike: from its own fills if bought, else from that session's mid (high + low) / 2</>
+              : <>&apos;s close, {perf.benchmark} too</>}. Buys and holdings you already owned count as money in, so adding money isn't performance.
             {" "}Dividends count as income on their ex-date{s.dividends_accrued ? <>, including {money(s.dividends_accrued)} accrued (est.) from
               ex-dates you held through that no dividend transaction records yet</> : ""}.
           </p>

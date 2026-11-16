@@ -251,3 +251,109 @@ def test_earnings_reaction_after_the_close_uses_the_report_days_close_from_the_q
     bars.append(Bar(datetime.combine(report, time(), NY), 135, 136, 127, 127.5, 1e6))
     r = a.earnings_history("DUOL")["reports"][0]["reaction"]
     assert r["base_close"] == 127.5
+
+
+# B-053: on the first session the benchmark runs over the same window as the portfolio, from the fills.
+NOV = [date(2026, 11, 13), date(2026, 11, 16)]
+
+
+def test_first_day_benchmark_starts_at_its_own_fill_when_bought():
+    # Bought SPY at 752.66 and X at 100 intraday; SPY closed 754.37 (prior close 757.12 is irrelevant).
+    txns = [T(1, "BUY", "SPY", at(NOV[0], 18), 2, 752.66), T(2, "BUY", "X", at(NOV[0], 18), 10, 100)]
+    closes = {"SPY": {NOV[0]: 754.37}, "X": {NOV[0]: 101}}
+    pts = compute_series(txns, NOV[:1], closes, closes["SPY"], "SPY", bench_mid=760)
+    s = summarize(pts, inception=True)
+    bench = 754.37 / 752.66 - 1
+    assert s["benchmark_pct"] == pytest.approx(bench * 100)
+    assert s["twr_pct"] == pytest.approx((2 * 754.37 + 1010) / (2 * 752.66 + 1000) * 100 - 100)
+    assert s["excess_pct"] == pytest.approx(s["twr_pct"] - s["benchmark_pct"])
+    # Later days chain on from that start, not from the first close.
+    closes2 = {"SPY": {NOV[0]: 754.37, NOV[1]: 760}, "X": {NOV[0]: 101, NOV[1]: 101}}
+    pts = compute_series(txns, NOV, closes2, closes2["SPY"], "SPY", bench_mid=760)
+    assert summarize(pts, inception=True)["benchmark_pct"] == pytest.approx((760 / 752.66 - 1) * 100)
+    # A slice starting at a later close still compares close to close.
+    assert summarize(pts)["benchmark_pct"] == pytest.approx((760 / 754.37 - 1) * 100)
+
+
+def test_first_day_benchmark_not_held_starts_at_its_session_mid():
+    pts = compute_series([T(1, "BUY", "X", at(NOV[0], 18), 10, 100)], NOV[:1], {"X": {NOV[0]: 101}},
+                         {NOV[0]: 754.37}, "SPY", bench_mid=(758 + 750) / 2)
+    s = summarize(pts, inception=True)
+    assert s["benchmark_pct"] == pytest.approx((754.37 / 754 - 1) * 100)
+    assert s["excess_pct"] == pytest.approx(1 - (754.37 / 754 - 1) * 100)
+    # No range known: the benchmark starts at the first close, as before.
+    pts = compute_series([T(1, "BUY", "X", at(NOV[0], 18), 10, 100)], NOV[:1], {"X": {NOV[0]: 101}},
+                         {NOV[0]: 754.37}, "SPY")
+    assert summarize(pts, inception=True)["benchmark_pct"] == 0
+
+
+def test_first_day_of_opening_lots_starts_the_benchmark_at_the_close():
+    # OPENING lots enter at the close, so the portfolio's first day is flat; so is the benchmark's.
+    pts = compute_series([T(1, "OPENING", "X", at(NOV[0], 18), 10, 50)], NOV[:1], {"X": {NOV[0]: 101}},
+                         {NOV[0]: 754.37}, "SPY", bench_mid=754)
+    s = summarize(pts, inception=True)
+    assert s["twr_pct"] == pytest.approx(0) and s["benchmark_pct"] == pytest.approx(0)
+
+
+def _first_day_argus(make_argus, monkeypatch, buy_spy: bool):
+    import argus.app as app_mod
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    from argus.services.portfolio import TxnInput
+
+    spy = Quote("SPY", 754.37, 757.12, 756, 758, 750, datetime.combine(NOV[0], time(16, 5), NY), "fake")
+    x = Quote("X", 101, 99, 99, 102, 98, datetime.combine(NOV[0], time(16, 5), NY), "fake")
+
+    class Provider:
+        name = "fake"
+
+        def get_quotes(self, symbols):
+            return {s: q for s, q in (("SPY", spy), ("X", x)) if s in symbols}
+
+    a = make_argus([Provider()])
+    a.portfolios.create_portfolio("p")
+    buys = [TxnInput("BUY", "X", at(NOV[0], 18), 10, 100)]
+    if buy_spy:
+        buys.append(TxnInput("BUY", "SPY", at(NOV[0], 18), 2, 752.66))
+    a.portfolios.add_transactions("p", buys)
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": NOV[0].isoformat(), "session": "closed",
+                                                              "is_trading_day": False})
+    monkeypatch.setattr(app_mod, "sessions_between", lambda s, e: [d for d in NOV if s <= d <= e])
+    monkeypatch.setattr(a.market, "daily_closes_many",
+                        lambda syms, start: {s: {NOV[0]: {"SPY": 754.37, "X": 101}[s]} for s in syms})
+    monkeypatch.setattr(a.market, "session_range", lambda sym, d: (758, 750) if (sym, d) == ("SPY", NOV[0]) else None)
+    return a, {"SPY": spy, "X": x}
+
+
+@pytest.mark.parametrize("buy_spy", [True, False])
+def test_first_day_performance_and_dashboard_measure_the_benchmark_from_the_fills(make_argus, monkeypatch, buy_spy):
+    a, quotes = _first_day_argus(make_argus, monkeypatch, buy_spy)
+    start = 752.66 if buy_spy else 754.0  # its own fill, else the session mid (758 + 750) / 2
+    bench = (754.37 / start - 1) * 100
+    perf = a.performance("p", live_quotes=quotes)
+    s = perf["summary"]
+    assert s["benchmark_pct"] == pytest.approx(bench)
+    assert s["excess_pct"] == pytest.approx(s["twr_pct"] - bench)
+    assert perf["series"][-1]["bench_pct"] == pytest.approx(bench)  # the chart agrees with the stat
+    # The Dashboard tile compares the same window: the whole base was bought today, so it matches.
+    t = a.portfolio("p", live_quotes=quotes)["totals"]
+    assert t["bought_in_session"] and t["benchmark_day_pct"] == pytest.approx(bench)
+    assert t["day_pnl_pct"] == pytest.approx(s["twr_pct"])
+
+
+def test_dashboard_benchmark_day_change_blends_held_and_bought_today():
+    from argus.services.portfolio import PortfolioService
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    from argus.services.lots import Lot, PositionState
+
+    q = Quote("SPY", 101, 100, 100, 104, 98, datetime.combine(NOV[0], time(16, 5), NY), "fake")
+    # $3000 held through the prior close, $1000 bought today: SPY's mid is 101, so that part is flat.
+    pct = PortfolioService._benchmark_day_pct("SPY", {}, {"SPY": q}, 4000, 1000)
+    assert pct == pytest.approx(3000 / 4000 * 1.0)
+    # Nothing bought today: the plain day change.
+    assert PortfolioService._benchmark_day_pct("SPY", {}, {"SPY": q}, 4000, 0) == pytest.approx(1.0)
+    # SPY itself bought today at 100.5: that fill is the reference.
+    pos = PositionState("SPY", lots=[Lot(1, "SPY", datetime.combine(NOV[0], time(11), NY), "BUY", 2, 100.5)])
+    assert PortfolioService._benchmark_day_pct("SPY", {"SPY": pos}, {"SPY": q}, 1000, 1000) == pytest.approx(
+        (101 / 100.5 - 1) * 100)

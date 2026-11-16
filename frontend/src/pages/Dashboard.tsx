@@ -48,6 +48,8 @@ export function Dashboard({ portfolio, live }: Props) {
   if (!summary || !allocation) return <p className="muted">Loading portfolio…</p>;
 
   const t = summary.totals;
+  // Same window as the portfolio's day change (B-053); the bare quote only if the server sent none.
+  const benchBase = t.benchmark_day_pct ?? benchmark?.change_pct;
   return (
     <div className="stack">
       <section className="card">
@@ -92,9 +94,10 @@ export function Dashboard({ portfolio, live }: Props) {
           <div className="value">
             <span className={tone(t.day_pnl_pct)}>{pct(t.day_pnl_pct)}</span>
             <span className="muted"> / </span>
-            <span className={tone(benchmark?.change_pct)}>{pct(benchmark?.change_pct)}</span>
+            <span className={tone(benchBase)}>{pct(benchBase)}</span>
           </div>
-          <div className="delta muted">day change</div>
+          <div className="delta muted" title={t.bought_in_session ? `Shares bought this session count from their fills; for that part ${summary.portfolio.benchmark} counts from its own fills if bought, else from its session mid (high + low) / 2` : undefined}>
+            {t.bought_in_session ? `day change; today's buys from the fills, ${summary.portfolio.benchmark} alike` : "day change"}</div>
         </div>
       </section>
 
