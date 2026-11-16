@@ -45,7 +45,7 @@ from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
-from argus.services.market import MarketService, session_close_from_quote, with_pe
+from argus.services.market import MarketService, beta_basis, session_close_from_quote, with_pe
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import AccountSnapshots, SnapshotService
@@ -1009,6 +1009,7 @@ class Argus:
             metrics.setdefault(s, {}).update(v)
         return {"symbols": syms, "pending": todo, "metrics": metrics,
                 "as_of": {s: c["as_of"].isoformat() for s, c in cached.items()},
+                "beta_basis": {s: beta_basis(c["metrics"], c["sources"]) for s, c in cached.items()},
                 "errors": {"price_history": err} if err else {}}
 
     def held_positions(self) -> dict[str, tuple[float, float]]:

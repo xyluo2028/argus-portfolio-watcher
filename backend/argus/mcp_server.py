@@ -212,7 +212,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         So do eps_growth_yoy_pct (diluted EPS over those four quarters vs the four before) and
         eps_growth_q_yoy_pct (newest quarter vs a year earlier); with source "sec" a null one is not
         meaningful (from a loss or a near-zero base, beyond ±1000%), not missing. pe_ttm is the current price ÷ that eps_ttm, with its source (null when EPS ≤ 0); the provider's
-        P/E only when there's no EPS. Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
+        P/E only when there's no EPS. beta is the provider's (5 years of monthly returns vs the S&P 500;
+        `beta_basis` names source and window), not get_risk's 1-year daily beta vs SPY. Cached 24h; `sources` says which provider supplied each value. `sec` gives SEC's coverage:
         `latest_period` (newest quarter in SEC's XBRL data), its age, `stale` (older than ~135 days:
         SEC's data lacks a newer 10-Q, so SEC figures lag the providers'), `fcf_ttm_quarters` and
         `ttm_quarters` (behind the SEC revenue/EPS/growth/margin figures)."""
@@ -322,7 +323,10 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         beta x SPY for holdings listed later; plus SPY -10%) and Fama-French 5 + momentum exposures.
         `last_day` is the latest session's P&L of the shares held through it (the dashboard's Day P&L,
         `basis` "session_holdings"; today's holdings over it, "current_holdings", only when not every
-        quote is of that session), flagged when it exceeded the 99% VaR; until Yahoo publishes that session's bar its closes come from quotes (`closes_from_quotes`)."""
+        quote is of that session), flagged when it exceeded the 99% VaR. Betas here are Argus's own,
+        1 year of daily returns vs the benchmark (`beta_basis` on the report, each position and the SPY -10%
+        scenario), not get_fundamentals' provider beta; the factor "Market" loading is the Fama-French
+        market factor estimated jointly with the others (its `beta_basis`); until Yahoo publishes that session's bar its closes come from quotes (`closes_from_quotes`)."""
         return argus.risk(portfolio, quotes_now())
 
     @mcp.tool(annotations=READ)

@@ -36,6 +36,20 @@ def test_beta_vol_var_and_risk_shares():
     assert out["var"]["99"]["var_pct"] > out["var"]["95"]["var_pct"] > 0
     assert out["var"]["95"]["cvar_pct"] >= out["var"]["95"]["var_pct"]
     assert out["correlation"]["symbols"] == ["A", "B"] and out["correlation"]["matrix"][0][0] == pytest.approx(1)
+    # Every beta says what it is, so it isn't mistaken for the stock page's provider beta (B-021).
+    assert out["beta_basis"] == "Argus, vs SPY, 252 daily returns (1y)"
+    assert pos["A"]["beta_basis"] == out["beta_basis"]
+    spy10 = next(s for s in out["scenarios"] if s["key"] == "spy_down_10")
+    assert spy10["beta_basis"] == out["beta_basis"] and "1y daily beta vs SPY" in spy10["label"]
+
+
+def test_thin_history_beta_is_labeled_assumed():
+    days, rm = _walk(1, 400, start=date(2025, 1, 1))
+    _, ra = _walk(2, 400, beta_to=rm, beta=2.0)
+    young = dict(list(_closes(days, ra).items())[-20:])
+    out = risk.analyze({"OLD": 50.0, "NEW": 50.0}, {"SPY": _closes(days, rm), "OLD": _closes(days, rm), "NEW": young})
+    pos = {p["symbol"]: p for p in out["positions"]}
+    assert pos["NEW"]["beta"] == 1.0 and pos["NEW"]["beta_basis"].startswith("assumed 1 (only 19 daily returns")
 
 
 def test_stress_replays_history_and_proxies_late_listings():
@@ -69,6 +83,9 @@ def test_factor_regression_recovers_loadings():
     load = {l["factor"]: l["beta"] for l in f["loadings"]}
     assert load["Mkt-RF"] == pytest.approx(1.2, abs=0.05) and load["SMB"] == pytest.approx(0.5, abs=0.08)
     assert load["Mom"] == pytest.approx(-0.3, abs=0.08) and f["r2"] > 0.9
+    basis = {l["factor"]: l.get("beta_basis") for l in f["loadings"]}
+    assert basis["Mkt-RF"].startswith("Fama-French market factor") and "300 daily returns" in basis["Mkt-RF"]
+    assert basis["SMB"] is None  # only the market loading is a beta
 
 
 def test_french_csv_parsing():

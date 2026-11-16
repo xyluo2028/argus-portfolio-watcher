@@ -140,6 +140,8 @@ export interface Fundamentals {
   as_of: string;
   metrics: Record<string, number | null>;
   sources: Record<string, string>;
+  /** Source and window of `metrics.beta`, e.g. "Finnhub, 5y monthly vs S&P 500"; null without a beta. */
+  beta_basis?: string | null;
   /** Coverage of the SEC-based figures; null when SEC has nothing for the symbol. */
   sec?: SecCoverage | null;
   /** Parts that failed while the rest still loaded, e.g. price_history (returns, CAGR left null). */
@@ -441,17 +443,17 @@ export interface ReturnBases {
 export interface RiskReport {
   portfolio: string; available: boolean; reason?: string; fully_priced?: boolean;
   as_of: string; lookback_days: number; benchmark: string; total_value: number;
-  beta: number; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
+  beta: number; beta_basis: string; volatility_pct: number; benchmark_volatility_pct: number; max_drawdown_pct: number;
   var: Record<"95" | "99", { var_pct: number; cvar_pct: number; var_value: number; cvar_value: number }>;
   // session_holdings: the book's Day P&L (shares held through that session); current_holdings: today's
   // holdings over it, when quotes of that session aren't available for every position.
   last_day: { date: string; return_pct: number | null; value: number; basis: "session_holdings" | "current_holdings"; exceeds_var_99: boolean };
   closes_from_quotes: { date: string; symbols: string[] } | null;
-  positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; vol_pct: number; history_days: number; proxied: boolean }[];
+  positions: { symbol: string; weight_pct: number; risk_pct: number; beta: number; beta_basis: string; vol_pct: number; history_days: number; proxied: boolean }[];
   correlation: { symbols: string[]; matrix: (number | null)[][] };
-  scenarios: { key: string; label: string; start: string | null; end: string | null; spy_pct: number; portfolio_pct: number; value: number; proxied: string[] }[];
+  scenarios: { key: string; label: string; start: string | null; end: string | null; spy_pct: number; portfolio_pct: number; value: number; proxied: string[]; beta_basis?: string }[];
   factors: { from: string; to: string; days: number; r2: number; alpha_annual_pct: number;
-             loadings: { factor: string; label: string; beta: number; t: number }[] } | null;
+             loadings: { factor: string; label: string; beta: number; t: number; beta_basis?: string }[] } | null;
 }
 
 export interface GrowthProfile {

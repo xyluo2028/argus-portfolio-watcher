@@ -130,6 +130,34 @@ def test_finnhub_peg_is_trailing_and_kept_apart_from_the_expected_peg(growth, pe
     assert m["peg_ttm"] == peg_ttm
 
 
+def test_fundamentals_beta_names_its_source_and_window(make_argus):
+    # The provider's beta (5y monthly vs the S&P 500) is labeled apart from the Risk card's 1y daily one (B-021).
+    class Finnhub:
+        name = "finnhub"
+
+        def __init__(self, beta):
+            self.beta = beta
+
+        def get_metrics(self, symbol):
+            return {"beta": self.beta, "pe_ttm": 20.0}
+
+    class Yahoo:
+        name = "yahoo"
+
+        def get_metrics(self, symbol):
+            return {"beta": 1.38}
+
+    a = make_argus(fundamentals=[Finnhub(1.46), Yahoo()])
+    out = a.fundamentals("ADBE")
+    assert (out["metrics"]["beta"], out["beta_basis"]) == (1.46, "Finnhub, 5y monthly vs S&P 500")
+    assert a.symbol_fundamentals(["ADBE"])["beta_basis"] == {"ADBE": "Finnhub, 5y monthly vs S&P 500"}
+    b = make_argus(fundamentals=[Finnhub(None), Yahoo()])
+    assert b.market.get_fundamentals("LNG", ["beta"])["beta_basis"] == "Yahoo, 5y monthly vs S&P 500"
+    assert "beta_basis" not in b.market.get_fundamentals("LNG", ["pe_ttm"])
+    c = make_argus(fundamentals=[Finnhub(None)])
+    assert c.market.get_fundamentals("NOB", ["beta", "pe_ttm"])["beta_basis"] is None
+
+
 def test_peg_column_never_falls_back_to_the_trailing_one(make_argus):
     class Finnhub:
         name = "finnhub"

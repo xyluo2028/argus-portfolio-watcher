@@ -28,6 +28,11 @@ FACTOR_LABELS = {
     "Mom": "Momentum",
 }
 
+# The factor "Market" loading isn't a beta vs SPY: it's on the whole US market's return over T-bills,
+# estimated alongside the other five factors, so it differs from the Risk card's beta.
+MARKET_FACTOR_BASIS = ("Fama-French market factor (all US stocks minus T-bills), {days} daily returns "
+                       "{start} – {end}, jointly with 5 other factors")
+
 
 def _close_on_or_before(closes: dict[date, float], d: date) -> tuple[date, float] | None:
     best = None
@@ -68,6 +73,10 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         if obs[i] >= MIN_OBS and np.var(rm[ok], ddof=1) > 0:
             betas[i] = np.cov(raw[ok, i], rm[ok])[0, 1] / np.var(rm[ok], ddof=1)
     filled = np.where(np.isnan(raw), betas * rm[:, None], raw)
+    # Labels so this beta isn't confused with the provider's 5y monthly one on the stock page (B-021).
+    beta_basis = f"Argus, vs {bench}, {len(rm)} daily returns (1y)"
+    def position_basis(i):
+        return beta_basis if obs[i] >= MIN_OBS else f"assumed 1 (only {int(obs[i])} daily returns, under {MIN_OBS})"
     rp = filled @ w
 
     vol = float(np.std(rp, ddof=1) * np.sqrt(TRADING_DAYS))
@@ -102,7 +111,8 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
 
     positions = sorted(({
         "symbol": s, "weight_pct": float(w[i] * 100), "risk_pct": float(risk_share[i] * 100),
-        "beta": float(betas[i]), "vol_pct": float(asset_vol[i] * 100), "history_days": int(obs[i]),
+        "beta": float(betas[i]), "beta_basis": position_basis(i), "vol_pct": float(asset_vol[i] * 100),
+        "history_days": int(obs[i]),
         "proxied": bool(obs[i] < len(rm) * 0.9),
     } for i, s in enumerate(syms)), key=lambda p: -p["risk_pct"])
 
@@ -132,9 +142,9 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         scenarios.append({"key": key, "label": label, "start": start.isoformat(), "end": end.isoformat(),
                           "spy_pct": spy_ret * 100, "portfolio_pct": impact * 100, "value": impact * total,
                           "proxied": proxied})
-    scenarios.append({"key": "spy_down_10", "label": "SPY falls 10% (via beta)", "start": None, "end": None,
-                      "spy_pct": -10.0, "portfolio_pct": float(w @ betas) * -10, "value": float(w @ betas) * -0.10 * total,
-                      "proxied": []})
+    scenarios.append({"key": "spy_down_10", "label": f"{bench} falls 10% (each holding's 1y daily beta vs {bench})",
+                      "start": None, "end": None, "spy_pct": -10.0, "portfolio_pct": float(w @ betas) * -10,
+                      "value": float(w @ betas) * -0.10 * total, "proxied": [], "beta_basis": beta_basis})
 
     return {
         "available": True,
@@ -143,6 +153,7 @@ def analyze(values: dict[str, float], closes: dict[str, dict[date, float]], benc
         "benchmark": bench,
         "total_value": total,
         "beta": beta,
+        "beta_basis": beta_basis,
         "volatility_pct": vol * 100,
         "benchmark_volatility_pct": float(np.std(rm, ddof=1) * np.sqrt(TRADING_DAYS) * 100),
         "max_drawdown_pct": drawdown,
@@ -173,6 +184,8 @@ def _factor_exposures(rp_by_day: dict[date, float], factors: dict[date, dict[str
     return {
         "from": min(days).isoformat(), "to": max(days).isoformat(), "days": len(days), "r2": r2,
         "alpha_annual_pct": float(coef[0] * TRADING_DAYS * 100),
-        "loadings": [{"factor": f, "label": FACTOR_LABELS[f], "beta": float(coef[i + 1]), "t": float(coef[i + 1] / se[i + 1])}
+        "loadings": [{"factor": f, "label": FACTOR_LABELS[f], "beta": float(coef[i + 1]), "t": float(coef[i + 1] / se[i + 1]),
+                      **({"beta_basis": MARKET_FACTOR_BASIS.format(
+                          days=len(days), start=min(days).isoformat(), end=max(days).isoformat())} if f == "Mkt-RF" else {})}
                      for i, f in enumerate(names)],
     }

@@ -289,6 +289,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                       const v = metricValue(k, m, quote?.price), d = METRICS[k];
                       const since = d.range && bases?.bases[d.range];
                       const src = since ? `since the ${since.date} close, as the chart's ${d.range}`
+                        : k === "beta" && fund.beta_basis ? fund.beta_basis
                         : fund.sources[k] ? `source: ${fund.sources[k]}` : undefined;
                       const quarters = fund.sources[k] === "sec" ? secQuarters(k, fund.sec) : null;
                       const covers = !quarters?.length ? undefined : QUARTER_YOY.has(k)
@@ -301,6 +302,7 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
                           <dd className={metricTone(k, v)}>
                             {notMeaningful(k, m) ? "n/m" : formatMetric(k, v)}
                             {quarters?.length ? <span className="ext-line">SEC, {QUARTER_YOY.has(k) ? "Q" : `${quarters.length}Q`} to <span style={{ whiteSpace: "nowrap" }}>{quarters[0]}</span></span>
+                              : k === "beta" && fund.beta_basis ? <span className="ext-line">{fund.beta_basis.replace("S&P 500", "S&P\u00a0500")}</span>
                               : LABELED_SOURCE.has(k) && fund.sources[k] ? <span className="ext-line">{SOURCE_NAMES[fund.sources[k]] ?? fund.sources[k]}</span> : null}
                             {k === "ocf_margin_pct" && <span className="ext-line">capex not reported</span>}
                           </dd>

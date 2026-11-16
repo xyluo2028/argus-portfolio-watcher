@@ -47,6 +47,10 @@ METRIC_FIELDS = (
 # Ratios (P/E, P/B, margins...) are unit-free and keep the provider order.
 PRICE_CURRENCY_FIELDS = {"high_52w", "low_52w", "market_cap", "eps_ttm", "eps_forward", "revenue_ttm", "fcf_ttm",
                          "sma50", "sma200"}
+# What each provider's beta measures, so it isn't mistaken for the Risk card's own (1y daily vs SPY).
+# Yahoo labels its figure "Beta (5Y Monthly)" against the S&P 500; Finnhub doesn't say, but its numbers
+# match a 5-year monthly regression on SPY (SCHD 0.68, GLD 0.20, Nov 2026) and not shorter or daily windows.
+BETA_BASIS = {"finnhub": "Finnhub, 5y monthly vs S&P 500", "yahoo": "Yahoo, 5y monthly vs S&P 500"}
 # Pre/post-market prices are re-fetched this often during those sessions, and while closed
 # (overnight, weekends) only to catch the last after-hours prints.
 EXT_MAX_AGE = {"pre": 60, "post": 60, "closed": 30 * 60}
@@ -82,6 +86,14 @@ def sec_coverage(meta: dict | None) -> dict | None:
     return freshness(meta.get("latest_period")) | {
         "fcf_ttm_quarters": quarters, "fcf_ttm_through": quarters[0] if quarters else None,
         "ttm_quarters": meta.get("ttm_quarters")}
+
+
+def beta_basis(metrics: dict, sources: dict) -> str | None:
+    """Source and window of the fundamentals beta (BETA_BASIS); None when there's no beta."""
+    if metrics.get("beta") is None:
+        return None
+    src = sources.get("beta")
+    return BETA_BASIS.get(src, src)
 
 
 def with_fcf_margin(metrics: dict, sources: dict) -> tuple[dict, dict]:
@@ -479,6 +491,7 @@ class MarketService:
             "metrics": {f: metrics.get(f) for f in wanted},
             "sources": {f: sources[f] for f in wanted if f in sources},
             "sec": sec_coverage(sources.get("_sec")),
+            **({"beta_basis": beta_basis(metrics, sources)} if "beta" in wanted else {}),
         }
 
     def cached_fundamentals(self, symbols: list[str]) -> dict[str, dict]:

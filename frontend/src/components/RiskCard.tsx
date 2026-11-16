@@ -50,8 +50,8 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
         {r.closes_from_quotes && <span title={`Yahoo hasn't published ${r.closes_from_quotes.date}'s daily bar yet: closes from quotes for ${r.closes_from_quotes.symbols.join(", ")}`}> (last close from quotes)</span>}</span></h2>
 
       <div className="tiles">
-        <div className="tile">
-          <div className="label">Beta vs {r.benchmark}</div>
+        <div className="tile" title={`${r.beta_basis}. Not the stock page's beta, which is the data provider's over 5 years of monthly returns`}>
+          <div className="label">Beta vs {r.benchmark} · 1y daily</div>
           <div className="value">{r.beta.toFixed(2)}</div>
           <div className="delta muted">{r.benchmark} ±1% → you ±{r.beta.toFixed(1)}%</div>
         </div>
@@ -95,12 +95,12 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
             <tbody>
               {r.scenarios.map((s) => (
                 <tr key={s.key} style={{ cursor: "default" }}>
-                  <td style={{ textAlign: "left" }}>{s.label}</td>
+                  <td style={{ textAlign: "left", whiteSpace: "normal", minWidth: 170 }}>{s.label}</td>
                   <td className="muted">{s.start ? `${s.start} → ${s.end}` : "–"}</td>
                   <td className={tone(s.spy_pct)}>{pct(s.spy_pct, 1)}</td>
                   <td className={tone(s.portfolio_pct)}><strong>{pct(s.portfolio_pct, 1)}</strong></td>
                   <td className={tone(s.value)}>{money(s.value, { signed: true, whole: true })}</td>
-                  <td className="muted" title={s.proxied.join(", ")}>
+                  <td className="muted" title={s.beta_basis ?? s.proxied.join(", ")}>
                     {s.key === "spy_down_10" ? "all holdings" : s.proxied.length ? `${s.proxied.length} of ${r.positions.length} holdings` : "none"}
                   </td>
                 </tr>
@@ -109,8 +109,8 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
           </table>
         </div>
         <p className="small muted" style={{ margin: "6px 0 0" }}>
-          Each holding's actual price change over the window; holdings listed later use their beta to {r.benchmark}{" "}
-          (hover the count for which). Price only, no dividends.
+          Each holding's actual price change over the window; holdings listed later use their 1y daily beta to {r.benchmark}{" "}
+          (hover the count for which), as does the {r.benchmark} −10% row. Price only, no dividends.
         </p>
       </div>
 
@@ -133,14 +133,15 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
                   </td>
                   <td className="num">{p.weight_pct.toFixed(1)}%</td>
                   <td className="num"><strong>{p.risk_pct.toFixed(1)}%</strong></td>
-                  <td className="num muted" title="Beta to the benchmark">β {p.beta.toFixed(2)}</td>
+                  <td className="num muted" title={`Beta: ${p.beta_basis}`}>β {p.beta.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="small muted" style={{ margin: "6px 0 0" }}>
             Share of risk = the position's contribution to portfolio variance; it can exceed its weight (volatile, correlated)
-            or fall below it (diversifying). * Short history, filled with beta × {r.benchmark}.
+            or fall below it (diversifying). β = beta vs {r.benchmark} over the same 1y of daily returns (the stock page shows
+            the data provider's 5y monthly beta, which can differ a lot). * Short history, filled with beta × {r.benchmark}.
           </p>
         </div>
 
@@ -181,7 +182,8 @@ export function RiskCard({ portfolio }: { portfolio: string }) {
               <tbody>
                 {r.factors.loadings.map((l) => (
                   <tr key={l.factor} style={{ cursor: "default" }}>
-                    <td style={{ textAlign: "left" }}>{l.label}</td>
+                    <td style={{ textAlign: "left", whiteSpace: "normal", minWidth: 170 }} title={l.beta_basis}>{l.label}
+                      {l.beta_basis && <span className="ext-line">all US stocks minus T-bills, with the other factors; not the beta vs {r.benchmark}</span>}</td>
                     <td><strong>{l.beta.toFixed(2)}</strong></td>
                     <td className={Math.abs(l.t) >= 2 ? undefined : "muted"}>{l.t.toFixed(1)}</td>
                     <td style={{ textAlign: "left" }} className={Math.abs(l.t) >= 2 ? undefined : "muted"}>{reading(l.factor, l.beta, l.t)}</td>

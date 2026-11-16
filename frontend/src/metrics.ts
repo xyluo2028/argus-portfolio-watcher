@@ -95,7 +95,8 @@ const DEFS: MetricDef[] = [
   { key: "dividend_yield_pct", short: "Yield (TTM)", label: "Dividend yield (TTM)", kind: "pct2", title: "Dividends paid over the last 12 months ÷ price" },
   { key: "payout_ratio_pct", short: "Payout", label: "Payout ratio", kind: "pct", title: "Dividends as a share of earnings (TTM)" },
   { key: "dividend_growth_5y_pct", short: "Div CAGR 5Y", label: "Dividend CAGR 5Y", kind: "signed" },
-  { key: "beta", short: "Beta", label: "Beta", kind: "ratio2" },
+  { key: "beta", short: "Beta 5y", label: "Beta (5y monthly)", kind: "ratio2",
+    title: "The data provider's beta: 5 years of monthly returns vs the S&P 500 (Finnhub, else Yahoo). Not the Risk card's beta, which is Argus's own over 1 year of daily returns vs SPY and can differ a lot" },
   // funds
   { key: "expense_ratio_pct", short: "Expense ratio", label: "Expense ratio", kind: "pct2" },
   { key: "net_assets", short: "Net assets", label: "Net assets", kind: "big" },
