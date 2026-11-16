@@ -25,7 +25,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-002 Check every page at phone width
 - kind: ux · severity: medium
-- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005, income r006, macro r006, macro r008, multibagger r013, income r013, macro r013, income r014, macro r015, income r015, macro r016, income r016
+- reported by: seed (docs/deployment.md, "Should do" #12), macro r001, income r001, multibagger r001, macro r003, income r003, multibagger r003, macro r005, multibagger r005, income r006, macro r006, macro r008, multibagger r013, income r013, macro r013, income r014, macro r015, income r015, macro r016, income r016, trader r017
 - evidence: pages were mostly designed and checked at desktop width. r001 at 390 px: Markets is 5,418 px tall
   with one gauge per row and clips the sector and calendar tables; Analysis tables (stress, dividends) and the
   Screener results table clip after the first columns; yield-curve end labels overlap on desktop
@@ -43,6 +43,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r014: Analysis at phone width still hides income columns
 - r015: Markets at 390 px overflows horizontally because the error banner prints an unbroken Nasdaq URL (macro #3); Analysis Stress scenarios at 390 px show only the name and a cut-off date column, every loss figure off-screen (income #3)
 - r016: at 390 px the Stress table still hides every loss figure (income r016)
+- r017: at 390 px the Dashboard Holdings table puts Price, Value and P&L behind a sideways scroll
 - status: open
 
 ### B-003 Header badge says "no Finnhub key" when the stream is only switched off
@@ -156,14 +157,16 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-021 Two unlabeled betas; "SPY falls 10%" scenario understates risk next to the historical replays
 - kind: ux · severity: medium
-- reported by: income r001, income r003, macro r003, macro r006, macro r008, macro r013, income r013
+- reported by: income r001, income r003, macro r003, macro r006, macro r008, macro r013, income r013, trader r017
 - evidence: SCHD 0.71 (fundamentals) vs 0.22 (1y risk); scenario −1.5% vs replays −14% to −25%
 - r003: three unlabeled betas (SPY tile 0.14, factor loading 0.36, stock pages use Finnhub's: XOM −0.67 vs 0.17); "SPY falls 10%" −2.5% vs replays −5.7% to −26.5% (income r003 #9, macro r003)
 - r006: beta 0.25 (vs SPY, 1y) next to a factor "Market" loading 0.36, neither labeled (macro r006)
 - r008: GLD 0.19 on its page vs 0.85 in Risk; DBC 0.11 vs −0.40 (macro r008 #8)
 - r013: beta 0.13–0.15 and 99% VaR $609 vs a −$1,648 day (realized beta ~0.38) for loop-macro; loop-income's ratio implied ~−2.3% per −10% SPY (macro #3, income #3)
 - r014: income withdrew its r013 beta evidence: down-day beta equals full beta (0.157)
-- status: open
+- r017: ADBE beta 1.46 on the stock page vs 0.185 in risk; LNG 0.04 vs −0.47, neither labeled
+- acceptance (picked r017, labeling only): every beta shown (stock page/fundamentals, Risk card, factor loading, API and MCP fields) states its source and window (e.g. "Finnhub, 5y monthly" vs "vs SPY, 1y daily"), in the UI and as fields in the API; the "SPY falls 10%" scenario says which beta it uses; the scenario-vs-replay part stays open if not addressed
+- status: done (r017, cac6bf4): labeling; the scenario-vs-replay gap moved to B-173
 
 ### B-022 Targets & drift card opens on "By sector" when targets are saved by position
 - kind: ux · severity: medium
@@ -197,11 +200,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r005: still open (macro r005, income r005)
 - r006: `/drift` warns "targets sum to 99.0%" for a 1% cash target (macro r006)
 - r008: drift still warns "targets sum to 99.0%" for a 1% cash target (macro r008)
+- r017: see B-168 (no cash balance at all) for the broader need
 - status: open
 
 ### B-026 Risk, events and the brief take 11–15 s on first load after a trade
 - kind: perf · severity: medium
-- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014, macro r015, income r015, multibagger r015, macro r016, multibagger r016, income r016
+- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014, macro r015, income r015, multibagger r015, macro r016, multibagger r016, income r016, trader r017
 - r003: worse — cold `/risk` 33.4 s (income), 18.6 s (macro); brief 6.1 s
 - r004: cold `/risk` 24.1 s (macro), 21.5 s (income); cold portfolio fundamentals 26.8 s then all 17 "pending" (income r004 #7)
 - r005: cold `/risk` 15.5 s; portfolio fundamentals now 2.2 s (was 26.8 s) (income r005 #8)
@@ -215,6 +219,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r014: first risk load 25.6 s (income); watchlist first load 9.7 s (multibagger)
 - r015: first /risk 20.2 s, /performance 7.7 s, summary 3.3 s (macro #5); first risk 31.5 s (income #6); brief 4.9 s (1.35 s r014), cold watchlist 7.2 s, stock-page chart still "Loading chart…" at 2.7 s (multibagger #7)
 - r016: first risk load 53.5 s (income), ~15 s (macro); performance ~12 s, brief 7.7 s, watchlist 10.2 s cold
+- r017: on a 5-holding portfolio the first risk load took 3.4 s
 - status: open
 
 ### B-027 Screener universe isn't built until someone runs a screen (breadth unavailable meanwhile)
@@ -392,13 +397,15 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-053 Excess return vs SPY starts the benchmark at the prior close, the portfolio at its fills
 - kind: bug · severity: medium
-- reported by: macro r003, macro r005, macro r006
+- reported by: macro r003, macro r005, macro r006, trader r017
 - evidence: loop-macro shows −0.42% excess; over the same window (from the buy fills) SPY rose +0.47%, not +0.53%, so the
   true figure is about −0.36% (rounds/003/investor-macro.md #1)
 - r004: still present (macro r004)
 - r005: still present (macro r005 #9)
 - r006: chart starts loop-macro +0.11% vs SPY 0.00% on 10-20; from the SPY fill excess would be +0.67% not +0.62% (macro r006)
-- status: open
+- r017: bot0-sim day one: excess +0.42% while from the SPY fill (752.66) to the close SPY did +0.23% and the account +0.33%, so about +0.10–0.19%; Dashboard SPY tile −0.36%, chart 0.00% (rounds/017/trader.md)
+- acceptance: the benchmark series starts at the price the portfolio's first buy filled at (or, when the benchmark isn't held, the benchmark's price at the same point: the session's value the portfolio's first fill is measured from), not at the prior close; excess return on a portfolio's first session equals portfolio return − benchmark return measured over the same window; the Dashboard tile and Performance chart agree or are labeled with their different windows; a test covers a first-day portfolio
+- status: done (r017, 6f03b10)
 
 ### B-054 VTIP's December dividend isn't projected (next ex-date blank, rest of 2026 $0)
 - kind: bug · severity: medium
@@ -751,7 +758,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-106 The brief ignores named watchlists: no watchlist movers or watchlist earnings
 - kind: bug · severity: medium
-- reported by: multibagger r008, multibagger r009, multibagger r010, multibagger r012, multibagger r013, multibagger r014, multibagger r016
+- reported by: multibagger r008, multibagger r009, multibagger r010, multibagger r012, multibagger r013, multibagger r014, multibagger r016, trader r017
 - evidence: `/api/brief/loop-growth` `watchlist_movers: []` while growth-candidates has DUOL −4.3%, XZO +6.1%, BCRX +3.3%; the brief reads only the default watchlist; MNTN/DUOL/XZO/PTCT earnings missing (keep B-033 fixed) (rounds/008/investor-multibagger.md #3)
 - r009: `watchlist_movers: []` while VICR −4.63% / PEGA −3.56% (multibagger r009 #7)
 - r010: `watchlist_movers` empty while six watchlist names moved ≥3% (VICR −7.5%, PTCT −7.0%); MNTN's 11-04 report not in the brief (multibagger r010 #7)
@@ -759,7 +766,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r013: brief's watchlist movers empty while MNTN fell −54.7%
 - r014: brief watchlist movers still empty
 - r016: watchlist movers still empty; the Watchlist page has the same root cause (B-163)
-- status: open
+- r017: the brief has no watchlist earnings or movers; NVDA (watchlist `candidates`) reports 11-17 and is in `/api/events` but not in the brief
+- acceptance: the brief's watchlist movers and watchlist earnings read every named watchlist of the signed-in account (not only the one named "Watchlist"), deduplicated, each row naming its list; other accounts' lists stay invisible (B-033 stays fixed); tests cover a named list
+- status: done (r017, 222ba06)
 
 ### B-107 "YTD total return" on the stock page is Yahoo's undated month-end figure next to a live YTD price return
 - kind: bug · severity: medium
@@ -1016,8 +1025,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-151 Stock page hides a latest-quarter margin collapse; "Revenue growth YoY" is the prior quarter
 - kind: ux · severity: medium
-- reported by: multibagger r014
+- reported by: multibagger r014, trader r017
 - evidence: GRND shows only TTM operating margin (20.7%) while Q3 was 2.9% (39.1% a year ago); "Revenue growth YoY +32.4%" is the previous quarter's figure
+- r017: META trailing operating margin 32.9% while Q3 alone was 20.1%
 - status: open
 
 ### B-152 Two "last session" P&L figures (Risk +$3,978 vs Dashboard +$3,335); Day % column follows two rules
@@ -1126,6 +1136,44 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: feature · severity: low
 - reported by: multibagger r016
 - evidence: the multibagger's 15% cap is at cost; simulate shows only market-value weights (rounds/016/investor-multibagger.md)
+- status: open
+
+### B-168 Argus has no cash balance: value, weights, exposure and risk leave cash out
+- kind: feature · severity: high
+- reported by: trader r017
+- evidence: bot0-sim holds $2,100 cash (21%) of a $10,033 account; the Dashboard shows total value $7,933 and SPY at 44.2% when it is 35% of the account, so the 25%/50% house-rule caps can't be checked in Argus (rounds/017/trader.md #1). Related: B-024
+- note: a fix probably needs a per-portfolio starting-cash/deposit concept; setting it on bot0-sim would be a change to the trader's account outside `scripts/sim.py`, so a human should decide how the loop applies it
+- status: open
+
+### B-169 SPY's quote day low (Finnhub 745.20) disagrees with Argus's own daily bar (Yahoo 747.88)
+- kind: bug · severity: medium
+- reported by: trader r017
+- evidence: 11-13 session; the quote's low is out of line with the S&P 500 index, VOO and IVV; `sim.py` fills at the quote's (high + low)/2, so the SPY fill was 752.66 rather than ~754.00 from the bar (rounds/017/trader.md #2)
+- note: any fix changes the referee's fill input; flagged for a human
+- status: open
+
+### B-170 No alert for a close below the 50-day or 200-day moving average
+- kind: feature · severity: low
+- reported by: trader r017
+- evidence: two of the trader's exit rules are MA breaks; alerts only take price/percent conditions (rounds/017/trader.md #6)
+- status: open
+
+### B-171 Market context's top-level date is Sunday 11-15 while its data is from Friday 11-13
+- kind: ux · severity: low
+- reported by: trader r017
+- evidence: `/api/market-context` on 11-16 (Mon, before the open) (rounds/017/trader.md #9)
+- status: open
+
+### B-172 The CLI has no screener, market, watchlist or research commands
+- kind: feature · severity: low
+- reported by: trader r017
+- evidence: the trader did those steps through the API (rounds/017/trader.md #10)
+- status: open
+
+### B-173 "SPY falls 10%" scenario understates risk next to the historical replays
+- kind: bug · severity: medium
+- reported by: split from B-021 in r017 (income r001, r003, macro r003, r013)
+- evidence: SCHD book: scenario −1.5% vs replays −14% to −25%; loop-income r003 −2.5% vs −5.7% to −26.5%; the scenario uses each holding's 1y daily beta vs SPY (labeled since r017, cac6bf4)
 - status: open
 
 ## Done

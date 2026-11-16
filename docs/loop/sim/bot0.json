@@ -1,0 +1,351 @@
+{
+ "format": "argus-account-snapshot",
+ "version": 1,
+ "account": "bot0",
+ "created_at": "2026-11-16T02:44:17.609328+00:00",
+ "tables": {
+  "portfolio": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "name": "bot0-sim",
+    "benchmark": "SPY",
+    "created_at": "2026-11-16T02:11:51.373599+00:00"
+   }
+  ],
+  "txn": [
+   {
+    "id": 1,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "SPY",
+    "qty": 4.6501,
+    "price": 752.66,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T21:00:00+00:00",
+    "note": "Core index position ~35%; buying the pullback (F&G 30). Thesis note #1.",
+    "source": "ui",
+    "external_id": "sim-2026-11-13-BUY-SPY-4.6501",
+    "deleted": false,
+    "created_at": "2026-11-16T02:16:23.410046+00:00"
+   },
+   {
+    "id": 2,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "ADBE",
+    "qty": 4.9821,
+    "price": 240.86,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T21:00:00+00:00",
+    "note": "Quality at P/E 13.6 (0th pct of 5y), FCF margin 41%, steady 12% growth. Thesis #2.",
+    "source": "ui",
+    "external_id": "sim-2026-11-13-BUY-ADBE-4.9821",
+    "deleted": false,
+    "created_at": "2026-11-16T02:16:26.297989+00:00"
+   },
+   {
+    "id": 3,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "META",
+    "qty": 1.5764,
+    "price": 634.35,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T21:00:00+00:00",
+    "note": "Sold-off growth, P/E 22 (30th pct), rev +26%; smaller size for margin compression. Thesis #3.",
+    "source": "ui",
+    "external_id": "sim-2026-11-13-BUY-META-1.5764",
+    "deleted": false,
+    "created_at": "2026-11-16T02:16:26.411414+00:00"
+   },
+   {
+    "id": 4,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "LNG",
+    "qty": 3.234,
+    "price": 309.2101,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T21:00:00+00:00",
+    "note": "Energy diversifier, estimates rising, negative 1y beta to SPY. Thesis #4.",
+    "source": "ui",
+    "external_id": "sim-2026-11-13-BUY-LNG-3.234",
+    "deleted": false,
+    "created_at": "2026-11-16T02:16:26.537389+00:00"
+   },
+   {
+    "id": 5,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "XLV",
+    "qty": 6.377,
+    "price": 188.175,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-13T21:00:00+00:00",
+    "note": "Health care, strongest sector (1M +11%), low beta. Thesis #5.",
+    "source": "ui",
+    "external_id": "sim-2026-11-13-BUY-XLV-6.377",
+    "deleted": false,
+    "created_at": "2026-11-16T02:16:26.654847+00:00"
+   }
+  ],
+  "target": [],
+  "watchlist": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "name": "candidates"
+   }
+  ],
+  "watchlist_item": [
+   {
+    "watchlist_id": 1,
+    "symbol": "ADBE",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.476720+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "INTU",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.482413+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "LNG",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.479409+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "META",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.478742+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "NVDA",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.480630+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "PAYX",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.481805+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "UTHR",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.481226+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "XLV",
+    "note": "round 017 screen",
+    "added_at": "2026-11-16T02:14:45.480055+00:00"
+   }
+  ],
+  "alert": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "symbol": "ADBE",
+    "kind": "price_below",
+    "threshold": 215.0,
+    "note": "ADBE thesis exit level",
+    "active": true,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:36.965254+00:00"
+   },
+   {
+    "id": 2,
+    "account_id": 1,
+    "symbol": "META",
+    "kind": "price_below",
+    "threshold": 560.0,
+    "note": "META thesis exit level",
+    "active": true,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:36.985444+00:00"
+   },
+   {
+    "id": 3,
+    "account_id": 1,
+    "symbol": "LNG",
+    "kind": "price_below",
+    "threshold": 261.0,
+    "note": "LNG near 200d, thesis exit",
+    "active": true,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:37.004112+00:00"
+   },
+   {
+    "id": 4,
+    "account_id": 1,
+    "symbol": "NVDA",
+    "kind": "day_move_pct",
+    "threshold": 8.0,
+    "note": "NVDA earnings 11-17 reaction: decide on entry",
+    "active": true,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:37.022825+00:00"
+   }
+  ],
+  "alert_event": [],
+  "note": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "symbol": "SPY",
+    "kind": "thesis",
+    "text": "Core index position (~35%). Benchmark is SPY, so a large core keeps tracking error low while the stock picks do the work. Backdrop 11-13: fear & greed 30 (Fear), S&P 1M -3.1%, 10y 5.15%, VIX 19.3; 7 of 11 sectors above their 50d. Buying a pullback, not a breakout. Sell/trim if the S&P closes below its 200-day with breadth deteriorating, or to fund a better idea.",
+    "review_on": "2026-12-14",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:08.231841+00:00",
+    "updated_at": "2026-11-16T02:16:08.231846+00:00"
+   },
+   {
+    "id": 2,
+    "account_id": 1,
+    "symbol": "ADBE",
+    "kind": "thesis",
+    "text": "Value on a quality franchise: P/E ttm 13.6 (0th percentile of its own 5y range in Argus), forward ~9, FCF margin ~41%, revenue +12-13% YoY every quarter for four quarters, op margin ~35%, consensus FY EPS flat-to-up over 90 days. Market prices AI disruption; numbers don't show it yet. Earnings 12-09 amc. Exit if revenue growth drops under 9% or op margin under 30% on the 12-09 report, or price < 215 (below the 52w support area ~190-215 trend).",
+    "review_on": "2026-12-10",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:08.249636+00:00",
+    "updated_at": "2026-11-16T02:16:08.249640+00:00"
+   },
+   {
+    "id": 3,
+    "account_id": 1,
+    "symbol": "META",
+    "kind": "thesis",
+    "text": "Sold-off mega-cap growth: -15.8% 1M after Q3, P/E ttm 21.9 (30th percentile of its history), forward ~18, revenue +26% YoY. Risk I accept: Q3 operating margin fell to 20% (Q1 41%, Q2 31%) on AI spending, FY EPS consensus down 31.8 -> 29.1 in 90 days, short interest doubled, $25B new debt. Sized smaller (10%) for that. Exit if next report (01-26) shows revenue growth < 20% or op margin still falling, or price < 560.",
+    "review_on": "2027-01-27",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:08.267178+00:00",
+    "updated_at": "2026-11-16T02:16:08.267182+00:00"
+   },
+   {
+    "id": 4,
+    "account_id": 1,
+    "symbol": "LNG",
+    "kind": "thesis",
+    "text": "Energy diversifier with momentum: LNG exporter, revenue +42% YoY in Q3, Q3 EPS beat 31%, FY+1 consensus up from 18.6 to 23.0 over 90 days, 1Y +45%, above 50d and 200d. Its 1y daily beta to SPY from Argus history is ~-0.5, so it hedges the tech-heavy core. European winter demand is the near-term driver. Valuation is high vs its own history (P/E 87th pct), so 10% size. Exit on a close below the 200d (~261) or if FY+1 estimates start falling.",
+    "review_on": "2027-02-25",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:08.286333+00:00",
+    "updated_at": "2026-11-16T02:16:08.286337+00:00"
+   },
+   {
+    "id": 5,
+    "account_id": 1,
+    "symbol": "XLV",
+    "kind": "thesis",
+    "text": "Sector tilt to health care, the strongest sector in Argus's heatmap: 1M +11.3%, 3M +12.2%, YTD +22%, above 50d and 200d, low beta (~0.3 vs SPY over 1y, vol 17%). Defensive while rates are 5%+ and tech is breaking down (XLK 1M -13%). Exit if XLV closes below its 50d and the sector drops out of the top three on 1M.",
+    "review_on": "2027-01-15",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-16T02:16:08.304583+00:00",
+    "updated_at": "2026-11-16T02:16:08.304589+00:00"
+   }
+  ],
+  "peer_list": [],
+  "valuation_model": [],
+  "instrument": [
+   {
+    "symbol": "ADBE",
+    "name": "ADOBE INC",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Technology",
+    "industry": "Software - Application",
+    "updated_at": "2026-11-16T02:16:26.302046+00:00"
+   },
+   {
+    "symbol": "INTU",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-16T02:14:45.483008+00:00"
+   },
+   {
+    "symbol": "LNG",
+    "name": "CHENIERE ENERGY INC",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Energy",
+    "industry": "Oil & Gas Midstream",
+    "updated_at": "2026-11-16T02:16:26.540349+00:00"
+   },
+   {
+    "symbol": "META",
+    "name": "META PLATFORMS INC-CLASS A",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Communication Services",
+    "industry": "Internet Content & Information",
+    "updated_at": "2026-11-16T02:16:26.415324+00:00"
+   },
+   {
+    "symbol": "NVDA",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-16T02:14:45.480943+00:00"
+   },
+   {
+    "symbol": "PAYX",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-16T02:14:45.482079+00:00"
+   },
+   {
+    "symbol": "SPY",
+    "name": "SS SPDR S&P 500 ETF TRUST-US",
+    "exchange": null,
+    "type": "ETP",
+    "sector": "ETF",
+    "industry": "Large Blend",
+    "updated_at": "2026-11-16T02:16:25.912832+00:00"
+   },
+   {
+    "symbol": "UTHR",
+    "name": null,
+    "exchange": null,
+    "type": null,
+    "sector": null,
+    "industry": null,
+    "updated_at": "2026-11-16T02:14:45.481498+00:00"
+   },
+   {
+    "symbol": "XLV",
+    "name": "SS HEALTH CARE SELECT SECTOR",
+    "exchange": null,
+    "type": "ETP",
+    "sector": "ETF",
+    "industry": "Health",
+    "updated_at": "2026-11-16T02:16:26.907128+00:00"
+   }
+  ]
+ }
+}
