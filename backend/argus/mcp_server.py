@@ -29,7 +29,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from argus import access
-from argus.app import Argus
+from argus.app import EVENTS_DAYS_AHEAD, Argus
 from argus.errors import ArgusError
 from argus.market_calendar import parse_ny_datetime
 from argus.services.alerts import KINDS as ALERT_KINDS
@@ -282,14 +282,14 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Everything for a pre-market or post-close brief in one call: totals and day P&L vs
         benchmark, top gainers/losers and largest $ moves, positions near 52-week highs/lows,
         earnings in the next 7 days (hour: bmo = before open, amc = after close) and results from the
-        last 3 days (with EPS surprise), upcoming ex-dividend dates, alerts fired, theses due for
-        review, movers >= 3% and earnings (next 7 days, last 3) across every watchlist, each row naming
+        last 3 days (with EPS surprise), ex-dividend and payment dates in the next 14 days (the
+        Dashboard's Coming up window), alerts fired, theses due for review, movers >= 3% and earnings (next 7 days, last 3) across every watchlist, each row naming
         its lists, and headlines for the biggest movers. Write the brief from these facts; say when a section is empty rather than inventing detail."""
         return argus.daily_brief(portfolio, quotes_now(), news=include_news)
 
     @mcp.tool(annotations=READ)
     @_tool
-    def get_events(days_ahead: int = 14, days_back: int = 7, symbols: list[str] | None = None,
+    def get_events(days_ahead: int = EVENTS_DAYS_AHEAD, days_back: int = 7, symbols: list[str] | None = None,
                    portfolio: str | None = None) -> dict:
         """Earnings (with hour, EPS/revenue estimates, and actuals once reported) and ex-dividend /
         payment dates for `symbols`, else one `portfolio`'s holdings, else all held + watchlist

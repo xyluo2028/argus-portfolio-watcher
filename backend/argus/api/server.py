@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from argus.api.auth import (COOKIE_MAX_AGE, OPEN, SESSION_COOKIE, TOKEN_COOKIE, Authenticator, AuthMiddleware,
                             LoginThrottle, credentials, token_ok)
-from argus.app import Argus
+from argus.app import EVENTS_DAYS_AHEAD, Argus
 from argus.config import REPO_ROOT
 from argus.errors import ArgusError
 from argus.live import LiveHub
@@ -378,7 +378,7 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
         return await run(argus.daily_brief, ref, dict(hub.quotes), news)
 
     @app.get("/api/events")
-    async def events(days_ahead: int = 14, days_back: int = 7, portfolio: str | None = None, symbol: str | None = None):
+    async def events(days_ahead: int = EVENTS_DAYS_AHEAD, days_back: int = 7, portfolio: str | None = None, symbol: str | None = None):
         return await run(argus.upcoming_events, days_ahead, days_back, True, [symbol] if symbol else None, portfolio)
 
     @app.get("/api/alerts")

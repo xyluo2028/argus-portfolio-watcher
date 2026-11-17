@@ -171,6 +171,34 @@ def test_daily_brief_is_scoped_to_its_portfolio(make_argus):
     assert [x["symbol"] for x in g["theses_due"]] == ["AAA"]
 
 
+def test_daily_brief_dividends_use_the_coming_up_window(make_argus):
+    # An ex-date 9 days out shows in the Dashboard's Coming up (14 days), so the brief lists it too;
+    # its earnings stay a 7-day look (B-136)
+    from argus.app import EVENTS_DAYS_AHEAD
+    from argus.db import session_scope
+    from argus.market_calendar import NY
+    from argus.models import Event
+
+    a = make_argus([FakeQuotes("fake", {"TTT": (100, 100), "SPY": (500, 495)})])
+    a.portfolios.create_portfolio("p")
+    a.portfolios.add_transactions("p", [TxnInput("BUY", "TTT", NOW - timedelta(days=30), 10, 90)])
+    today = datetime.now(NY).date()
+    a.events.refresh(["TTT"])  # mark fresh so the brief keeps the rows below
+    with session_scope(a.engine) as s:
+        for days in (9, 13, 15):
+            s.add(Event(symbol="TTT", kind="ex_dividend", d=today + timedelta(days=days), data={}, source="t"))
+        s.add(Event(symbol="TTT", kind="earnings", d=today + timedelta(days=10), hour="amc", data={}, source="t"))
+
+    b = a.daily_brief("p", news=False)
+    assert EVENTS_DAYS_AHEAD == 14
+    assert (b["dividends_days_ahead"], b["earnings_days_ahead"]) == (14, 7)
+    assert [e["date"] for e in b["dividends_upcoming"]] == [(today + timedelta(days=d)).isoformat() for d in (9, 13)]
+    assert all(e["held"] for e in b["dividends_upcoming"])
+    assert b["earnings_upcoming"] == []
+    coming_up = a.upcoming_events(refresh=False, portfolio="p")["upcoming"]  # what the Dashboard shows
+    assert [e for e in coming_up if e["kind"] != "earnings"] == b["dividends_upcoming"]
+
+
 def test_daily_brief_reads_every_named_watchlist(make_argus):
     from argus.db import session_scope
     from argus.market_calendar import NY

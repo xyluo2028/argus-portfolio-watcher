@@ -100,6 +100,8 @@ def _transient(err: str | None) -> bool:
 
 
 ANNOUNCED_REACH_DAYS = 183  # a declared ex-date this far past a window can still replace an estimate in it
+EVENTS_DAYS_AHEAD = 14  # the Dashboard's Coming up window; the brief's upcoming dividends use the same
+BRIEF_EARNINGS_DAYS_AHEAD = 7
 
 
 def _event_happened(e: dict, now: datetime) -> bool:
@@ -1057,7 +1059,7 @@ class Argus:
         watched = [i["symbol"] for w in self.watchlists.list_watchlists() for i in self.watchlists.items(w["name"])]
         return sorted(set(self.held_positions()) | set(watched))
 
-    def upcoming_events(self, days_ahead: int = 14, days_back: int = 7, refresh: bool = True,
+    def upcoming_events(self, days_ahead: int = EVENTS_DAYS_AHEAD, days_back: int = 7, refresh: bool = True,
                         symbols: list[str] | None = None, portfolio: str | None = None) -> dict:
         """Events for `symbols`, else one portfolio's holdings, else (or for ALL) holdings + watchlist."""
         scoped = not symbols and portfolio and str(portfolio).lower() != ALL
@@ -1193,11 +1195,12 @@ class Argus:
             elif price <= lo * 1.03:
                 near.append({"symbol": p["symbol"], "near": "52w_low", "gap_pct": (price / lo - 1) * 100})
 
-        events = self.upcoming_events(days_ahead=7, days_back=3, portfolio=ref)
+        events = self.upcoming_events(days_ahead=EVENTS_DAYS_AHEAD, days_back=3, portfolio=ref)
         mine = None if str(ref).lower() == ALL else set(self.open_symbols(ref))
         self.evaluate_alerts(live_quotes)
         last_session = date.fromisoformat(status["last_session"])
         today = datetime.now(NY).date()
+        earnings_end = (today + timedelta(days=BRIEF_EARNINGS_DAYS_AHEAD)).isoformat()
         movers = [*by_pct[:3], *by_pct[-3:]] if len(by_pct) > 6 else by_pct
         out = {
             "portfolio": summ["portfolio"]["name"],
@@ -1210,9 +1213,11 @@ class Argus:
             "largest_dollar_moves": [pick(p) for p in by_dollar[:5]],
             "near_52w_extremes": near,
             "split_warnings": summ.get("split_warnings", []),
-            "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings"],
+            "earnings_upcoming": [e for e in events["upcoming"] if e["kind"] == "earnings" and e["date"] <= earnings_end],
             "earnings_recent": [e for e in events["recent"] if e["kind"] == "earnings"],
+            "earnings_days_ahead": BRIEF_EARNINGS_DAYS_AHEAD,
             "dividends_upcoming": [e for e in events["upcoming"] if e["kind"] != "earnings"],
+            "dividends_days_ahead": EVENTS_DAYS_AHEAD,
             "alerts_fired": [a for a in self.alerts.fired(since=min(last_session, today))
                              if mine is None or a["symbol"] in mine],
             "theses_due": [n for n in self.notes.list(due_by=today + timedelta(days=7))
