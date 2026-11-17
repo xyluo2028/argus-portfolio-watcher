@@ -519,7 +519,7 @@ export interface MarketContext {
 
 export interface ScreenerStatus {
   built: boolean; building: boolean; progress: string | null; fiscal_year?: number; companies?: number;
-  fundamentals_at?: string; prices_at?: string; fields: Record<string, { label: string; unit: "$" | "%" | "x" }>;
+  fundamentals_at?: string; prices_at?: string; fields: Record<string, { label: string; unit: "$" | "%" | "x"; period: "fy" | "quarter" | "ttm" | "mrq" | null }>;
 }
 export type ScreenRow = Record<string, number | string | boolean | null> & { symbol: string; name: string | null; exchange: string | null };
 export interface ScreenResult { status: ScreenerStatus; matches: number; rows: ScreenRow[] }

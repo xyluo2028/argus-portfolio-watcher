@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, api, type ScreenResult, type ScreenerStatus, type WatchlistSummary } from "../api";
+import { ApiError, api, type ScreenResult, type ScreenRow, type ScreenerStatus, type WatchlistSummary } from "../api";
 import { big, nyTime, price, tone } from "../format";
 import { pickWatchlist, rememberWatchlist, savedWatchlist, withDefault } from "../watchlists";
 
@@ -24,7 +24,22 @@ const PRESETS: { name: string; hint: string; sort: string; filters: Filter[] }[]
 
 // Lower is better for these, so a click on their header sorts low → high first.
 const LOW_FIRST = new Set(["pe", "ps", "pb", "debt_to_equity"]);
-const COLUMNS = ["market_cap", "revenue_growth_pct", "gross_margin_pct", "net_margin_pct", "fcf_yield_pct", "pe", "ps", "roe_pct", "debt_to_equity"];
+const COLUMNS = ["market_cap", "revenue_growth_pct", "revenue_growth_q_yoy_pct", "gross_margin_pct", "net_margin_pct", "fcf_yield_pct",
+                 "pe", "pe_ttm", "ps", "roe_pct", "debt_to_equity"];
+
+// Which period a figure covers, so a fiscal-year number is never read as current.
+function periodTag(period: string | null | undefined, fy: number | undefined) {
+  if (period === "fy") return fy ? `FY${fy}` : "FY";
+  if (period === "quarter") return "latest qtr y/y";
+  return null;  // TTM is in the label; balance-sheet ratios are the latest quarter-end
+}
+
+function cellTitle(period: string | null | undefined, r: ScreenRow) {
+  if (period === "fy") return r.fiscal_year_end ? `Fiscal year ended ${r.fiscal_year_end}` : undefined;
+  if (period === "quarter") return r.latest_quarter ? `${r.latest_quarter} vs the same quarter a year earlier` : undefined;
+  if (period === "ttm") return r.ttm_through ? `Trailing twelve months through ${r.ttm_through}` : undefined;
+  return undefined;
+}
 
 function show(field: string, v: unknown, unit: string | undefined) {
   if (typeof v !== "number") return "–";
@@ -121,7 +136,10 @@ export function Screener() {
             return (
               <div className="row filter-row" key={i}>
                 <select value={f.field} onChange={(e) => set(i, { field: e.target.value })} aria-label="Field">
-                  {Object.entries(fields).map(([k, v]) => <option key={k} value={k} disabled={k !== f.field && used.has(k)}>{v.label}</option>)}
+                  {Object.entries(fields).map(([k, v]) => {
+                    const tag = periodTag(v.period, status?.fiscal_year);
+                    return <option key={k} value={k} disabled={k !== f.field && used.has(k)}>{v.label}{tag ? ` (${tag})` : ""}</option>;
+                  })}
                 </select>
                 <input className="input" inputMode="decimal" placeholder={`min ${hint}`} value={f.min} onChange={(e) => set(i, { min: e.target.value })} aria-label="Minimum" />
                 <span className="muted">to</span>
@@ -168,6 +186,7 @@ export function Screener() {
                     <th key={c} onClick={() => sortBy(c)} title={`Sort by ${fields[c]?.label ?? c}; click again to reverse`}
                         aria-sort={c === sort ? (desc ? "descending" : "ascending") : undefined}>
                       {fields[c]?.label ?? c}{c === sort ? (desc ? " ↓" : " ↑") : ""}
+                      {periodTag(fields[c]?.period, status?.fiscal_year) && <span className="th-period">{periodTag(fields[c]?.period, status?.fiscal_year)}</span>}
                     </th>
                   ))}
                   <th />
@@ -178,7 +197,8 @@ export function Screener() {
                       <td><Link to={`/t/${r.symbol.replace("-", ".")}`} className="sym">{r.symbol}</Link><span className="name" title={`${r.name ?? ""} · ${r.exchange ?? ""}`}>{r.name}</span></td>
                       <td>{show("price", r.price, "$")}</td>
                       {columns.map((c) => (
-                        <td key={c} className={c.endsWith("growth_pct") ? tone(r[c] as number) : undefined}>{show(c, r[c], fields[c]?.unit)}</td>
+                        <td key={c} className={c.endsWith("growth_pct") || c === "revenue_growth_q_yoy_pct" ? tone(r[c] as number) : undefined}
+                            title={cellTitle(fields[c]?.period, r)}>{show(c, r[c], fields[c]?.unit)}</td>
                       ))}
                       <td><button className="btn ghost small" disabled={!target || isAdded(r.symbol.replace("-", "."))}
                                   title={target ? `Add to ${target}` : undefined}
@@ -192,7 +212,9 @@ export function Screener() {
         )}
         <p className="small muted" style={{ margin: "8px 0 0" }}>
           Fundamentals: the latest full calendar year in SEC XBRL filings (with the year before for growth) and the latest quarter-end
-          balance sheet; fiscal years are mapped to the calendar year they mostly cover. Market caps from Yahoo. Banks' revenue = net interest
+          balance sheet; fiscal years are mapped to the calendar year they mostly cover. Latest-quarter growth compares each company's
+          newest SEC quarter with the same quarter a year earlier; TTM figures are that fiscal year plus this year's quarters less the
+          same quarters a year before, blank where a quarter is missing. Hover a cell for its period. Market caps from Yahoo. Banks' revenue = net interest
           + noninterest income; companies whose profit is over twice their revenue have revenue-based figures left blank.
         </p>
       </section>

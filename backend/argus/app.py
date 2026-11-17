@@ -1429,11 +1429,12 @@ class Argus:
 
     def screener_status(self) -> dict:
         return self.screener.status() | {"building": self.job_running("screener"), "progress": self.screener_progress,
-                                         "fields": {k: {"label": l, "unit": u} for k, (l, u) in screener_mod.FIELDS.items()}}
+                                         "fields": {k: {"label": l, "unit": u, "period": screener_mod.PERIODS.get(k)}
+                                                    for k, (l, u) in screener_mod.FIELDS.items()}}
 
     def screen_stocks(self, filters: dict[str, list] | None = None, sort: str = "market_cap", descending: bool = True,
                       limit: int = 100, include_otc: bool = False) -> dict:
-        """Screen US companies on SEC fundamentals (latest calendar year) and live market caps.
+        """Screen US companies on SEC fundamentals (latest calendar year, latest quarter, TTM) and live market caps.
         `filters`: {field: [min, max]} with null for an open bound; see screener_status()["fields"].
         The first call starts building the universe in the background (`building`)."""
         status = self.screener.status()

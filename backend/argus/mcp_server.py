@@ -359,13 +359,17 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
     @_tool
     def screen_stocks(filters: dict[str, list[float | None]] | None = None, sort: str = "market_cap",
                       descending: bool = True, limit: int = 50, include_otc: bool = False) -> dict:
-        """Screen US-listed companies on SEC fundamentals (latest calendar year, prior year for growth,
-        latest balance sheet) and live market caps. filters: {field: [min, max]}, null for an open bound;
-        money in USD (market_cap 1e9 = $1B), percents as numbers (net_margin_pct 15 = 15%). Fields:
-        market_cap, price, revenue, revenue_growth_pct, net_income, earnings_growth_pct, gross_margin_pct,
-        operating_margin_pct, net_margin_pct, fcf_margin_pct, fcf_yield_pct, pe, ps, pb, roe_pct, roa_pct,
-        debt_to_equity, current_ratio. The first call may start building the universe (status.building);
-        call again in a minute."""
+        """Screen US-listed companies on SEC fundamentals and live market caps. Most figures are the
+        latest calendar-aligned fiscal year (row fiscal_year, fiscal_year_end; prior year for growth);
+        revenue_growth_q_yoy_pct is the latest SEC quarter (row latest_quarter) vs the same quarter a year
+        earlier; pe_ttm, operating_margin_ttm_pct and roe_ttm_pct are trailing twelve months to that
+        quarter (row ttm_through), null where a quarter is missing; pb, debt_to_equity and current_ratio
+        use the latest balance sheet. filters: {field: [min, max]}, null for an open bound; money in USD
+        (market_cap 1e9 = $1B), percents as numbers (net_margin_pct 15 = 15%). Fields: market_cap, price,
+        revenue, revenue_growth_pct, revenue_growth_q_yoy_pct, net_income, earnings_growth_pct,
+        gross_margin_pct, operating_margin_pct, operating_margin_ttm_pct, net_margin_pct, fcf_margin_pct,
+        fcf_yield_pct, pe, pe_ttm, ps, pb, roe_pct, roe_ttm_pct, roa_pct, debt_to_equity, current_ratio.
+        The first call may start building the universe (status.building); call again in a minute."""
         return argus.screen_stocks(filters, sort, descending, limit, include_otc)
 
     @mcp.tool(annotations=READ)

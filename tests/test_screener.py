@@ -58,3 +58,95 @@ def test_screen_filters_sorts_and_skips_otc():
     assert {x["symbol"] for x in sc.screen(rows, {"pe": [None, 25]}, include_otc=True)["rows"]} == {"AAA", "CCC"}
     with pytest.raises(ValueError):
         sc.screen(rows, {"nope": [1, 2]})
+
+
+# Quarterly frames for an INCY-like company (cik 1): FY2025 looked great, the latest quarter swung to a
+# loss. Revenue in quarters 1-3 of 2026 and 2025 (and nothing for Q4: few companies file one).
+Q_FRAMES = {
+    "revenue": {"CY2026Q3": {1: 300.0, 2: 90.0}, "CY2026Q2": {1: 280.0, 2: 85.0, 3: 50.0}, "CY2026Q1": {1: 260.0, 2: 80.0},
+                "CY2025Q3": {1: 250.0}, "CY2025Q2": {1: 240.0, 3: 40.0}, "CY2025Q1": {1: 230.0}},
+    "operating_income": {"CY2026Q3": {1: -200.0}, "CY2026Q2": {1: 60.0}, "CY2026Q1": {1: 50.0},
+                         "CY2025Q3": {1: 70.0}, "CY2025Q2": {1: 70.0}, "CY2025Q1": {1: 60.0}},
+    "net_income": {"CY2026Q3": {1: -180.0}, "CY2026Q2": {1: 50.0}, "CY2026Q1": {1: 40.0},
+                   "CY2025Q3": {1: 60.0}, "CY2025Q2": {1: 55.0}, "CY2025Q1": {1: 45.0}},
+}
+RECENT = ["CY2026Q3", "CY2026Q2", "CY2026Q1"]
+
+
+def test_latest_quarter_growth_and_ttm_labelled():
+    latest = sc.latest_quarters(Q_FRAMES, RECENT, 2025)
+    assert latest[1]["period"] == "CY2026Q3" and latest[3]["period"] == "CY2026Q2"  # 3 hasn't filed Q3 yet
+    rows = sc.add_prices(sc.build_rows(TICKERS, ANNUAL, PRIOR, INSTANT, latest, 2025, {1: "2025-12-31"}),
+                         {"AAA": {"market_cap": 4000.0, "quote_type": "EQUITY"}})
+    a = next(r for r in rows if r["symbol"] == "AAA")
+    assert (a["fiscal_year"], a["fiscal_year_end"], a["latest_quarter"], a["ttm_through"]) == (2025, "2025-12-31", "Q3 2026", "Q3 2026")
+    assert a["revenue_growth_q_yoy_pct"] == pytest.approx(20)  # 300 vs 250
+    # TTM = FY2025 + Q1-Q3 2026 - Q1-Q3 2025: revenue 1000 + 840 - 720, op income 250 - 90 - 200, net income 200 - 90 - 160
+    assert a["revenue_ttm"] == pytest.approx(1120) and a["net_income_ttm"] == pytest.approx(-50)
+    assert a["operating_margin_ttm_pct"] == pytest.approx(-40 / 1120 * 100)
+    assert a["pe"] == pytest.approx(20) and a["pe_ttm"] is None and a["roe_ttm_pct"] == pytest.approx(-5)
+    c = next(r for r in rows if r["symbol"] == "CCC")
+    # Gamma's revenue is unreliable (no TTM), and it has no year-ago quarter; Beta had no Q3 2025
+    assert c["latest_quarter"] == "Q2 2026" and c["revenue_growth_q_yoy_pct"] == pytest.approx(25) and c["revenue_ttm"] is None
+    b = next(r for r in sc.build_rows(TICKERS, ANNUAL, PRIOR, INSTANT, latest, 2025) if r["symbol"] == "BBB")
+    assert b["latest_quarter"] == "Q3 2026" and b["revenue_growth_q_yoy_pct"] is None and b["ttm_through"] is None
+    # A filter on the latest quarter: the screen drops rows without one
+    assert [r["symbol"] for r in sc.screen(rows, {"revenue_growth_q_yoy_pct": [None, 22]})["rows"]] == ["AAA"]
+
+
+def test_ttm_is_the_year_when_the_latest_quarter_closes_it():
+    frames = {"revenue": {"CY2025Q4": {1: 300.0}, "CY2024Q4": {1: 200.0}}}
+    latest = sc.latest_quarters(frames, ["CY2025Q4", "CY2025Q3", "CY2025Q2"], 2025)
+    a = sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, latest, 2025)[0]
+    assert a["revenue_growth_q_yoy_pct"] == pytest.approx(50) and a["revenue_ttm"] == 1000.0 and a["net_income_ttm"] == 200.0
+    # A laggard whose newest quarter is still in the fiscal year gets growth but no TTM
+    stale = sc.latest_quarters({"revenue": {"CY2025Q2": {1: 300.0}}}, ["CY2026Q1", "CY2025Q4", "CY2025Q3", "CY2025Q2"], 2025)
+    assert sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, stale, 2025)[0]["revenue_ttm"] is None
+
+
+def test_ttm_counts_quarters_since_a_non_december_fiscal_year_closed():
+    assert sc._closing_quarter("2026-02-01", 2025) == (2025, 4) and sc._closing_quarter("2026-02-28", 2025) == (2026, 1)
+    assert sc._closing_quarter("2026-06-27", 2025) == (2026, 2) and sc._closing_quarter(None, 2025) == (2025, 4)
+    # A fiscal year to March 2026 already holds CY2026Q1: TTM to Q3 2026 adds only Q2 and Q3 (less 2025's)
+    latest = sc.latest_quarters(Q_FRAMES, RECENT, 2025, {1: "2026-03-31"})
+    a = sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, latest, 2025)[0]
+    assert a["revenue_ttm"] == pytest.approx(1000 + 580 - 490) and a["net_income_ttm"] == pytest.approx(200 - 130 - 115)
+    # One to June 2026 adds Q3 alone; one to June 2025 would need five quarters, more than were fetched
+    june = sc.latest_quarters(Q_FRAMES, RECENT, 2025, {1: "2026-06-27"})
+    assert sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, june, 2025)[0]["revenue_ttm"] == pytest.approx(1050)
+    old = sc.latest_quarters(Q_FRAMES, RECENT, 2025, {1: "2025-06-30"})
+    assert sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, old, 2025)[0]["revenue_ttm"] is None
+
+
+class _FakeSec:
+    def __init__(self):
+        self.periods = set()
+
+    def company_tickers(self):
+        return TICKERS[:1]
+
+    def frame(self, concept, unit, period):
+        self.periods.add(period)
+        if period == "CY2025":
+            vals = {"Revenues": 1000.0, "NetIncomeLoss": 200.0, "OperatingIncomeLoss": 250.0}
+            return {1: {"val": vals[concept], "end": "2025-12-31"}} if concept in vals else {}
+        concept_key = {"Revenues": "revenue", "OperatingIncomeLoss": "operating_income", "NetIncomeLoss": "net_income"}.get(concept)
+        v = Q_FRAMES.get(concept_key, {}).get(period, {}).get(1)
+        return {1: {"val": v, "end": None}} if v is not None else {}
+
+
+class _FakeYahoo:
+    def market_caps(self, symbols):
+        return {"AAA": {"price": 10.0, "market_cap": 4000.0, "quote_type": "EQUITY"}}
+
+
+def test_build_fetches_quarterly_frames(tmp_path):
+    from datetime import date
+    sec = _FakeSec()
+    svc = sc.ScreenerService(tmp_path, sec, _FakeYahoo())
+    svc.build(today=date(2026, 11, 17))
+    assert {"CY2026Q3", "CY2025Q1", "CY2026Q3I"} <= sec.periods and "CY2025Q4" not in sec.periods
+    row = svc.load()["rows"][0]
+    assert (row["fiscal_year_end"], row["latest_quarter"]) == ("2025-12-31", "Q3 2026")
+    assert row["revenue_growth_q_yoy_pct"] == pytest.approx(20) and row["revenue_ttm"] == pytest.approx(1120)
+    assert row["pe"] == pytest.approx(20) and row["pe_ttm"] is None

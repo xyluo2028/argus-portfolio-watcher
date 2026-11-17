@@ -262,6 +262,7 @@ table.corr td { min-width: 40px; border-radius: 3px; }
 .seg.tabs button { padding: 5px 12px; white-space: nowrap; }
 .metric-table .name { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; vertical-align: bottom; }
+.metric-table .th-period { display: block; font-size: 10.5px; font-weight: 400; color: var(--muted); }
 
 /* trade & edit forms */
 .trade { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px;
