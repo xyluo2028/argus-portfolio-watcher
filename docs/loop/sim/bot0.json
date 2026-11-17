@@ -2,7 +2,7 @@
  "format": "argus-account-snapshot",
  "version": 1,
  "account": "bot0",
- "created_at": "2026-11-16T02:44:17.609328+00:00",
+ "created_at": "2026-11-17T02:41:21.582458+00:00",
  "tables": {
   "portfolio": [
    {
@@ -93,6 +93,22 @@
     "external_id": "sim-2026-11-13-BUY-XLV-6.377",
     "deleted": false,
     "created_at": "2026-11-16T02:16:26.654847+00:00"
+   },
+   {
+    "id": 6,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "TMUS",
+    "qty": 5.2579,
+    "price": 171.1701,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-16T21:00:00+00:00",
+    "note": "Defensive value: P/E 16.4 at 5th pct of 5y range, FCF yield ~10%, div 2.4%, low beta; thesis note filed",
+    "source": "ui",
+    "external_id": "sim-2026-11-16-BUY-TMUS-5.2579",
+    "deleted": false,
+    "created_at": "2026-11-17T02:17:36.662701+00:00"
    }
   ],
   "target": [],
@@ -139,6 +155,12 @@
     "symbol": "PAYX",
     "note": "round 017 screen",
     "added_at": "2026-11-16T02:14:45.481805+00:00"
+   },
+   {
+    "watchlist_id": 1,
+    "symbol": "TMUS",
+    "note": null,
+    "added_at": "2026-11-17T02:17:51.574578+00:00"
    },
    {
     "watchlist_id": 1,
@@ -197,6 +219,17 @@
     "active": true,
     "created_by": "ui",
     "created_at": "2026-11-16T02:16:37.022825+00:00"
+   },
+   {
+    "id": 5,
+    "account_id": 1,
+    "symbol": "TMUS",
+    "kind": "price_below",
+    "threshold": 150.0,
+    "note": "TMUS thesis exit level",
+    "active": true,
+    "created_by": "ui",
+    "created_at": "2026-11-17T02:17:43.558176+00:00"
    }
   ],
   "alert_event": [],
@@ -260,6 +293,18 @@
     "created_by": "ui",
     "created_at": "2026-11-16T02:16:08.304583+00:00",
     "updated_at": "2026-11-16T02:16:08.304589+00:00"
+   },
+   {
+    "id": 6,
+    "account_id": 1,
+    "symbol": "TMUS",
+    "kind": "thesis",
+    "text": "Defensive value in an Extreme-fear tape (F&G 11.8, S&P -1.9% on 11-16, XLK -3.2%; breadth shows new highs in staples/health care). P/E ttm 16.4 = 5th percentile of its own 5y range in Argus, forward ~11.9, FCF $18.7B ttm (~10% FCF yield), dividend 2.4%, revenue +7-11% YoY for 3 quarters, op margin ~24% in Q2/Q3, Q3 EPS beat +8%. FY+1 EPS consensus up 13.90->14.01 over 90d; analysts 24 buy / 4 hold, mean target 225. 1y daily beta to SPY ~-0.34 (Argus history), Finnhub 0.38: diversifies the tech/META exposure. Down 21% 1Y and below its 200d (~186) but back above its 50d (~164). Risk: leverage (liabilities/equity 1.6), price war with peers. Size ~9%. Exit on a close below 150 (near the 52w low 143.75 area) or if revenue growth drops under 5% at the late-Jan report.",
+    "review_on": "2027-01-29",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-17T02:17:36.554324+00:00",
+    "updated_at": "2026-11-17T02:17:36.554328+00:00"
    }
   ],
   "peer_list": [],
@@ -327,6 +372,15 @@
     "sector": "ETF",
     "industry": "Large Blend",
     "updated_at": "2026-11-16T02:16:25.912832+00:00"
+   },
+   {
+    "symbol": "TMUS",
+    "name": "T-MOBILE US INC",
+    "exchange": null,
+    "type": "Common Stock",
+    "sector": "Communication Services",
+    "industry": "Telecom Services",
+    "updated_at": "2026-11-17T02:17:36.671071+00:00"
    },
    {
     "symbol": "UTHR",

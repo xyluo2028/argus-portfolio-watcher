@@ -134,8 +134,8 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - status: open
 
 ### B-019 Screener has only the last calendar year: no TTM or latest-quarter growth
-- kind: feature · severity: medium
-- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008, multibagger r009, multibagger r010, multibagger r015, multibagger r016
+- kind: feature · severity: high
+- reported by: multibagger r001, multibagger r003, multibagger r005, multibagger r006, multibagger r008, multibagger r009, multibagger r010, multibagger r015, multibagger r016, trader r018
 - evidence: `fiscal_year: 2025` on 2026-10-20; LOAR +23% CY vs +36–39% latest quarters
 - r003: misled a screen — DUOL and ODD topped it on last year's growth but are now decelerating or shrinking (multibagger r003)
 - r004: XZO +62% in the screener vs +3% latest SEC quarter; COLL and HIMS likewise (multibagger r004 #4)
@@ -147,7 +147,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r010: IA shows +78.6% full-year growth but the last two quarters ran +2% and +11%; COLL +23.6% but slowed to +6% (multibagger r010 #6)
 - r015: XZO in the screener at FY +62% vs latest quarters +0/+3/+6%; RDDT screener P/E 38.5 (FY2025) vs 21.6 TTM on the stock page; no year label on the columns (multibagger #5)
 - r016: 11 of 19 "≥25% growth" hits grow less in their latest SEC quarter; NUTX, CRK, GPOR, JOE, XZO flat or shrinking (multibagger r016 #3)
-- status: open
+- r018: screener passed INCY as quality (P/E 19.1, op margin 29.5%, ROE 22.8%, FY2025) while TTM is P/E 64, op margin 10.4%, ROE 7.1% and Q3 2026 lost $785M; rows carry no year label (trader r018 #3)
+- acceptance: (1) screener rows carry trailing-twelve-month revenue growth (latest SEC quarter vs the same quarter a year earlier, `revenue_growth_q_yoy_pct`) and the fiscal year / period each FY figure comes from, in the API, MCP and the Screener table (column header or cell label "FY2025"); (2) a filter can use the latest-quarter growth; (3) where TTM P/E or op margin is available from SEC quarters for the universe it's used or shown beside FY; if a full TTM isn't feasible in one change, ship (1)–(2) and say what's left; (4) tests cover the label and the new field
+- status: done (r018, b22ab5a)
 
 ### B-020 Rows missing gross margin silently drop out of a gross-margin filter
 - kind: ux · severity: medium
@@ -205,7 +207,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-026 Risk, events and the brief take 11–15 s on first load after a trade
 - kind: perf · severity: medium
-- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014, macro r015, income r015, multibagger r015, macro r016, multibagger r016, income r016, trader r017
+- reported by: income r001, still present r002 (cold `/risk` 17.7 s), income r003, macro r003, income r005, macro r006, income r008, income r009, multibagger r009, macro r010, income r010, multibagger r010, multibagger r012, macro r013, income r013, multibagger r013, income r014, multibagger r014, macro r015, income r015, multibagger r015, macro r016, multibagger r016, income r016, trader r017, trader r018
 - r003: worse — cold `/risk` 33.4 s (income), 18.6 s (macro); brief 6.1 s
 - r004: cold `/risk` 24.1 s (macro), 21.5 s (income); cold portfolio fundamentals 26.8 s then all 17 "pending" (income r004 #7)
 - r005: cold `/risk` 15.5 s; portfolio fundamentals now 2.2 s (was 26.8 s) (income r005 #8)
@@ -220,6 +222,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r015: first /risk 20.2 s, /performance 7.7 s, summary 3.3 s (macro #5); first risk 31.5 s (income #6); brief 4.9 s (1.35 s r014), cold watchlist 7.2 s, stock-page chart still "Loading chart…" at 2.7 s (multibagger #7)
 - r016: first risk load 53.5 s (income), ~15 s (macro); performance ~12 s, brief 7.7 s, watchlist 10.2 s cold
 - r017: on a 5-holding portfolio the first risk load took 3.4 s
+- r018: first brief load of the round 5.65 s, later 0.08 s; risk 0.90 s (trader r018 #6)
 - status: open
 
 ### B-027 Screener universe isn't built until someone runs a screen (breadth unavailable meanwhile)
@@ -883,9 +886,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-125 "Coming up" marks announced dividend amounts with "≈"
 - kind: ux · severity: low
-- reported by: income r009
+- reported by: income r009, trader r018
 - evidence: "Fri, Oct 30 · O · Ex-dividend · ≈ $19.31" though O's $0.272 and date are announced (`estimated_date: False`) (rounds/009/investor-income.md #9)
 - r011: Coming up says "Mon, Nov 16 PG Dividend paid ≈ $33.76": past tense for a future payment (income r011; B-087)
+- r018: Coming up shows "Wed, Nov 25 · TMUS · Ex-dividend · ≈ $5.36" though `/api/events` has no `estimated` flag (trader r018 #5)
 - status: open
 
 ### B-127 Theses stay "due" after a newer note; the CLI can't change a note's review date
@@ -917,14 +921,6 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r013: payrolls 11-06 back, only because Nasdaq restored it; still no protection
 - r015: see B-156: one day's 403 now empties the whole calendar, kept rows included
 - status: open
-
-### B-136 The brief's upcoming dividends are empty while Coming up lists three
-- kind: bug · severity: low
-- reported by: income r012, income r013, income r014
-- evidence: rounds/012/investor-income.md #4
-- r014: narrowed — the brief now lists O's 11-13 payment, but on a Sunday-evening run misses Monday's PG payment and XOM ex-date
-- r015: brief lists O, PG and XOM, the same as Coming up (income confirmed fixed on a weekday run)
-- status: done (confirmed fixed r015)
 
 ### B-137 Stock page's Reported financials table stops before the quarter just reported
 - kind: ux · severity: medium
@@ -1101,8 +1097,9 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-162 Holdings "Day %" column follows two rules (TMDX +23.0% while the stock rose +27.9%; RDDT +1.38% beside $0.00 Day P&L)
 - kind: ux · severity: low
-- reported by: multibagger r014 (split from B-152 in r015)
+- reported by: multibagger r014 (split from B-152 in r015), trader r018
 - evidence: Day % mixes the stock's move with the position's own day P&L share for positions bought or added during/after the session (rounds/014/investor-multibagger.md)
+- r018: TMUS bought at the 11-16 mid shows Day % −0.68% (fill to close) while the stock rose 0.04% (trader r018 #1)
 - status: open
 
 ### B-163 The Watchlist page only shows a list named "Watchlist"; named watchlists are invisible in the UI
@@ -1140,9 +1137,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-168 Argus has no cash balance: value, weights, exposure and risk leave cash out
 - kind: feature · severity: high
-- reported by: trader r017
+- reported by: trader r017, trader r018
 - evidence: bot0-sim holds $2,100 cash (21%) of a $10,033 account; the Dashboard shows total value $7,933 and SPY at 44.2% when it is 35% of the account, so the 25%/50% house-rule caps can't be checked in Argus (rounds/017/trader.md #1). Related: B-024
 - note: a fix probably needs a per-portfolio starting-cash/deposit concept; setting it on bot0-sim would be a change to the trader's account outside `scripts/sim.py`, so a human should decide how the loop applies it
+- r018: still open; Dashboard total $8,733 against a $9,933 account (trader r018)
 - status: open
 
 ### B-169 SPY's quote day low (Finnhub 745.20) disagrees with Argus's own daily bar (Yahoo 747.88)
@@ -1174,6 +1172,41 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: bug · severity: medium
 - reported by: split from B-021 in r017 (income r001, r003, macro r003, r013)
 - evidence: SCHD book: scenario −1.5% vs replays −14% to −25%; loop-income r003 −2.5% vs −5.7% to −26.5%; the scenario uses each holding's 1y daily beta vs SPY (labeled since r017, cac6bf4)
+- status: open
+
+### B-136 The brief's upcoming dividends are empty while Coming up lists three
+- kind: bug · severity: low
+- reported by: income r012, income r013, income r014, trader r018
+- evidence: rounds/012/investor-income.md #4
+- r014: narrowed — the brief now lists O's 11-13 payment, but on a Sunday-evening run misses Monday's PG payment and XOM ex-date
+- r015: brief lists O, PG and XOM, the same as Coming up (income confirmed fixed on a weekday run)
+- r018: reopened: the brief's `dividends_upcoming` is empty while Coming up (14 days) lists TMUS's announced 11-25 ex-dividend, 9 days out; the brief's window is shorter (trader r018 #5)
+- acceptance: the brief's upcoming dividends use the same window as the Dashboard's Coming up (14 days) or a shared constant, and the payload states its window (`days_ahead` or similar); with a holding whose announced ex-date is 9 days out, the brief lists it; a test covers an ex-date between 8 and 14 days out
+- status: done (r018, 547a110)
+
+### B-174 Dashboard "SPY, last session" becomes a flow-weighted blend after a same-day buy
+- kind: ux · severity: medium
+- reported by: trader r018
+- evidence: tile read SPY −1.91% before the TMUS buy, −1.77% after (caption "today's buys from the fills, SPY alike"); −1.77% is a money-weighted SPY shadow of the flows and matches no SPY move; the Holdings row says SPY −1.91% (rounds/018/trader.md #1)
+- status: open
+
+### B-175 `/api/history` and the stock-page chart end a session early after the close
+- kind: bug · severity: medium
+- reported by: trader r018
+- evidence: ~5 h after the 11-16 close `/api/history/ADBE`, TMUS and SPY end at the 11-13 bar; `/t/ADBE` header "246.00 · close Mon, Nov 16" over a last candle "C 243.08" (11-13); performance/risk already fill the session from quotes (`closes_from_quotes`), the chart and history don't (rounds/018/trader.md #2)
+- acceptance: when stored daily bars end before the quote's last completed regular session (`session_date`), `/api/history` (daily interval; CLI and MCP alike) appends a provisional bar for that session built from the quote's regular-session open/high/low/close, marked `provisional: true`, without storing it as a real bar; once Yahoo's bar arrives the real one is returned and nothing is duplicated; the stock-page chart shows that candle and its OHLC readout names the bar's date; tests: bars ending one session before `session_date` → one provisional bar appended; real bar present → unchanged; intraday or weekend → no extra bar
+- status: done (r018, 9ee1853)
+
+### B-176 Earnings date changes show no "moved from" marker
+- kind: feature · severity: low
+- reported by: trader r018
+- evidence: INTU earnings listed 11-19 in r017's brief and events, 11-20 amc in r018, with no note or previous date (rounds/018/trader.md #4)
+- status: open
+
+### B-177 Screener TTM gaps after B-019: no Q4 derivation, FY can lag, no TTM FCF or margins
+- kind: feature · severity: medium
+- reported by: split from B-019 in r018
+- evidence: TTM is empty where SEC has no 3-month Q4 frame (AAPL, MSFT); FY columns always use last calendar year, so a June-2026 FY may still show FY2025; FCF yield, gross and net margin stay FY-only (r018 B-019 commit b22ab5a)
 - status: open
 
 ## Done
