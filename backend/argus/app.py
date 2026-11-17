@@ -24,7 +24,7 @@ from argus.importers import investing
 from argus.market_calendar import NY, market_status, session_date, sessions_between, trade_session
 from argus.models import (AuditLog, CompanyProfile, ValuationModel, DividendHistory, FundProfile, Instrument, PeerList, SecurityMap,
                           Target)
-from argus.providers.base import ProviderError, Quote
+from argus.providers.base import Bar, ProviderError, Quote
 from argus.providers.finnhub import FinnhubProvider
 from argus.providers.openfigi import OpenFigiProvider, yahoo_symbol
 from argus.providers.sec_edgar import SecEdgarProvider
@@ -45,7 +45,8 @@ from argus.services.alerts import AlertService
 from argus.services.events import EventsService
 from argus.services.lots import build_positions
 from argus.services import performance as performance_mod
-from argus.services.market import MarketService, beta_basis, session_close_from_quote, with_pe
+from argus.services.market import (MarketService, beta_basis, provisional_session_bar, session_close_from_quote,
+                                   with_pe)
 from argus.services.notes import NoteService
 from argus.services.portfolio import ALL, PortfolioService, TxnInput, position_to_dict
 from argus.services.snapshot import AccountSnapshots, SnapshotService
@@ -312,10 +313,17 @@ class Argus:
         """
         sym = normalize_symbol(symbol)
         bars = self.market.get_history(sym, period, interval)
-        out = {"symbol": sym, "interval": interval, "period": period, "source": "yahoo",
-               "bars": [{"ts": b.ts.isoformat(), "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]}
+        extra = self._provisional_bar(sym, bars) if interval == "1d" else None
+        rows = [{"ts": b.ts.isoformat(), "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]
+        if extra is not None:
+            bars = [*bars, extra]
+            rows.append({"ts": extra.ts.isoformat(), "o": extra.o, "h": extra.h, "l": extra.l, "c": extra.c,
+                         "v": None, "provisional": True})
+        out = {"symbol": sym, "interval": interval, "period": period, "source": "yahoo", "bars": rows}
         if indicators:
             full = self.market.get_history(sym, "max" if interval == "1d" else period, interval) if bars else []
+            if extra is not None:
+                full = [*full, extra]
             offset = len(full) - len(bars)
             computed = indicators_mod.compute(full, indicators)
             out["indicators"] = {
@@ -323,6 +331,22 @@ class Argus:
                 for k, v in computed.items()
             }
         return out
+
+    def _provisional_bar(self, sym: str, bars: list[Bar]) -> Bar | None:
+        """The last completed session's bar from the quote while Yahoo's daily bar is late (B-175), as
+        performance and risk fill that session's close (B-134/B-142). Never stored."""
+        if not bars:
+            return None
+        session = date.fromisoformat(market_status()["last_session"])
+        last = bars[-1].ts.astimezone(NY).date()
+        if last >= session:
+            return None
+        try:
+            quote = self.market.get_quotes([sym])[0].get(sym)
+        except Exception as e:  # noqa: BLE001 - without a quote the bars end where Yahoo's do, as before
+            log.warning("quote for %s's provisional bar: %s", sym, e)
+            return None
+        return provisional_session_bar(last, quote, session)
 
     # Chart panes from Finnhub's quarterly ratio history: field -> (Finnhub key, label)
     FUND_SERIES = {"pe_ttm": ("peTTM", "P/E"), "ps_ttm": ("psTTM", "P/S"), "pb": ("pb", "P/B"),

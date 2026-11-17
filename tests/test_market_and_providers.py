@@ -800,3 +800,78 @@ def test_a_bar_without_a_close_never_breaks_the_history_cache(make_argus):
     a = make_argus(history=FakeHistory(bars))
     closes = a.market.daily_closes("AEHR", today - timedelta(days=10))
     assert sorted(closes.values()) == [10.0, 10.5]
+
+
+def _history_argus(make_argus, monkeypatch, last_session, bar_days, quote):
+    """Argus whose stored daily bars end on bar_days[-1] and whose quote provider serves `quote`."""
+    import argus.app as app_mod
+    from argus.market_calendar import NY
+
+    class Provider:
+        name = "fake"
+        calls = 0
+
+        def get_quotes(self, symbols):
+            Provider.calls += 1
+            return {quote.symbol: quote} if quote and quote.symbol in symbols else {}
+
+    a = make_argus([Provider()])
+    bars = [Bar(datetime.combine(d, datetime.min.time(), NY).astimezone(UTC), 100 + i, 102 + i, 99 + i, 101 + i, 1e6)
+            for i, d in enumerate(bar_days)]
+    monkeypatch.setattr(app_mod, "market_status", lambda *_: {"last_session": last_session.isoformat()})
+    monkeypatch.setattr(a.market, "get_history", lambda sym, period, interval: list(bars))
+    return a, Provider
+
+
+def _quote(d, hh, price=110.0, sym="ADBE"):
+    from datetime import time as dtime
+
+    from argus.market_calendar import NY
+    from argus.providers.base import Quote
+    return Quote(sym, price, 103.0, 104.0, 112.0, 103.5, datetime.combine(d, dtime(hh, 0), NY), "fake")
+
+
+NOV13, NOV16 = date(2026, 11, 13), date(2026, 11, 16)  # Friday, Monday
+
+
+def test_history_appends_a_provisional_bar_while_yahoos_is_late(make_argus, monkeypatch):
+    """B-175: after the 11-16 close the stored bars still ended on 11-13; the session's bar comes
+    from the quote's regular-session OHLC, marked provisional, with indicators one longer too."""
+    days = [date(2026, 11, d) for d in (10, 11, 12, 13)]
+    a, _ = _history_argus(make_argus, monkeypatch, NOV16, days, _quote(NOV16, 16))
+    out = a.history("ADBE", "1mo", "1d", ["sma2"])
+    assert len(out["bars"]) == 5
+    last = out["bars"][-1]
+    assert last["ts"].startswith("2026-11-16T05:00")  # New York midnight, like the stored bars
+    assert (last["o"], last["h"], last["l"], last["c"], last["v"]) == (104.0, 112.0, 103.5, 110.0, None)
+    assert last["provisional"] is True and not any(b.get("provisional") for b in out["bars"][:-1])
+    assert len(out["indicators"]["sma2"]) == 5 and out["indicators"]["sma2"][-1] == pytest.approx((104 + 110) / 2)
+    from sqlalchemy import func, select
+
+    from argus.db import session_scope
+    from argus.models import PriceBar
+    with session_scope(a.engine) as s:
+        assert s.scalar(select(func.count()).select_from(PriceBar)) == 0  # never stored
+
+
+def test_history_returns_the_real_bar_once_it_arrives(make_argus, monkeypatch):
+    days = [date(2026, 11, d) for d in (12, 13, 16)]
+    a, provider = _history_argus(make_argus, monkeypatch, NOV16, days, _quote(NOV16, 16))
+    out = a.history("ADBE", "1mo")
+    assert [b["c"] for b in out["bars"]] == [101, 102, 103] and not any("provisional" in b for b in out["bars"])
+    assert provider.calls == 0  # no quote needed
+
+
+def test_history_adds_nothing_intraday_or_on_a_weekend(make_argus, monkeypatch):
+    # Mid-session on 11-16: the last completed session (11-13) has its bar; the quote is today's.
+    a, _ = _history_argus(make_argus, monkeypatch, NOV13, [date(2026, 11, 12), NOV13], _quote(NOV16, 12))
+    assert len(a.history("ADBE", "1mo")["bars"]) == 2
+    # Bars a session behind but the quote is of a later session: no bar for a session it doesn't describe.
+    a, _ = _history_argus(make_argus, monkeypatch, NOV13, [date(2026, 11, 11), date(2026, 11, 12)], _quote(NOV16, 12))
+    assert len(a.history("ADBE", "1mo")["bars"]) == 2
+    # Saturday: the quote's fetch time maps to Friday 11-13, whose bar is stored.
+    a, _ = _history_argus(make_argus, monkeypatch, NOV13, [date(2026, 11, 12), NOV13], _quote(date(2026, 11, 14), 10))
+    assert len(a.history("ADBE", "1mo")["bars"]) == 2
+    # Intraday intervals are never filled.
+    a, _ = _history_argus(make_argus, monkeypatch, NOV16, [NOV13], _quote(NOV16, 16))
+    assert len(a.history("ADBE", "5d", "1h")["bars"]) == 1

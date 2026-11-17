@@ -166,7 +166,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
                           indicators: list[str] | None = None, last: int | None = 60) -> dict:
         """OHLCV bars. period: 1d 5d 1mo 3mo 6mo 1y 2y 5y 10y max; interval: 1d, or 5m/15m/1h for
         short periods. indicators e.g. ["sma50","sma200","rsi14","macd","bb20","atr14"] are
-        computed with full warm-up. `last` returns only the most recent N bars (None = all)."""
+        computed with full warm-up. `last` returns only the most recent N bars (None = all). While
+        Yahoo's daily bar for the last completed session is late, that bar comes from the quote's
+        regular-session OHLC with `provisional: true` and `v: null`."""
         out = argus.history(symbol, period, interval, indicators)
         if last:
             out["bars"] = out["bars"][-last:]

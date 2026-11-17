@@ -124,7 +124,8 @@ export interface HistoryResponse {
   symbol: string;
   interval: string;
   period: string;
-  bars: { ts: string; o: number; h: number; l: number; c: number; v: number }[];
+  /** `provisional`: the last completed session built from the quote while Yahoo's bar is late (no volume). */
+  bars: { ts: string; o: number; h: number; l: number; c: number; v: number | null; provisional?: boolean }[];
   indicators?: Record<string, (number | null)[] | Record<string, (number | null)[]>>;
 }
 

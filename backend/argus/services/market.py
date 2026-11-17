@@ -163,6 +163,19 @@ def session_close_from_quote(last_bar: date | None, quote: Quote | None, session
     return quote.price if session_date(quote.as_of) == session else None
 
 
+def provisional_session_bar(last_bar: date | None, quote: Quote | None, session: date) -> Bar | None:
+    """`session`'s daily bar from a quote's regular-session open/high/low/close while Yahoo's is late
+    (B-175), under the same rule as session_close_from_quote. For display only, never stored; the
+    quote carries no volume, so `v` is None."""
+    close = session_close_from_quote(last_bar, quote, session)
+    if close is None:
+        return None
+    o = quote.open or close
+    return Bar(ts=datetime.combine(session, datetime.min.time(), NY).astimezone(UTC), o=o,
+               h=max(quote.high or close, o, close), l=min(quote.low or close, o, close), c=close,
+               v=None)  # type: ignore[arg-type]
+
+
 class MarketService:
     def __init__(self, engine: Engine, settings: Settings, quote_providers: list, history_provider,
                  fundamentals_providers: list, sec=None, directory=None, profile_provider=None, figi=None):

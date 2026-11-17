@@ -186,7 +186,9 @@ def history(symbol: str, period: str = "1y", interval: str = "1d",
         console.print(f"{d['symbol']} {d['period']} {d['interval']}: {len(bars)} bars")
         t = Table("Date", "Open", "High", "Low", "Close", "Volume")
         for b in bars[-10:]:
-            t.add_row(b["ts"][:10], _money(b["o"]), _money(b["h"]), _money(b["l"]), _money(b["c"]), f"{b['v']:,.0f}")
+            # A provisional bar (from the quote while Yahoo's is late) has no volume.
+            t.add_row(b["ts"][:10] + (" (provisional)" if b.get("provisional") else ""), _money(b["o"]),
+                      _money(b["h"]), _money(b["l"]), _money(b["c"]), "" if b["v"] is None else f"{b['v']:,.0f}")
         console.print(t)
     specs = [x for x in indicators.split(",") if x.strip()] if indicators else None
     _run(as_json, lambda: _argus().history(symbol, period, interval, specs), render)

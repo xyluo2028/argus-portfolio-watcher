@@ -148,7 +148,7 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
     if (panes.includes("volume")) {
       const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false,
         lastValueVisible: false }, paneIndex);
-      vol.setData(data.bars.map((b, i) => ({
+      vol.setData(data.bars.map((b, i) => (b.v == null ? { time: times[i] } : {
         time: times[i], value: b.v,
         color: resolve(b.c >= b.o ? "var(--candle-up)" : "var(--candle-down)") + "66",
       })));
@@ -215,8 +215,15 @@ export function CandleChart({ data, overlays, panes, live, metrics = [], fundame
       const v = t == null ? null : ratioAt[k]?.get(t as string);
       return v == null ? "" : `${METRIC_PANES.find((m) => m.key === k)!.label} ${v.toFixed(1)}`;
     }).filter(Boolean).join("  ");
+    // The readout names its bar, so a stale last bar can't pass for the header's session (B-175).
+    const barLabel = (b: typeof last) => intraday
+      ? new Date(b.ts).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short",
+          day: "numeric", hour: "numeric", minute: "2-digit" })
+      : new Date(b.ts).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short",
+          day: "numeric" });
     const describe = (b: typeof last | undefined, t?: Time) =>
-      b ? `O ${price(b.o)}  H ${price(b.h)}  L ${price(b.l)}  C ${price(b.c)}  Vol ${b.v.toLocaleString("en-US")}` +
+      b ? `${barLabel(b)}${b.provisional ? " (from quote)" : ""}  O ${price(b.o)}  H ${price(b.h)}  L ${price(b.l)}  ` +
+          `C ${price(b.c)}${b.v == null ? "" : `  Vol ${b.v.toLocaleString("en-US")}`}` +
           (shownMetrics.length ? `   ${describeMetrics(t)}` : "") : "";
     setLegend(describe(last, times[times.length - 1]));
     const onMove = (p: MouseEventParams) => {
