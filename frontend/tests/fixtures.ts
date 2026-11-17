@@ -33,6 +33,8 @@ const status = { built: true, building: false, fiscal_year: 2025, companies: 500
 /** All data stays in the browser test: no live API, credentials, or user records are accessed. */
 export async function mockApi(page: Page) {
   const control = { failNextHistory: false, historyDelay: new Map<string, number>() };
+  // Watchlist membership for the stock page's watchlist button: adds and removes change it.
+  const lists = new Map<string, Set<string>>([["Watchlist", new Set(["TEST"])]]);
   await page.addInitScript(() => localStorage.setItem("argus.theme", "dark"));
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -42,6 +44,24 @@ export async function mockApi(page: Page) {
       `event: update\ndata: ${JSON.stringify({ version: 1, market, stream: { state: "disabled", symbols: 0 },
         quotes: { TEST: quote }, alerts_fired: [], portfolio: summary })}\n\n` });
     if (path === "/api/screener") return json(route.request().method() === "POST" ? { status, matches: 0, rows: [] } : status);
+    if (path === "/api/watchlists") {
+      const sym = url.searchParams.get("symbol");
+      return json([...lists].map(([name, syms]) => ({ name, count: syms.size, ...(sym ? { contains: syms.has(sym) } : {}) })));
+    }
+    const member = path.match(/^\/api\/watchlists\/([^/]+)(?:\/([^/]+))?$/);
+    if (member && route.request().method() === "POST") {
+      const name = decodeURIComponent(member[1]);
+      const { symbols } = route.request().postDataJSON() as { symbols: string[] };
+      const syms = lists.get(name) ?? new Set<string>();
+      lists.set(name, syms);
+      const added = symbols.filter((x) => !syms.has(x));
+      added.forEach((x) => syms.add(x));
+      return json({ watchlist: name, added, already_present: symbols.filter((x) => !added.includes(x)) });
+    }
+    if (member && member[2] && route.request().method() === "DELETE") {
+      lists.get(decodeURIComponent(member[1]))?.delete(decodeURIComponent(member[2]));
+      return json({ removed: [decodeURIComponent(member[2])], not_found: [] });
+    }
     if (route.request().method() !== "GET") throw new Error(`Unexpected API mutation: ${path}`);
     if (path === "/api/auth/status") return json({ required: false, authenticated: true, methods: [], account: null });
     if (path === "/api/portfolios") return json([portfolio]);

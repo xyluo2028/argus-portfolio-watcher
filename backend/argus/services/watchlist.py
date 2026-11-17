@@ -39,12 +39,17 @@ class WatchlistService:
             s.flush()
         return w
 
-    def list_watchlists(self) -> list[dict]:
+    def list_watchlists(self, symbol: str | None = None) -> list[dict]:
+        """Your lists with their sizes; with `symbol`, also whether each list holds it (`contains`)."""
+        sym = normalize_symbol(symbol) if symbol else None
         with session_scope(self.engine) as s:
             out = []
             for w in s.scalars(select(Watchlist).where(access.owned(s, Watchlist.account_id)).order_by(Watchlist.id)):
-                n = len(list(s.scalars(select(WatchlistItem).where(WatchlistItem.watchlist_id == w.id))))
-                out.append({"name": w.name, "count": n})
+                syms = list(s.scalars(select(WatchlistItem.symbol).where(WatchlistItem.watchlist_id == w.id)))
+                row = {"name": w.name, "count": len(syms)}
+                if sym:
+                    row["contains"] = sym in syms
+                out.append(row)
             return out
 
     def items(self, name: str = DEFAULT) -> list[dict]:

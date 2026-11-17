@@ -417,7 +417,7 @@ def test_every_api_route_refuses_or_hides_another_accounts_records(leak):
     own = {
         ("GET", "/api/portfolios"): ("GET", "/api/portfolios", None),
         ("POST", "/api/portfolios"): ("POST", "/api/portfolios", {"name": "bot-sim"}),
-        ("GET", "/api/watchlists"): ("GET", "/api/watchlists", None),
+        ("GET", "/api/watchlists"): ("GET", "/api/watchlists?symbol=BBB", None),  # my Tech list holds BBB
         ("POST", "/api/watchlists/{name}"): ("POST", "/api/watchlists/Watchlist", {"symbols": ["AAA"]}),
         ("GET", "/api/alerts"): ("GET", "/api/alerts?include_inactive=true", None),
         ("POST", "/api/alerts"): ("POST", "/api/alerts", {"symbol": "AAA", "kind": "price_above", "threshold": 1}),

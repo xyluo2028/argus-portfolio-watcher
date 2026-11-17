@@ -329,7 +329,7 @@ export interface TxnResult {
   positions: { before: PositionPreview; after: PositionPreview }[];
 }
 
-export interface WatchlistSummary { name: string; count: number }
+export interface WatchlistSummary { name: string; count: number; contains?: boolean }  // contains: asked with a symbol
 
 export interface WatchItem {
   symbol: string; note: string | null; added_at: string; quote: Quote | null; metrics: Record<string, number | null> | null;
@@ -570,7 +570,7 @@ export const api = {
       (confirm != null ? `&confirm=${enc(confirm)}` : "")),
   deleteTransaction: (id: number, dryRun: boolean) =>
     send<{ deleted: Txn; dry_run: boolean }>("DELETE", `/api/transactions/${id}?dry_run=${dryRun}`),
-  watchlists: () => get<WatchlistSummary[]>("/api/watchlists"),
+  watchlists: (symbol?: string) => get<WatchlistSummary[]>(`/api/watchlists${symbol ? `?symbol=${enc(symbol)}` : ""}`),
   watchlist: (name = "Watchlist") => get<{ watchlist: string; items: WatchItem[]; errors: Record<string, string> }>(`/api/watchlists/${enc(name)}`),
   watchAdd: (symbols: string[], note?: string, name = "Watchlist") =>
     send<{ added: string[]; already_present: string[] }>("POST", `/api/watchlists/${enc(name)}`, { symbols, note }),

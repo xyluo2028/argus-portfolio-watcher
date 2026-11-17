@@ -102,6 +102,27 @@ test("holdings keep the symbol visible when scrolling columns", async ({ page })
   await noPageOverflow(page);
 });
 
+test("the stock page adds to a watchlist in one tap, and its menu removes it or starts a new list", async ({ page }) => {
+  await page.goto("/t/TEST");
+  const watch = page.getByRole("button", { name: "★ In Watchlist" });  // the fixture's default list holds TEST
+  await expect(watch).toBeVisible();
+  await watch.tap();
+  const menu = page.getByRole("group", { name: "Watchlists for TEST" });
+  await expect(menu).toBeVisible();
+  await noPageOverflow(page);
+  await menu.getByRole("checkbox", { name: /Watchlist/ }).tap();  // take it off
+  const add = page.getByRole("button", { name: "☆ Add to watchlist" });
+  await expect(add).toBeVisible();
+  await add.tap();  // one tap puts it back on the list you were using
+  await expect(page.getByRole("button", { name: "★ In Watchlist" })).toBeVisible();
+  await page.getByRole("button", { name: "★ In Watchlist" }).tap();
+  await menu.getByRole("textbox", { name: "New watchlist name" }).fill("Ideas");
+  await menu.getByRole("button", { name: "Add", exact: true }).tap();
+  await expect(page.getByRole("button", { name: "★ In 2 lists" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
 test("range changes show progress, recover from failure, and ignore an older response", async ({ page }) => {
   const control = controls.get(page)!;
   await page.goto("/t/TEST");

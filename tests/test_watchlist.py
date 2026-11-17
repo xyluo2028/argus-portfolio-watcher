@@ -21,6 +21,17 @@ def test_watchlist_add_is_idempotent_and_remove_reports_missing(make_argus):
     assert a.watchlists.remove(["TSLA", "NOPE"]) == {"watchlist": "Watchlist", "removed": ["TSLA"], "not_found": ["NOPE"]}
 
 
+def test_list_watchlists_says_which_lists_hold_a_symbol(make_argus):
+    """The stock page's watchlist button asks this instead of loading every list's quotes."""
+    a = make_argus([FakeQuotes("fake", {"TSLA": (250, 245), "BRK.B": (480, 478)})])
+    a.watchlists.add(["TSLA"])
+    a.watchlists.add(["TSLA", "BRK.B"], name="EV and friends")
+    assert a.watchlists.list_watchlists() == [{"name": "Watchlist", "count": 1},
+                                              {"name": "EV and friends", "count": 2}]
+    assert [w["contains"] for w in a.watchlists.list_watchlists("tsla")] == [True, True]
+    assert [w["contains"] for w in a.watchlists.list_watchlists("brk-b")] == [False, True]  # normalized like an add
+
+
 def test_watchlist_add_rejects_unknown_tickers(make_argus):
     a = make_argus([FakeQuotes("fake", {"ISRG": (409, 415)})])
     with pytest.raises(ArgusError) as e:

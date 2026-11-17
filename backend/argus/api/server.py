@@ -348,8 +348,8 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
 
     # -- watchlist & compare ------------------------------------------------------
     @app.get("/api/watchlists")
-    async def watchlists():
-        return await run(argus.watchlists.list_watchlists)
+    async def watchlists(symbol: str | None = None):
+        return await run(argus.watchlists.list_watchlists, symbol)
 
     @app.get("/api/watchlists/{name}")
     async def watchlist(name: str):

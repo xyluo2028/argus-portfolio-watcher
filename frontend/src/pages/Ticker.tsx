@@ -18,6 +18,7 @@ import { EventsCard } from "../components/EventsCard";
 import { FinancialsCard, SecStale } from "../components/FinancialsCard";
 import { HoldingsCard } from "../components/HoldingsCard";
 import { PeersCard } from "../components/PeersCard";
+import { WatchButton } from "../components/WatchButton";
 import { ResearchCard } from "../components/ResearchCard";
 import { PositionCard } from "../components/PositionCard";
 import { SymbolNotes } from "../components/SymbolNotes";
@@ -180,7 +181,10 @@ export function Ticker({ portfolio, live }: { portfolio: string; live: StreamUpd
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end" }}>
           <div>
-            <div className="hero-label">{symbol}{position?.name ? ` · ${position.name}` : ""}{position?.sector ? ` · ${position.sector}` : ""}</div>
+            <div className="row hero-title">
+              <div className="hero-label">{symbol}{position?.name ? ` · ${position.name}` : ""}{position?.sector ? ` · ${position.sector}` : ""}</div>
+              <WatchButton symbol={symbol} />
+            </div>
             <div className="hero-value">{price(quote?.price)}</div>
             <div className={`hero-delta ${tone(quote?.change)}`}>
               {quote?.change == null ? "–" : `${quote.change > 0 ? "+" : quote.change < 0 ? "−" : ""}${Math.abs(quote.change).toFixed(2)}`} ({pct(quote?.change_pct)})
