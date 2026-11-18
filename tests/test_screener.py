@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from argus.services import screener as sc
@@ -91,7 +93,35 @@ def test_latest_quarter_growth_and_ttm_labelled():
     b = next(r for r in sc.build_rows(TICKERS, ANNUAL, PRIOR, INSTANT, latest, 2025) if r["symbol"] == "BBB")
     assert b["latest_quarter"] == "Q3 2026" and b["revenue_growth_q_yoy_pct"] is None and b["ttm_through"] is None
     # A filter on the latest quarter: the screen drops rows without one
-    assert [r["symbol"] for r in sc.screen(rows, {"revenue_growth_q_yoy_pct": [None, 22]})["rows"]] == ["AAA"]
+    assert [r["symbol"] for r in sc.screen(rows, {"revenue_growth_q_yoy_pct": [None, 22]}, today=TODAY)["rows"]] == ["AAA"]
+
+
+TODAY = date(2026, 11, 18)
+
+
+def test_a_stale_latest_quarter_is_flagged_and_fails_quarter_filters():
+    # D's case: SEC's frames still end at Q1 2026 in November, though its Q2 and Q3 10-Qs are filed.
+    # EEE (cik 5) has AAA's Q1 figures only; AAA's Q3 is a fiscal quarter ending 27 Sep.
+    frames = {k: {p: v | ({5: v[1]} if p in ("CY2026Q1", "CY2025Q1") else {}) for p, v in by_p.items()}
+              for k, by_p in Q_FRAMES.items()}
+    tickers = [TICKERS[0], {"cik": 5, "ticker": "EEE", "name": "Stale"}]
+    annual = {k: v | {5: v[1]} for k, v in ANNUAL.items()}
+    latest = sc.latest_quarters(frames, RECENT, 2025, ends={"CY2026Q3": {1: "2026-09-27"}})
+    quotes = {s: {"market_cap": 4000.0, "quote_type": "EQUITY"} for s in ("AAA", "EEE")}
+    rows = sc.add_prices(sc.build_rows(tickers, annual, PRIOR | {"revenue": PRIOR["revenue"] | {5: 800.0}},
+                                       INSTANT, latest, 2025), quotes)
+    assert [(r["symbol"], r["latest_quarter"], r["quarter_end"]) for r in rows] == [
+        ("AAA", "Q3 2026", "2026-09-27"), ("EEE", "Q1 2026", "2026-03-31")]
+    assert next(r for r in rows if r["symbol"] == "EEE")["revenue_growth_q_yoy_pct"] == pytest.approx(260 / 230 * 100 - 100)
+    hits = sc.screen(rows, {"revenue_growth_q_yoy_pct": [10, None]}, today=TODAY)["rows"]
+    assert [(r["symbol"], r["quarter_stale"]) for r in hits] == [("AAA", False)]  # 13% growth, 7 months old: out
+    every = {r["symbol"]: r for r in sc.screen(rows, {}, today=TODAY)["rows"]}
+    eee = every["EEE"]
+    assert eee["quarter_stale"] and eee["latest_quarter"] == "Q1 2026" and eee["pe"] == pytest.approx(20)  # FY figures stay
+    assert all(eee[f] is None for f in sc.QUARTER_FIGURES)
+    assert not sc.screen(rows, {"operating_margin_ttm_pct": [None, None]}, today=TODAY)["rows"][1:]  # only AAA has TTM
+    # The same row with its quarter still current (four months after it ended) passes.
+    assert [r["symbol"] for r in sc.screen(rows, {"revenue_growth_q_yoy_pct": [10, None]}, today=date(2026, 7, 31))["rows"]] == ["AAA", "EEE"]
 
 
 def test_ttm_is_the_year_when_the_latest_quarter_closes_it():
@@ -153,7 +183,8 @@ class _FakeSec:
             return {1: {"val": vals[concept], "end": "2025-12-31"}} if concept in vals else {}
         concept_key = {"Revenues": "revenue", "OperatingIncomeLoss": "operating_income", "NetIncomeLoss": "net_income"}.get(concept)
         v = Q_FRAMES.get(concept_key, {}).get(period, {}).get(1)
-        return {1: {"val": v, "end": None}} if v is not None else {}
+        end = "2026-09-27" if (concept, period) == ("Revenues", "CY2026Q3") else None  # a fiscal quarter
+        return {1: {"val": v, "end": end}} if v is not None else {}
 
 
 class _FakeYahoo:
@@ -168,6 +199,6 @@ def test_build_fetches_quarterly_frames(tmp_path):
     svc.build(today=date(2026, 11, 17))
     assert {"CY2026Q3", "CY2025Q1", "CY2026Q3I"} <= sec.periods and "CY2025Q4" not in sec.periods
     row = svc.load()["rows"][0]
-    assert (row["fiscal_year_end"], row["latest_quarter"]) == ("2025-12-31", "Q3 2026")
+    assert (row["fiscal_year_end"], row["latest_quarter"], row["quarter_end"]) == ("2025-12-31", "Q3 2026", "2026-09-27")
     assert row["revenue_growth_q_yoy_pct"] == pytest.approx(20) and row["revenue_ttm"] == pytest.approx(1120)
     assert row["pe"] == pytest.approx(20) and row["pe_ttm"] is None

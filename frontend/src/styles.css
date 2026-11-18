@@ -297,6 +297,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .preview { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); }
 .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); }
 .tag.agent { border-color: var(--accent); color: var(--text); }
+.tag.stale-qtr { margin-left: 6px; white-space: nowrap; color: var(--text); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
 
 /* live badge */
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }

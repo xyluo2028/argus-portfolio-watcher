@@ -34,7 +34,13 @@ function periodTag(period: string | null | undefined, fy: number | undefined) {
   return null;  // TTM is in the label; balance-sheet ratios are the latest quarter-end
 }
 
+// The server withholds latest-quarter and TTM figures when SEC's newest quarter for a company is stale.
+function staleNote(r: ScreenRow) {
+  return `SEC's latest quarter for this company is ${r.latest_quarter} (ended ${r.quarter_end}): newer filings aren't in SEC's XBRL data yet, so latest-quarter and TTM figures are left out`;
+}
+
 function cellTitle(period: string | null | undefined, r: ScreenRow) {
+  if ((period === "quarter" || period === "ttm") && r.quarter_stale) return staleNote(r);
   if (period === "fy") return r.fiscal_year_end ? `Fiscal year ended ${r.fiscal_year_end}` : undefined;
   if (period === "quarter") return r.latest_quarter ? `${r.latest_quarter} vs the same quarter a year earlier` : undefined;
   if (period === "ttm") return r.ttm_through ? `Trailing twelve months through ${r.ttm_through}` : undefined;
@@ -194,7 +200,8 @@ export function Screener() {
                 <tbody>
                   {res.rows.map((r) => (
                     <tr key={r.symbol} style={{ cursor: "default" }}>
-                      <td><Link to={`/t/${r.symbol.replace("-", ".")}`} className="sym">{r.symbol}</Link><span className="name" title={`${r.name ?? ""} · ${r.exchange ?? ""}`}>{r.name}</span></td>
+                      <td><Link to={`/t/${r.symbol.replace("-", ".")}`} className="sym">{r.symbol}</Link>
+                        {r.quarter_stale && <span className="tag stale-qtr" title={staleNote(r)}>{r.latest_quarter}</span>}<span className="name" title={`${r.name ?? ""} · ${r.exchange ?? ""}`}>{r.name}</span></td>
                       <td>{show("price", r.price, "$")}</td>
                       {columns.map((c) => (
                         <td key={c} className={c.endsWith("growth_pct") || c === "revenue_growth_q_yoy_pct" ? tone(r[c] as number) : undefined}
@@ -214,7 +221,8 @@ export function Screener() {
           Fundamentals: the latest full calendar year in SEC XBRL filings (with the year before for growth) and the latest quarter-end
           balance sheet; fiscal years are mapped to the calendar year they mostly cover. Latest-quarter growth compares each company's
           newest SEC quarter with the same quarter a year earlier; TTM figures are that fiscal year plus this year's quarters less the
-          same quarters a year before, blank where a quarter is missing. Hover a cell for its period. Market caps from Yahoo. Banks' revenue = net interest
+          same quarters a year before, blank where a quarter is missing. Where SEC's newest quarter ended over 135 days ago
+          (flagged with that quarter by the symbol), both are left out rather than shown as current. Hover a cell for its period. Market caps from Yahoo. Banks' revenue = net interest
           + noninterest income; companies whose profit is over twice their revenue have revenue-based figures left blank.
         </p>
       </section>
