@@ -46,6 +46,9 @@ class Concept:
     tags: tuple[str, ...]  # tried in order across us-gaap then ifrs-full
     additive: bool = True  # EPS is not: YTD differencing doesn't apply (see _derive_q4_eps)
     fallback: tuple[str, ...] = ()  # only fill periods the chosen tag leaves empty
+    # Positive in any going business, so a year smaller than one of its quarters, or a derived fiscal
+    # Q4 below zero beside a positive year and 9 months, means a mis-tagged fact (see series_for).
+    positive: bool = False
 
 
 # Revenue tags, shared with the screener. Revenue including assessed tax (sales taxes, VAT) is gross of
@@ -54,9 +57,10 @@ REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues
 REVENUE_FALLBACK_TAGS = ("RevenueFromContractWithCustomerIncludingAssessedTax",)
 
 CONCEPTS: tuple[Concept, ...] = (
-    Concept("revenue", (*REVENUE_TAGS, "Revenue"), fallback=REVENUE_FALLBACK_TAGS),  # "Revenue": ifrs-full
-    Concept("gross_profit", ("GrossProfit",)),
-    Concept("operating_income", ("OperatingIncomeLoss", "ProfitLossFromOperatingActivities")),
+    Concept("revenue", (*REVENUE_TAGS, "Revenue"), fallback=REVENUE_FALLBACK_TAGS,  # "Revenue": ifrs-full
+            positive=True),
+    Concept("gross_profit", ("GrossProfit",), positive=True),
+    Concept("operating_income", ("OperatingIncomeLoss", "ProfitLossFromOperatingActivities"), positive=True),
     Concept("net_income", ("NetIncomeLoss", "ProfitLossAttributableToOwnersOfParent", "ProfitLoss")),
     Concept("eps_diluted", ("EarningsPerShareDiluted", "DilutedEarningsLossPerShare"), additive=False),
     Concept("operating_cash_flow", ("NetCashProvidedByUsedInOperatingActivities",
@@ -206,14 +210,16 @@ def _pick_series(facts: dict, concept: Concept) -> tuple[list[dict], str | None]
 
 
 def _duration_rows(rows: list[dict]) -> dict[tuple[date, date], tuple[float, str]]:
-    """Dedupe by (start, end): financial reports over other filings, then the latest (restatements win)."""
-    best: dict[tuple[date, date], tuple[float, str, tuple[bool, str]]] = {}
+    """Dedupe by (start, end): financial reports over other filings, a full year from an annual report
+    over a 10-Q's copy, then the latest (restatements win). A 10-Q has no full-year column, so a year it
+    tags is a mistake: FIX's Q1 2026 10-Q tagged Q1 2025's revenue as the whole of 2025."""
+    best: dict[tuple[date, date], tuple[float, str, tuple[bool, bool, str]]] = {}
     for r in rows:
         if "start" not in r:
             continue
         key = (date.fromisoformat(r["start"]), date.fromisoformat(r["end"]))
         form = r.get("form", "")
-        rank = (form in REPORT_FORMS, r.get("filed", ""))
+        rank = (form in REPORT_FORMS, _is_year((key[1] - key[0]).days) and form in ANNUAL_FORMS, r.get("filed", ""))
         if key not in best or rank > best[key][2]:
             best[key] = (float(r["val"]), form, rank)
     return {k: (v[0], v[1]) for k, v in best.items()}
@@ -227,8 +233,20 @@ def _is_year(days: int) -> bool:
     return 350 <= days <= 380
 
 
-def series_for(rows: list[dict], period: str, additive: bool) -> dict[date, float]:
+def series_for(rows: list[dict], period: str, additive: bool, positive: bool = False,
+               withheld: set[date] | None = None) -> dict[date, float]:
+    """One value per period end. For a `positive` line, a year smaller than a shorter period inside it
+    (a quarter or year to date) is dropped, and so is a quarter derived below zero from a positive
+    year and year to date; the ends of the periods left empty that way go into `withheld`."""
     durations = _duration_rows(rows)
+    if positive:
+        for (start, end), (v, _) in list(durations.items()):
+            if _is_year((end - start).days) and any(
+                    s >= start and e <= end and (s, e) != (start, end) and pv > v
+                    for (s, e), (pv, _) in durations.items()):
+                del durations[(start, end)]
+                if withheld is not None:
+                    withheld.add(end)
     if period == "annual":
         return {end: v for (start, end), (v, form) in durations.items()
                 if _is_year((end - start).days) and (form in ANNUAL_FORMS or not form)}
@@ -246,6 +264,10 @@ def series_for(rows: list[dict], period: str, additive: bool) -> dict[date, floa
             series.sort()
             for (e1, v1), (e2, v2) in zip(series, series[1:]):
                 if _is_quarter((e2 - e1).days) and e2 not in quarters:
+                    if positive and v1 > 0 and v2 > 0 and v2 < v1:
+                        if withheld is not None:
+                            withheld.add(e2)
+                        continue
                     quarters[e2] = v2 - v1
     return quarters
 
@@ -264,19 +286,26 @@ def build_financials(facts: dict, period: str = "quarterly", limit: int = 8, tod
         raise ValueError("period must be 'quarterly' or 'annual'")
     by_end: dict[date, dict] = {}
     units: dict[str, str] = {}
+    withheld: dict[str, set[date]] = {}
     for concept in CONCEPTS:
         rows, unit = _pick_series(facts, concept)
-        values = series_for(rows, period, concept.additive)
+        values = series_for(rows, period, concept.additive, concept.positive,
+                            withheld.setdefault(concept.field, set()))
         if concept.fallback:
             spare, spare_unit = _pick_series(facts, Concept(concept.field, concept.fallback, concept.additive))
             if unit is None or spare_unit == unit:
                 unit = unit or spare_unit
-                values = series_for(spare, period, concept.additive) | values
+                values = series_for(spare, period, concept.additive, concept.positive) | values
         if not values:
             continue
         units[concept.field] = unit or ""
         for end, v in values.items():
             by_end.setdefault(end, {"period_end": end.isoformat()})[concept.field] = v
+    # Left empty rather than published wrong; `withheld` names the lines so a reader knows why.
+    for field, ends in withheld.items():
+        for end in sorted(ends):
+            if end in by_end and field not in by_end[end]:
+                by_end[end].setdefault("withheld", []).append(field)
     if period == "quarterly":
         _derive_q4_eps(facts, by_end, units)
     periods = [by_end[e] for e in sorted(by_end, reverse=True)[:limit]]

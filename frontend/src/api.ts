@@ -173,6 +173,8 @@ export interface FinancialPeriod {
   eps_diluted?: number;
   /** Set when fiscal-Q4 EPS isn't filed for the quarter and was worked out from the full year. */
   eps_diluted_derived?: "net_income_per_share" | "annual_less_ytd" | "annual_less_quarters";
+  /** Lines left empty because SEC's facts for the period contradict each other (a year smaller than a quarter). */
+  withheld?: ("revenue" | "gross_profit" | "operating_income")[];
   free_cash_flow?: number;
 }
 

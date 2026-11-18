@@ -109,7 +109,9 @@ def latest_quarters(frames: dict[str, dict[str, dict[int, float]]], periods: lis
     like the annual frames) and the same quarters a year earlier. The latest quarter is the newest one
     with revenue. TTM to it is the fiscal year plus the quarters since the year closed minus the same
     quarters a year before, every one of them needed (so at most len(periods) of them); when the latest
-    quarter closes the year, it is the year itself. The year is added in build_rows, once it is checked."""
+    quarter closes the year, it is the year itself. The year is added in build_rows, once it is checked.
+    `revenue_q_max` (the largest quarter of the fiscal year) and `revenue_q_max_ttm` (of the TTM window)
+    are floors for the year and the TTM revenue."""
     rev, fy_end = frames.get("revenue", {}), fy_end or {}
     out: dict[int, dict] = {}
     for cik in set().union(*(rev.get(p, {}).keys() for p in periods)):
@@ -118,6 +120,10 @@ def latest_quarters(frames: dict[str, dict[str, dict[int, float]]], periods: lis
         row = {"period": period, "revenue": rev[period][cik], "revenue_prev": rev.get(f"CY{y - 1}Q{q}", {}).get(cik)}
         cy, cq = _closing_quarter(fy_end.get(cik), fiscal_year)
         since = (y * 4 + q) - (cy * 4 + cq)  # quarters reported since the fiscal year closed
+        in_year = [v for p, by_cik in rev.items() if p.startswith(f"CY{fiscal_year}Q") and (v := by_cik.get(cik)) is not None]
+        if in_year:
+            row["revenue_q_max"] = max(in_year)
+        row["revenue_q_max_ttm"] = rev[period][cik]
         if 0 <= since <= len(periods):
             span = [(y * 4 + q - 1 - j) for j in range(since)]  # quarter indices, newest first
             span = [(f"CY{i // 4}Q{i % 4 + 1}", f"CY{i // 4 - 1}Q{i % 4 + 1}") for i in span]
@@ -126,6 +132,8 @@ def latest_quarters(frames: dict[str, dict[str, dict[int, float]]], periods: lis
                 vals = [(f.get(now, {}).get(cik), f.get(then, {}).get(cik)) for now, then in span]
                 if all(a is not None and b is not None for a, b in vals):
                     row[f"{concept}_delta"] = sum(a - b for a, b in vals)
+                    if concept == "revenue" and vals:
+                        row["revenue_q_max_ttm"] = max(a for a, _ in vals)
         out[cik] = row
     return out
 
@@ -155,11 +163,19 @@ def build_rows(tickers: list[dict], annual: dict[str, dict[int, float]], prior: 
         # Profit more than twice revenue (mark-to-market gains, a mis-tagged revenue line): margins
         # and revenue multiples would mislead, so leave them out for this company.
         odd = rev is not None and a.get("net_income") is not None and abs(a["net_income"]) > 2 * abs(rev)
+        lq = quarters.get(cik, {})
+        # A year smaller than one of its quarters is a mis-tagged fact (FIX's Q1 2026 10-Q tagged
+        # Q1 2025's revenue, operating income and gross profit as calendar 2025's, and SEC's frame
+        # serves it); the lines filed with it go too.
+        if rev is not None and lq.get("revenue_q_max") is not None and rev < lq["revenue_q_max"]:
+            odd = True
         if odd:
             a = a | {"revenue": None, "gross_profit": None, "operating_income": None}
-        lq = quarters.get(cik, {})
         ttm = {k: a[k] + lq[f"{k}_delta"] if a.get(k) is not None and f"{k}_delta" in lq else None for k in QUARTERLY}
         ttm["net_income"] = _plausible_income(ttm["net_income"], ttm["revenue"])
+        if ttm["revenue"] is not None and ttm["revenue"] < (lq.get("revenue_q_max_ttm") or 0):
+            odd = True  # twelve months can't be less than one of their quarters: tags mixed across periods
+            ttm = dict.fromkeys(QUARTERLY)
         if ttm["revenue"] is not None and ttm["revenue"] <= 0:  # tags mixed across periods
             ttm = dict.fromkeys(QUARTERLY)
         rows.append({

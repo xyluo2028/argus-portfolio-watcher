@@ -4,6 +4,7 @@ import { big, pct, tone } from "../format";
 import { RevenueColumns } from "./RevenueColumns";
 
 const TIMING: Record<string, string> = { amc: "after close", bmo: "before open", dmh: "during market" };
+const WITHHELD = "Left out: SEC's filings contradict each other for this period (the full year is smaller than a quarter)";
 const shortDate = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 const longDate = (d: string) =>
@@ -109,12 +110,12 @@ export function FinancialsCard({ symbol }: { symbol: string }) {
                         {p.period_end}
                         {e && <span className="ext-line">reported {shortDate(e.report_date)}{e.timing ? `, ${TIMING[e.timing]}` : ""}</span>}
                       </td>
-                      <td>
+                      <td title={p.withheld?.includes("revenue") ? WITHHELD : undefined}>
                         {big(p.revenue)}
                         {e?.revenue_estimate != null && <span className="ext-line">est. {big(e.revenue_estimate)}</span>}
                       </td>
-                      <td>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
-                      <td>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
+                      <td title={p.withheld?.includes("gross_profit") ? WITHHELD : undefined}>{p.gross_margin_pct == null ? "–" : p.gross_margin_pct.toFixed(1)}</td>
+                      <td title={p.withheld?.includes("operating_income") ? WITHHELD : undefined}>{p.operating_margin_pct == null ? "–" : p.operating_margin_pct.toFixed(1)}</td>
                       <td className={tone(p.net_income)}>{big(p.net_income)}</td>
                       <td title={p.eps_diluted_derived ? "Not filed for the quarter: derived from the full-year EPS" : undefined}>
                         {p.eps_diluted == null ? "–" : p.eps_diluted.toFixed(2)}

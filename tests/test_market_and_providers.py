@@ -749,6 +749,60 @@ def test_search_ranking(settings):
     assert syms("  ") == []
 
 
+def test_sec_fy_revenue_holding_a_quarter_is_not_used():
+    from argus.providers.sec_edgar import ttm_figures
+
+    # FIX: the Q1 2026 10-Q tagged Q1 2025's revenue, gross profit and operating income as calendar
+    # 2025 (filed after the 10-K, so it used to win), making Q4 = FY - 9 months come out at -$4.6B.
+    def facts(with_10k: bool):
+        rows = {"Revenues": (1831, 2173, 2451, 9102), "GrossProfit": (403, 510, 608, 2196)}
+        out = {}
+        for tag, (q1, q2, q3, fy) in rows.items():
+            r = [_fact("2025-01-01", "2025-03-31", q1), _fact("2025-04-01", "2025-06-30", q2),
+                 _fact("2025-07-01", "2025-09-30", q3), _fact("2025-01-01", "2025-06-30", q1 + q2),
+                 _fact("2025-01-01", "2025-09-30", q1 + q2 + q3),
+                 _fact("2025-01-01", "2025-12-31", q1, form="10-Q", filed="2026-04-23")]
+            if with_10k:
+                r.append(_fact("2025-01-01", "2025-12-31", fy, form="10-K", filed="2026-02-19"))
+            out[tag] = {"units": {"USD": r}}
+        out["NetIncomeLoss"] = {"units": {"USD": [_fact("2025-01-01", "2025-09-30", 700),
+                                                  _fact("2025-01-01", "2025-12-31", 1000, form="10-K")]}}
+        return {"facts": {"us-gaap": out}}
+
+    q = {p["period_end"]: p for p in build_financials(facts(True))["periods"]}
+    assert q["2025-12-31"]["revenue"] == 9102 - 6455 and q["2025-12-31"]["gross_profit"] == 2196 - 1521
+    assert "withheld" not in q["2025-12-31"]
+    assert build_financials(facts(True), "annual")["periods"][0]["revenue"] == 9102
+    # Only the bad copy: the year is smaller than its quarters, so it isn't a year and Q4 isn't derived
+    q = {p["period_end"]: p for p in build_financials(facts(False))["periods"]}
+    assert "revenue" not in q["2025-12-31"] and "gross_margin_pct" not in q["2025-12-31"]
+    assert q["2025-12-31"]["withheld"] == ["revenue", "gross_profit"] and q["2025-12-31"]["net_income"] == 300
+    a = build_financials(facts(False), "annual")["periods"][0]
+    assert "revenue" not in a and a["withheld"] == ["revenue", "gross_profit"]
+    assert "revenue_ttm" not in ttm_figures(build_financials(facts(False)))
+
+
+def test_sec_negative_derived_q4_of_a_positive_line_is_withheld():
+    # A "year" holding 6 months: bigger than any quarter, less than 9 months to date, so Q4 would be
+    # negative. Year facts are checked against the year to date too; a 9 months less than its 6 months
+    # (no year involved) is caught when differencing.
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [
+            _fact("2025-01-01", "2025-03-31", 100), _fact("2025-04-01", "2025-06-30", 110),
+            _fact("2025-07-01", "2025-09-30", 120), _fact("2025-01-01", "2025-09-30", 330),
+            _fact("2025-01-01", "2025-12-31", 210, form="10-K")]}},
+        "NetIncomeLoss": {"units": {"USD": [  # a Q4 loss is real for net income: kept
+            _fact("2025-01-01", "2025-09-30", 30), _fact("2025-01-01", "2025-12-31", 10, form="10-K")]}},
+    }}}
+    q4 = {p["period_end"]: p for p in build_financials(facts)["periods"]}["2025-12-31"]
+    assert "revenue" not in q4 and q4["withheld"] == ["revenue"] and q4["net_income"] == -20
+    nine_short = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [
+        _fact("2025-01-01", "2025-03-31", 100), _fact("2025-01-01", "2025-06-30", 210),
+        _fact("2025-01-01", "2025-09-30", 110)]}}}}}
+    q3 = {p["period_end"]: p for p in build_financials(nine_short)["periods"]}
+    assert "2025-09-30" not in q3 and q3["2025-06-30"]["revenue"] == 110
+
+
 def test_sec_prefers_report_filings_over_later_proxy_copies():
     from argus.providers.sec_edgar import _duration_rows
 

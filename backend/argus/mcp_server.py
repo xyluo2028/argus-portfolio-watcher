@@ -227,7 +227,9 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         """Reported financials from SEC EDGAR (revenue, gross/operating/net income and margins,
         diluted EPS, operating cash flow, capex, free cash flow). period: quarterly | annual.
         Quarters not filed separately (usually Q4) are derived from annual minus 9-month totals;
-        such a quarter's diluted EPS carries `eps_diluted_derived` (the method used).
+        such a quarter's diluted EPS carries `eps_diluted_derived` (the method used). Revenue, gross
+        profit or operating income SEC's facts contradict (a year smaller than one of its quarters, a
+        derived quarter below zero) is left out and named in the period's `withheld`.
         `latest_period` is the newest period end, `stale` true when it's older than a newer report
         should be (~135 days for a quarter): SEC's XBRL data can lag a filing by months. ETFs have none.
         Quarterly results also carry `earnings`: per quarter the report date and timing (bmo/amc),

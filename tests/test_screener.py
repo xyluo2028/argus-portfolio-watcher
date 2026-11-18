@@ -118,6 +118,27 @@ def test_ttm_counts_quarters_since_a_non_december_fiscal_year_closed():
     assert sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, old, 2025)[0]["revenue_ttm"] is None
 
 
+def test_a_year_smaller_than_its_quarters_is_dropped_with_its_ttm():
+    # FIX: a Q1 2026 10-Q tagged Q1 2025's revenue (and operating income) as calendar 2025's, and SEC's
+    # CY2025 frame serves it. FY revenue 230 < Q3 2025's 250: no FY revenue, margins, P/S or TTM.
+    annual = {"revenue": {1: 230.0}, "net_income": {1: 200.0}, "operating_income": {1: 60.0}, "gross_profit": {1: 90.0}}
+    latest = sc.latest_quarters(Q_FRAMES, RECENT, 2025)
+    a = sc.add_prices(sc.build_rows(TICKERS[:1], annual, PRIOR, INSTANT, latest, 2025),
+                      {"AAA": {"market_cap": 4000.0, "quote_type": "EQUITY"}})[0]
+    assert a["revenue_unreliable"] and a["revenue"] is None and a["ps"] is None
+    assert a["net_margin_pct"] is None and a["gross_margin_pct"] is None and a["revenue_ttm"] is None
+    assert a["operating_margin_ttm_pct"] is None
+    # TTM below its newest quarter (a year short of a quarter's worth, mixed tags): flagged, no TTM
+    short = {"revenue": {1: 255.0}, "net_income": {1: 200.0}}
+    frames = {"revenue": {"CY2026Q3": {1: 300.0}, "CY2026Q2": {1: 100.0}, "CY2026Q1": {1: 100.0},
+                          "CY2025Q3": {1: 250.0}, "CY2025Q2": {1: 250.0}, "CY2025Q1": {1: 250.0}}}
+    b = sc.build_rows(TICKERS[:1], short, PRIOR, INSTANT, sc.latest_quarters(frames, RECENT, 2025), 2025)[0]
+    assert b["revenue"] == 255.0 and b["revenue_unreliable"] and b["revenue_ttm"] is None and b["net_income_ttm"] is None
+    # The healthy case is untouched
+    ok = sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, latest, 2025)[0]
+    assert not ok["revenue_unreliable"] and ok["revenue_ttm"] == pytest.approx(1120)
+
+
 class _FakeSec:
     def __init__(self):
         self.periods = set()
