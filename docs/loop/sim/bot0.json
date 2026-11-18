@@ -2,7 +2,7 @@
  "format": "argus-account-snapshot",
  "version": 1,
  "account": "bot0",
- "created_at": "2026-11-17T02:41:21.582458+00:00",
+ "created_at": "2026-11-18T02:37:06.597251+00:00",
  "tables": {
   "portfolio": [
    {
@@ -305,6 +305,18 @@
     "created_by": "ui",
     "created_at": "2026-11-17T02:17:36.554324+00:00",
     "updated_at": "2026-11-17T02:17:36.554328+00:00"
+   },
+   {
+    "id": 7,
+    "account_id": 1,
+    "symbol": "NVDA",
+    "kind": "note",
+    "text": "Plan, 11-17 round: NVDA reported after the 11-17 close (rev $115.8B vs $111.3B est, EPS 2.68 vs 2.53, guide above; board confirms Huang will not return). After-hours 162.94 (+4.8%). I will NOT buy at the 11-17 mid (154.26): that price predates the report, so buying it would trade on information the fill could not have had. Decide at the 11-18 session, at a price that includes the reaction. In favour: P/E ttm 19.7 (0th pct of 5y), forward ~10x FY+1, revenue +106% YoY. Against: CEO ouster / governance, analysts cut buy 49->36 and hold 2->14 in a month, 172 insider sales and no buys in a year. Size: up to ~$1,000 (10%) from cash.",
+    "review_on": "2026-11-18",
+    "archived": false,
+    "created_by": "ui",
+    "created_at": "2026-11-18T02:16:33.078413+00:00",
+    "updated_at": "2026-11-18T02:16:33.078418+00:00"
    }
   ],
   "peer_list": [],

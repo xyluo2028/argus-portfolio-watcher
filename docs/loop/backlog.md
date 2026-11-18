@@ -277,7 +277,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-036 Fear & greed jumps (24.6 → 38.3) when breadth loads; no component count; new-highs scored differently
 - kind: ux · severity: medium
-- reported by: macro r002, macro r003, macro r005, macro r006, macro r008, macro r009, macro r010, income r010, macro r012, macro r013, macro r015, macro r016, multibagger r016
+- reported by: macro r002, macro r003, macro r005, macro r006, macro r008, macro r009, macro r010, income r010, macro r012, macro r013, macro r015, macro r016, multibagger r016, trader r019
 - evidence: 22 highs vs 2 lows reads "Extreme greed" (rounds/002/investor-macro.md #4)
 - r003: 27.0 with 5 readings → 39.8 with 7 within minutes; Price strength 86.7 on 26 highs vs 4 lows (macro r003 #5)
 - r004: 9.5 → 27.8 when breadth loaded (macro r004 #3)
@@ -290,7 +290,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r013: 1.2 → 22.1 once breadth loaded; 'Price strength 91, Extreme greed' on a 76-up/424-down day (macro #4)
 - r015: 20.8 "Extreme fear" from 5 of 7 components, 38 "Fear" once breadth loaded; still no components count (macro #4)
 - r016: 25.3 from 5 of 7 parts, then 40.9 once breadth loaded, with no partial hint
-- status: open
+- r019: 10.9 with `errors.breadth` set → 19.8 a minute later once the universe was built, same market data (trader r019 #6)
+- acceptance: `/api/market-context`'s fear & greed carries `components_used` and `components_total`, and a `partial: true` flag while any component is missing; while partial the gauge shows "partial (n of m)" on the Markets page and the brief; the score of a partial reading is computed on the same scale so the jump on completion is explained by the flag (or no headline label is given while partial); tests: one missing component → partial with counts; all present → partial false
+- note: shipped for the API and Markets page; the brief has no fear & greed section to flag (would go with B-038)
+- status: done (r019, ad8fa6d)
 
 ### B-037 Markets has no 10y real yield, breakeven, dollar index or credit spreads
 - kind: feature · severity: medium
@@ -439,7 +442,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-059 News tone counts articles about other companies (RMBS 6 positive, none about Rambus)
 - kind: bug · severity: medium
-- reported by: multibagger r003, multibagger r006, income r008, income r009, multibagger r014
+- reported by: multibagger r003, multibagger r006, income r008, income r009, multibagger r014, trader r019
 - evidence: rounds/003/investor-multibagger.md #5
 - r004: still present; RMBS −7.6% day has no sector context (multibagger r004 #7)
 - r006: RMBS earnings night scored 10 positive / 0 negative; "…as Shares Slip" scored positive, "Rambus falls…" neutral; five "positive" articles about other companies (multibagger r006 #6)
@@ -447,6 +450,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r008: JNJ headlines about Bausch + Lomb, Genmab, GSK; NEE about PG&E and Southern (income r008 #9)
 - r009: HD headlines are "Dow Jones Top Movers…" and a Target story; O's include a Verizon FCF story (income r009 #7)
 - r014: RDDT news mostly unrelated personal-finance stories
+- r019: "Nvidia says it won't bring back Jensen Huang" scored positive; NVDA tone 11 positive / 0 negative on the day the founder-CEO's exit was confirmed (trader r019 #8)
 - status: open
 
 ### B-060 Screener rows have no sector or industry; no sector filter
@@ -801,11 +805,12 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-110 The brief leaves out extended-hours moves and headlines for holdings that just reported
 - kind: feature · severity: medium
-- reported by: income r008, multibagger r009, multibagger r010
+- reported by: income r008, multibagger r009, multibagger r010, trader r019
 - evidence: MSFT +2.9% after hours on its report (largest AH P&L) is absent from movers and headlines; revenue miss not shown next to the EPS beat (rounds/008/investor-income.md #3; related to B-055, B-096)
 - r009: RMBS −4.9% and INOD −6.2% post-market, `totals.ext_pnl` −$851 not in the brief (multibagger r009 #7)
 - r010: the weekend brief has headlines only for TOST; the biggest movers have none (multibagger r010 #2)
 - r011: LOAR +9.3% (biggest dollar gainer) has no headline anywhere (multibagger r011 #7)
+- r019: brief's `watchlist_earnings.recent` has NVDA's surprise but no after-hours move (+4.8%); only `argus quotes` shows it (trader r019 #7)
 - status: open
 
 ### B-111 A one-quarter cash windfall shows as a high FCF margin with no warning (INOD 58%)
@@ -1199,14 +1204,45 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-176 Earnings date changes show no "moved from" marker
 - kind: feature · severity: low
-- reported by: trader r018
+- reported by: trader r018, trader r019
 - evidence: INTU earnings listed 11-19 in r017's brief and events, 11-20 amc in r018, with no note or previous date (rounds/018/trader.md #4)
+- r019: INTU flipped back 11-20 → 11-19 amc (finnhub) with no marker either time; for an after-close report the date decides which session's fill precedes the numbers (rounds/019/trader.md #4)
 - status: open
 
 ### B-177 Screener TTM gaps after B-019: no Q4 derivation, FY can lag, no TTM FCF or margins
 - kind: feature · severity: medium
 - reported by: split from B-019 in r018
 - evidence: TTM is empty where SEC has no 3-month Q4 frame (AAPL, MSFT); FY columns always use last calendar year, so a June-2026 FY may still show FY2025; FCF yield, gross and net margin stay FY-only (r018 B-019 commit b22ab5a)
+- r019: with B-180's staleness flag, 490 of 4,084 rows are stale; ~194 have Aug–Oct fiscal years (AAPL, V, DIS, QCOM, SBUX, MU, COST) whose fiscal Q4 is only in the 10-K as a full year; deriving Q4 = FY − 9M from annual frames would fix most (programmer r019)
+- r019: balance-sheet ratios (P/B, liabilities/equity, current ratio) aren't flagged when the latest balance sheet is stale (programmer r019)
+- status: open
+
+### B-178 FIX Q4 2025 revenue derived as −$4.62B (FY revenue is the Q1 figure); TTM, P/E, margins and screener wrong
+- kind: bug · severity: high
+- reported by: trader r019
+- evidence: `argus financials FIX` quarterly 2025-12-31 revenue −4,624,288,000; screener FY2025 revenue 1,831,286,000 = Q1 2025's; `revenue_ttm` 5.27B while one quarter is 3.77B; stock page P/S 3.0, net margin 30.9%, ROE 55.2%; FIX passed a P/E TTM screen; `revenue_unreliable` False (rounds/019/trader.md #1)
+- acceptance: an annual (FY) fact is accepted only when its period spans about a year (e.g. 330–380 days) and isn't smaller than any reported quarter of that fiscal year; a derived fiscal-Q4 value for an additive line (revenue, gross profit, operating income) is never published when it's negative while the FY and quarters are positive (left null and marked instead); the screener's FY and TTM figures use the same guarded facts, and `revenue_unreliable` is set when TTM revenue is less than the largest single quarter; tests with a company-facts fixture where the FY revenue tag holds a 3-month value; live FIX shows no negative quarter and a TTM revenue of at least the latest quarter's
+- status: done (r019, ef97ee8)
+
+### B-179 The sim fills at a pre-report mid while the after-hours reaction is visible (look-ahead)
+- kind: feature (process) · severity: high
+- reported by: trader r019
+- evidence: NVDA mid 154.26 (11-17) vs ext_price 162.94 (+4.8%) after its beat; a buy books ~+5.6% for free; the trader passed by choice (rounds/019/trader.md #2)
+- note: needs `scripts/sim.py` or the schedule to change, which the loop may not edit; flagged for a human in r019's summary
+- status: open (human)
+
+### B-180 Screener "latest quarter" can be two quarters stale with no flag (D: Q1 2026 in mid-November)
+- kind: bug · severity: medium
+- reported by: trader r019
+- evidence: `POST /api/screener` (revenue_growth_q_yoy_pct ≥ 15) returns D with `latest_quarter` and `ttm_through` "Q1 2026", latest-quarter growth 24.6%, P/E TTM 20.0; the other 53 rows are on Q3 2026 or equivalent (rounds/019/trader.md #3)
+- acceptance: find why D's Q2/Q3 2026 frames are missing and fix it if it's in Argus's SEC frames handling; independently, every screener row carries `quarter_end` (date) and `quarter_stale: true` when its latest quarter ended more than ~135 days before today; stale rows are excluded from latest-quarter and TTM filters (their q/TTM fields are null or flagged so they don't pass) and are marked on the Screener page; tests: a row whose latest quarter is 7 months old is flagged and doesn't pass a latest-quarter growth filter, a current one does
+- note: D's Q2/Q3 2026 10-Qs are absent from SEC's own XBRL data (company facts and frames), as for NEE, SO, DUK, AEP, ETR, SRE, EXC, PLD, DLR; not an Argus bug
+- status: done (r019, 3651f0d)
+
+### B-181 Events mark a held stock's dividend payment `held: false` when the bot bought after the ex-date
+- kind: ux · severity: low
+- reported by: trader r019
+- evidence: `/api/events` LNG dividend_pay 11-17, ex 11-09, `held: false`, amount 0 while 3.234 LNG is held (bought 11-13); the stock page says "not owed" correctly (rounds/019/trader.md #5)
 - status: open
 
 ## Done
