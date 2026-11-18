@@ -221,10 +221,11 @@ function FearGreed({ fg }: { fg: NonNullable<MarketContext["fear_greed"]> }) {
     return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
   };
   const [nx, ny] = at(fg.score, r - 22);
+  const headline = fg.partial ? `Partial (${fg.components_used} of ${fg.components_total})` : fg.rating;
   return (
     <div className="card">
       <h2>Fear &amp; greed <span className="muted small">· 0 extreme fear, 100 extreme greed</span></h2>
-      <svg viewBox="0 0 260 172" className="fg-dial" role="img" aria-label={`Fear and greed ${fg.score.toFixed(0)}: ${fg.rating}`}>
+      <svg viewBox="0 0 260 172" className="fg-dial" role="img" aria-label={`Fear and greed ${fg.score.toFixed(0)}: ${headline}`}>
         {FG_BANDS.map(([lo, hi, c]) => <path key={lo} d={arc(lo, hi)} stroke={c} strokeWidth={18} fill="none" />)}
         {[0, 25, 50, 75, 100].map((v) => {
           const [x, y] = at(v, r + 17);
@@ -234,7 +235,12 @@ function FearGreed({ fg }: { fg: NonNullable<MarketContext["fear_greed"]> }) {
         <circle cx={cx} cy={cy} r={6} fill="var(--text)" />
         <text x={cx} y={cy + 44} textAnchor="middle" className="fg-score">{fg.score.toFixed(0)}</text>
       </svg>
-      <div className="fg-rating" style={{ color: fgText(fg.score) }}>{fg.rating}</div>
+      <div className="fg-rating" style={{ color: fg.partial ? "var(--text-2)" : fgText(fg.score) }}>{headline}</div>
+      {fg.partial && (
+        <p className="small muted" style={{ margin: "0 0 8px", textAlign: "center" }}>
+          Missing {fg.missing.join(", ").toLowerCase()}: the score can move a lot once {fg.missing.length > 1 ? "they load" : "it loads"}.
+        </p>
+      )}
       <div className="fg-parts">
         {fg.components.map((c) => (
           <div key={c.key} className="fg-part">
@@ -247,7 +253,7 @@ function FearGreed({ fg }: { fg: NonNullable<MarketContext["fear_greed"]> }) {
         ))}
       </div>
       <p className="small muted" style={{ margin: "8px 0 0" }}>
-        The average of {fg.components.length} readings, in the spirit of CNN's index. History-based ones are ranked against the last
+        The average of {fg.components_used} of {fg.components_total} readings, in the spirit of CNN's index. History-based ones are ranked against the last
         year (50 = a typical day); price strength and breadth come from today's counts. A contrarian gauge: extremes tend to fade.
       </p>
     </div>

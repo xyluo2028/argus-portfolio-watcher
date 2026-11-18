@@ -43,6 +43,11 @@ BREADTH_FIELDS = ("regularMarketPrice,regularMarketPreviousClose,regularMarketDa
 # Yahoo sometimes returns a null close for a past session, and for futures, FX and crypto the bar for
 # "today" holds the overnight price while the settle it moved from is gone.
 QUOTE_FIELDS = "regularMarketPrice,regularMarketPreviousClose,regularMarketTime,quoteType"
+# The seven fear & greed readings; while any is missing the score is flagged partial and gets no rating,
+# since the missing ones (usually today's breadth, before the screener's universe is built) can move it a lot.
+FG_COMPONENTS = {"momentum": "Market momentum", "strength": "Price strength", "breadth": "Price breadth",
+                 "volatility": "Volatility", "term": "Volatility term structure",
+                 "safe_haven": "Safe-haven demand", "junk": "Junk bond demand"}
 FG_LABELS = [(25, "Extreme fear"), (45, "Fear"), (55, "Neutral"), (75, "Greed"), (101, "Extreme greed")]
 
 PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
@@ -236,46 +241,50 @@ def fg_label(score: float) -> str:
 def fear_greed(closes: dict[str, dict[date, float]], breadth: dict | None) -> dict | None:
     parts: list[dict] = []
 
-    def add(key, label, score, detail):
+    def add(key, score, detail):
         if score is not None:
-            parts.append({"key": key, "label": label, "score": round(score, 1), "detail": detail})
+            parts.append({"key": key, "label": FG_COMPONENTS[key], "score": round(score, 1), "detail": detail})
 
     spx = closes.get("^GSPC") or {}
     if spx:
         dev = _vs_average(_series(spx)[1], 125)
         if dev:
-            add("momentum", "Market momentum", _rank(dev),
+            add("momentum", _rank(dev),
                 f"S&P 500 {abs(dev[-1]) * 100:.1f}% {'above' if dev[-1] >= 0 else 'below'} its 125-day average")
     if breadth and breadth["new_highs"] + breadth["new_lows"]:
         h, lo = breadth["new_highs"], breadth["new_lows"]
-        add("strength", "Price strength", h / (h + lo) * 100, f"{h} new 52-week highs vs {lo} new lows")
+        add("strength", h / (h + lo) * 100, f"{h} new 52-week highs vs {lo} new lows")
     if breadth and breadth["pct_above_50d"] is not None:
-        add("breadth", "Price breadth", breadth["pct_above_50d"],
+        add("breadth", breadth["pct_above_50d"],
             f"{breadth['pct_above_50d']:.0f}% of the {breadth['count']} largest stocks above their 50-day average")
     vix = closes.get("^VIX") or {}
     if vix:
         dev = _vs_average(_series(vix)[1], 50)
         r = _rank(dev)
         if r is not None:
-            add("volatility", "Volatility", 100 - r,
+            add("volatility", 100 - r,
                 f"VIX {_series(vix)[1][-1]:.1f}, {abs(dev[-1]) * 100:.0f}% {'above' if dev[-1] >= 0 else 'below'} its 50-day average")
     term = _ratio_series(vix, closes.get("^VIX3M") or {})
     r = _rank(term)
     if r is not None:
-        add("term", "Volatility term structure", 100 - r,
+        add("term", 100 - r,
             f"VIX ÷ 3-month VIX {term[-1]:.2f}" + (" (inverted: near-term fear)" if term[-1] > 1 else ""))
-    for key, label, a, b, what in (("safe_haven", "Safe-haven demand", "SPY", "TLT", "Stocks vs Treasuries"),
-                                   ("junk", "Junk bond demand", "HYG", "LQD", "Junk vs investment-grade bonds")):
+    for key, a, b, what in (("safe_haven", "SPY", "TLT", "Stocks vs Treasuries"),
+                            ("junk", "HYG", "LQD", "Junk vs investment-grade bonds")):
         sp = _spread_20d(closes.get(a) or {}, closes.get(b) or {})
         r = _rank(sp)
         if r is not None:
-            add(key, label, r, f"{what} {'+' if sp[-1] >= 0 else '−'}{abs(sp[-1]):.1f} pp over 20 days")
+            add(key, r, f"{what} {'+' if sp[-1] >= 0 else '−'}{abs(sp[-1]):.1f} pp over 20 days")
     if not parts:
         return None
     score = sum(p["score"] for p in parts) / len(parts)
     for p in parts:
         p["rating"] = fg_label(p["score"])
-    return {"score": round(score, 1), "rating": fg_label(score), "components": parts}
+    have = {p["key"] for p in parts}
+    missing = [label for key, label in FG_COMPONENTS.items() if key not in have]
+    return {"score": round(score, 1), "rating": None if missing else fg_label(score), "components": parts,
+            "components_used": len(parts), "components_total": len(FG_COMPONENTS), "partial": bool(missing),
+            "missing": missing}
 
 
 def build(closes: dict[str, dict[date, float]], curve: dict[date, dict[str, float]] | None,

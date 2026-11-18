@@ -511,7 +511,9 @@ export interface MarketContext {
   sectors: { symbol: string; name: string; returns: Record<string, number | null>; above_50d: boolean; above_200d: boolean }[];
   breadth: { equal_vs_cap: Record<string, number | null>; small_vs_large: Record<string, number | null>;
              sectors_above_50d: number; sectors_above_200d: number; sectors: number; stocks: StockBreadth | null };
-  fear_greed: { score: number; rating: string;
+  // rating is null while partial: the missing readings can move the score a lot
+  fear_greed: { score: number; rating: string | null; partial: boolean; components_used: number;
+                components_total: number; missing: string[];
                 components: { key: string; label: string; score: number; rating: string; detail: string }[] } | null;
   yield_curve: { as_of: string; spread_10y_2y: number | null; spread_10y_3m: number | null;
                  lines: { label: string; date: string; points: { tenor: string; yield: number | null }[] }[] } | null;

@@ -489,10 +489,17 @@ def test_fear_greed_scores_and_labels():
     assert by["strength"]["score"] == 75 and by["breadth"]["score"] == 70
     assert fg["score"] == pytest.approx(sum(c["score"] for c in fg["components"]) / 7, abs=0.1)
     assert fg["rating"] == "Extreme greed" and by["breadth"]["rating"] == "Greed"
+    assert (fg["partial"], fg["components_used"], fg["components_total"], fg["missing"]) == (False, 7, 7, [])
     assert [mc.fg_label(v) for v in (0, 24.9, 25, 50, 60, 100)] == ["Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Extreme greed"]
 
-    # Only history: the snapshot-based readings drop out, the rest still score.
-    assert len(mc.fear_greed(closes, None)["components"]) == 5
+    # Only history: the snapshot-based readings drop out, the rest still score, flagged partial with no rating.
+    part = mc.fear_greed(closes, None)
+    assert len(part["components"]) == 5
+    assert (part["partial"], part["components_used"], part["components_total"]) == (True, 5, 7)
+    assert part["missing"] == ["Price strength", "Price breadth"] and part["rating"] is None
+    # One reading missing (no new highs or lows today) is partial too.
+    one = mc.fear_greed(closes, stocks | {"new_highs": 0, "new_lows": 0})
+    assert (one["partial"], one["components_used"], one["missing"]) == (True, 6, ["Price strength"])
     assert mc.fear_greed({}, None) is None
 
 
