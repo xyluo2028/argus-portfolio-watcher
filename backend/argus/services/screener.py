@@ -43,7 +43,7 @@ PRICES_MAX_AGE_S = 4 * 3600
 FIELDS = {
     "market_cap": ("Market cap", "$"), "price": ("Price", "$"),
     "revenue": ("Revenue", "$"), "revenue_growth_pct": ("Revenue growth", "%"),
-    "revenue_growth_q_yoy_pct": ("Revenue growth", "%"),
+    "revenue_growth_q_yoy_pct": ("Revenue growth", "%"), "revenue_q": ("Revenue", "$"),
     "net_income": ("Net income", "$"), "earnings_growth_pct": ("Earnings growth", "%"),
     "gross_margin_pct": ("Gross margin", "%"), "operating_margin_pct": ("Operating margin", "%"),
     "net_margin_pct": ("Net margin", "%"), "fcf_margin_pct": ("FCF margin", "%"), "fcf_yield_pct": ("FCF yield", "%"),
@@ -52,16 +52,17 @@ FIELDS = {
     "roe_pct": ("ROE", "%"), "roe_ttm_pct": ("ROE TTM", "%"), "roa_pct": ("ROA", "%"), "debt_to_equity": ("Liabilities / equity", "x"),
     "current_ratio": ("Current ratio", "x"),
 }
-# The period each field covers: the calendar-aligned fiscal year, the latest quarter, the trailing
+# The period each field covers: the calendar-aligned fiscal year, the latest quarter (vs a year earlier, or itself), the trailing
 # twelve months to it, or the latest balance sheet (ROE/ROA put a year's income over it). Shown in the
 # table header so a FY figure is never read as current.
 PERIODS = {"revenue": "fy", "revenue_growth_pct": "fy", "net_income": "fy", "earnings_growth_pct": "fy",
            "gross_margin_pct": "fy", "operating_margin_pct": "fy", "net_margin_pct": "fy", "fcf_margin_pct": "fy",
            "fcf_yield_pct": "fy", "pe": "fy", "ps": "fy", "roe_pct": "fy", "roa_pct": "fy",
-           "revenue_growth_q_yoy_pct": "quarter", "operating_margin_ttm_pct": "ttm", "pe_ttm": "ttm", "roe_ttm_pct": "ttm",
+           "revenue_growth_q_yoy_pct": "quarter", "revenue_q": "qtr", "operating_margin_ttm_pct": "ttm", "pe_ttm": "ttm", "roe_ttm_pct": "ttm",
            "pb": "mrq", "debt_to_equity": "mrq", "current_ratio": "mrq"}
-# Withheld from a row whose latest quarter is stale (see screen): figures that would pass for current.
-QUARTER_FIGURES = ("revenue_growth_q_yoy_pct", "revenue_ttm", "net_income_ttm", "operating_margin_ttm_pct",
+# Withheld from a row whose latest quarter is stale (see screen): every figure of that quarter (and its
+# year-ago companion) and the TTM figures built on it, which would otherwise pass for current.
+QUARTER_FIGURES = ("revenue_q", "revenue_q_prev", "revenue_growth_q_yoy_pct", "ttm_through", "revenue_ttm", "net_income_ttm", "operating_margin_ttm_pct",
                    "roe_ttm_pct", "pe_ttm")
 
 

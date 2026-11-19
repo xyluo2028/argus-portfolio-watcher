@@ -31,6 +31,7 @@ const COLUMNS = ["market_cap", "revenue_growth_pct", "revenue_growth_q_yoy_pct",
 function periodTag(period: string | null | undefined, fy: number | undefined) {
   if (period === "fy") return fy ? `FY${fy}` : "FY";
   if (period === "quarter") return "latest qtr y/y";
+  if (period === "qtr") return "latest qtr";
   return null;  // TTM is in the label; balance-sheet ratios are the latest quarter-end
 }
 
@@ -40,9 +41,10 @@ function staleNote(r: ScreenRow) {
 }
 
 function cellTitle(period: string | null | undefined, r: ScreenRow) {
-  if ((period === "quarter" || period === "ttm") && r.quarter_stale) return staleNote(r);
+  if ((period === "quarter" || period === "qtr" || period === "ttm") && r.quarter_stale) return staleNote(r);
   if (period === "fy") return r.fiscal_year_end ? `Fiscal year ended ${r.fiscal_year_end}` : undefined;
   if (period === "quarter") return r.latest_quarter ? `${r.latest_quarter} vs the same quarter a year earlier` : undefined;
+  if (period === "qtr") return r.latest_quarter ? `${r.latest_quarter}${r.quarter_end ? ` (ended ${r.quarter_end})` : ""}` : undefined;
   if (period === "ttm") return r.ttm_through ? `Trailing twelve months through ${r.ttm_through}` : undefined;
   return undefined;
 }

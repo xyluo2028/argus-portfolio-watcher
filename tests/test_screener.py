@@ -119,6 +119,13 @@ def test_a_stale_latest_quarter_is_flagged_and_fails_quarter_filters():
     eee = every["EEE"]
     assert eee["quarter_stale"] and eee["latest_quarter"] == "Q1 2026" and eee["pe"] == pytest.approx(20)  # FY figures stay
     assert all(eee[f] is None for f in sc.QUARTER_FIGURES)
+    assert (eee["revenue_q"], eee["revenue_q_prev"], eee["ttm_through"]) == (None, None, None)  # B-184
+    assert eee["revenue"] is not None and eee["revenue_growth_pct"] is not None  # FY figures stay
+    aaa = every["AAA"]
+    assert aaa["revenue_q"] is not None and aaa["revenue_q_prev"] is not None and aaa["ttm_through"] == "Q3 2026"
+    # A filter on the latest quarter's revenue passes the current row only
+    assert [r["symbol"] for r in sc.screen(rows, {"revenue_q": [1, None]}, today=TODAY)["rows"]] == ["AAA"]
+    assert [r["symbol"] for r in sc.screen(rows, {"revenue_q": [1, None]}, today=date(2026, 7, 31))["rows"]] == ["AAA", "EEE"]
     assert not sc.screen(rows, {"operating_margin_ttm_pct": [None, None]}, today=TODAY)["rows"][1:]  # only AAA has TTM
     # The same row with its quarter still current (four months after it ended) passes.
     assert [r["symbol"] for r in sc.screen(rows, {"revenue_growth_q_yoy_pct": [10, None]}, today=date(2026, 7, 31))["rows"]] == ["AAA", "EEE"]
