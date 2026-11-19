@@ -2,7 +2,7 @@
  "format": "argus-account-snapshot",
  "version": 1,
  "account": "bot0",
- "created_at": "2026-11-18T02:37:06.597251+00:00",
+ "created_at": "2026-11-19T02:37:44.512776+00:00",
  "tables": {
   "portfolio": [
    {
@@ -109,6 +109,22 @@
     "external_id": "sim-2026-11-16-BUY-TMUS-5.2579",
     "deleted": false,
     "created_at": "2026-11-17T02:17:36.662701+00:00"
+   },
+   {
+    "id": 7,
+    "portfolio_id": 1,
+    "type": "BUY",
+    "symbol": "NVDA",
+    "qty": 6.127,
+    "price": 155.05,
+    "fee": 0.0,
+    "amount": 0.0,
+    "ts": "2026-11-18T21:00:00+00:00",
+    "note": "Post-report entry: Q3 beat and raised guide, P/E TTM 19 (0th pct of 5y), ~9.4x FY+1 EPS; sized ~10% for governance risk. Thesis note id 8.",
+    "source": "ui",
+    "external_id": "sim-2026-11-18-BUY-NVDA-6.127",
+    "deleted": false,
+    "created_at": "2026-11-19T02:15:51.212263+00:00"
    }
   ],
   "target": [],
@@ -216,7 +232,7 @@
     "kind": "day_move_pct",
     "threshold": 8.0,
     "note": "NVDA earnings 11-17 reaction: decide on entry",
-    "active": true,
+    "active": false,
     "created_by": "ui",
     "created_at": "2026-11-16T02:16:37.022825+00:00"
    },
@@ -230,6 +246,17 @@
     "active": true,
     "created_by": "ui",
     "created_at": "2026-11-17T02:17:43.558176+00:00"
+   },
+   {
+    "id": 6,
+    "account_id": 1,
+    "symbol": "NVDA",
+    "kind": "price_below",
+    "threshold": 130.0,
+    "note": "NVDA thesis exit level",
+    "active": true,
+    "created_by": "cli",
+    "created_at": "2026-11-19T02:15:55.444140+00:00"
    }
   ],
   "alert_event": [],
@@ -317,6 +344,18 @@
     "created_by": "ui",
     "created_at": "2026-11-18T02:16:33.078413+00:00",
     "updated_at": "2026-11-18T02:16:33.078418+00:00"
+   },
+   {
+    "id": 8,
+    "account_id": 1,
+    "symbol": "NVDA",
+    "kind": "thesis",
+    "text": "Buy ~$950 at the 11-18 mid (post-report session, so a fair fill). Q3 FY27 beat: revenue $115.8B vs $111.3B est, EPS 2.68 vs 2.53, guide above. Stock fell -2.9% on the day (155.46 -> 150.96) while AMD +5.3% and AVGO +3.6%: the market is pricing a governance discount (CEO ouster confirmed). At ~151-155: P/E TTM 19.1 (0th pct of its 5y range), FY+1 EPS consensus rose 15.91 -> 16.54 in 7 days (~9.4x), net margin 64%, latest SEC quarter revenue +106% YoY. Sized at ~10% (house max 25%) because of governance risk, insider selling (172 sales, 0 buys) and a tech sector below its 50d/200d. Exit: close below 130 (analyst low target), or the next quarter showing revenue growth below 40% YoY, or further management turmoil hitting guidance. Review at the next report (late Feb 2027).",
+    "review_on": "2027-02-25",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-19T02:15:45.311308+00:00",
+    "updated_at": "2026-11-19T02:15:45.311313+00:00"
    }
   ],
   "peer_list": [],
@@ -360,12 +399,12 @@
    },
    {
     "symbol": "NVDA",
-    "name": null,
+    "name": "NVIDIA CORP",
     "exchange": null,
-    "type": null,
-    "sector": null,
-    "industry": null,
-    "updated_at": "2026-11-16T02:14:45.480943+00:00"
+    "type": "Common Stock",
+    "sector": "Technology",
+    "industry": "Semiconductors",
+    "updated_at": "2026-11-19T02:15:53.053232+00:00"
    },
    {
     "symbol": "PAYX",

@@ -451,6 +451,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r009: HD headlines are "Dow Jones Top Movers…" and a Target story; O's include a Verizon FCF story (income r009 #7)
 - r014: RDDT news mostly unrelated personal-finance stories
 - r019: "Nvidia says it won't bring back Jensen Huang" scored positive; NVDA tone 11 positive / 0 negative on the day the founder-CEO's exit was confirmed (trader r019 #8)
+- r020: 8 of the latest 15 `/api/research/NVDA` news items are about other companies (Alphabet, Sandisk, Natera, Coupang…) and count toward its tone (trader r020 #6)
 - status: open
 
 ### B-060 Screener rows have no sector or industry; no sector filter
@@ -811,6 +812,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r010: the weekend brief has headlines only for TOST; the biggest movers have none (multibagger r010 #2)
 - r011: LOAR +9.3% (biggest dollar gainer) has no headline anywhere (multibagger r011 #7)
 - r019: brief's `watchlist_earnings.recent` has NVDA's surprise but no after-hours move (+4.8%); only `argus quotes` shows it (trader r019 #7)
+- r020: the brief's `watchlist_earnings.recent` lists NVDA's 11-17 beat with no price reaction (it fell 2.9% at the 11-18 session while AMD +5.3%, AVGO +3.6%); suggestion: `reaction_pct` and `ext_change_pct` on recent earnings (rounds/020/trader.md #5)
 - status: open
 
 ### B-111 A one-quarter cash windfall shows as a high FCF margin with no warning (INOD 58%)
@@ -1193,6 +1195,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: ux · severity: medium
 - reported by: trader r018
 - evidence: tile read SPY −1.91% before the TMUS buy, −1.77% after (caption "today's buys from the fills, SPY alike"); −1.77% is a money-weighted SPY shadow of the flows and matches no SPY move; the Holdings row says SPY −1.91% (rounds/018/trader.md #1)
+- r020: brief `benchmark.change_pct` −0.3058% (SPY close to close) became `benchmark_day_pct` −0.2853% after the NVDA buy (trader r020 #7)
 - status: open
 
 ### B-175 `/api/history` and the stock-page chart end a session early after the close
@@ -1215,7 +1218,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: TTM is empty where SEC has no 3-month Q4 frame (AAPL, MSFT); FY columns always use last calendar year, so a June-2026 FY may still show FY2025; FCF yield, gross and net margin stay FY-only (r018 B-019 commit b22ab5a)
 - r019: with B-180's staleness flag, 490 of 4,084 rows are stale; ~194 have Aug–Oct fiscal years (AAPL, V, DIS, QCOM, SBUX, MU, COST) whose fiscal Q4 is only in the 10-K as a full year; deriving Q4 = FY − 9M from annual frames would fix most (programmer r019)
 - r019: balance-sheet ratios (P/B, liabilities/equity, current ratio) aren't flagged when the latest balance sheet is stale (programmer r019)
-- status: open
+- r020: 27 of 240 companies above $50B are stale (AAPL, V, MU, COST, PANW, QCOM, DIS, INTU, TDG, BDX; also CEG, WMB) and silently drop out of every TTM screen; KLAC isn't stale but has null `ttm_through`/`pe_ttm`; no count of excluded rows on the page (trader r020 #3)
+- acceptance (picked r020, Q4 derivation): when SEC has no 3-month frame for a company's fiscal Q4, the screener derives it as FY − the first three quarters of that fiscal year (revenue, net income, EPS-diluted where available, and any other additive line the TTM uses), only when all four periods are present, the FY spans 330–380 days and the result passes B-178's guards (not negative when FY and quarters are positive); the derived quarter feeds `revenue_q`, latest-quarter growth and TTM, and the row's `quarter_end` moves forward so it is no longer stale; the response counts rows still excluded for no current TTM and the Screener page shows that count under the match count; tests: a fixture with an August fiscal year and no Q4 frame gets a derived Q4 and a current TTM; a negative derivation stays null; live, AAPL/V/COST are no longer stale
+- r020 shipped (5fc9385): fiscal-Q4 derivation from frames (revenue, operating and net income), TTM anchored on the newest closed fiscal year (fixed MSFT, KLAC), `quarter_derived` flag, `excluded_no_ttm` count on the Screener page; >$50B stale rows 27 → 16, no `pe_ttm` 81 → 56
+- still open: COST, AZO (16-week fiscal quarter puts two quarters in one calendar frame); BDX, COR, APD wait for their 10-Ks; V, MU, DIS, QCOM have a derived current quarter and P/E TTM but `revenue_ttm` still null (investigate); TTM FCF and margins; stale balance-sheet ratios
+- status: open (partly done r020, 5fc9385)
 
 ### B-178 FIX Q4 2025 revenue derived as −$4.62B (FY revenue is the Q1 figure); TTM, P/E, margins and screener wrong
 - kind: bug · severity: high
@@ -1244,6 +1251,27 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - reported by: trader r019
 - evidence: `/api/events` LNG dividend_pay 11-17, ex 11-09, `held: false`, amount 0 while 3.234 LNG is held (bought 11-13); the stock page says "not owed" correctly (rounds/019/trader.md #5)
 - status: open
+
+### B-182 `argus fundamentals` (CLI) returns `pe_ttm: null` for a symbol the server hasn't quoted yet
+- kind: bug · severity: medium
+- reported by: trader r020
+- evidence: `uv run argus fundamentals DE --json` three times: `pe_ttm: null` with `eps_ttm: 18.0`, `sources.pe_ttm: "sec"`; `/api/fundamentals/DE` 35.82; after the API call the CLI returned 35.82; same for FIX and CMI (rounds/020/trader.md #1)
+- acceptance: `fundamentals()` computes `pe_ttm` from the quote it fetches itself (passed straight to the P/E step, not via a cache another process fills), so the CLI, MCP and API return the same `pe_ttm` for a symbol on a cold quote cache whenever a price and positive EPS exist; test: with an empty quote cache and a stubbed quote provider, the CLI/app path returns a non-null `pe_ttm` equal to price / EPS
+- status: done (r020, 9c1c0c1)
+
+### B-183 Notes on watchlist names never appear in the brief's notes due
+- kind: ux · severity: medium
+- reported by: trader r020
+- evidence: note 7 (NVDA, `review_on` 2026-11-18, NVDA on the watchlist, not held); `GET /api/brief/bot0-sim` on 11-18 `theses_due: []`; the brief filters notes to held symbols (rounds/020/trader.md #2)
+- status: open
+
+### B-184 Stale screener rows still carry `revenue_q` (and the previous quarter)
+- kind: bug · severity: low
+- reported by: trader r020
+- evidence: PTC, INTU, ESE (`quarter_stale: true`) have growth, TTM and P/E null but `revenue_q` 600,049,000 (PTC) and 8,558,000,000 (INTU); a quarterly revenue filter still passes stale data (rounds/020/trader.md #4)
+- acceptance: for rows with `quarter_stale: true`, every latest-quarter field (`revenue_q`, its previous/year-ago companions, and any other `*_q*` value) is null, so no quarterly filter passes them; FY fields stay; test: a stale row has all quarter fields null and fails a `revenue_q` filter, a current row keeps them
+- note: r020 also made `revenue_q` a screen field (period "latest qtr"); balance-sheet ratios (P/B, D/E, current ratio) stay on stale rows as point-in-time values
+- status: done (r020, 88bcbe0)
 
 ## Done
 ### B-134 When Yahoo's daily bar for the last completed session is missing, performance and earnings reactions use the previous close
