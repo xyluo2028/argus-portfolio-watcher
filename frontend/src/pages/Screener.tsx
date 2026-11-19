@@ -44,7 +44,7 @@ function cellTitle(period: string | null | undefined, r: ScreenRow) {
   if ((period === "quarter" || period === "qtr" || period === "ttm") && r.quarter_stale) return staleNote(r);
   if (period === "fy") return r.fiscal_year_end ? `Fiscal year ended ${r.fiscal_year_end}` : undefined;
   if (period === "quarter") return r.latest_quarter ? `${r.latest_quarter} vs the same quarter a year earlier` : undefined;
-  if (period === "qtr") return r.latest_quarter ? `${r.latest_quarter}${r.quarter_end ? ` (ended ${r.quarter_end})` : ""}` : undefined;
+  if (period === "qtr") return r.latest_quarter ? `${r.latest_quarter}${r.quarter_end ? ` (ended ${r.quarter_end})` : ""}${r.quarter_derived ? ", a fiscal Q4: the full year less its first three quarters" : ""}` : undefined;
   if (period === "ttm") return r.ttm_through ? `Trailing twelve months through ${r.ttm_through}` : undefined;
   return undefined;
 }
@@ -185,6 +185,12 @@ export function Screener() {
                 </select>
               </label>
             </div>
+            {(res.excluded_no_ttm ?? 0) > 0 && (
+              <p className="small muted" style={{ margin: "0 0 8px" }}
+                 title="Their latest quarter in SEC's data is over 135 days old (a newer 10-Q isn't in SEC's XBRL frames yet) or they have no trailing-twelve-month figures, so quarter and TTM filters can't test them">
+                {res.excluded_no_ttm!.toLocaleString("en-US")} more {res.excluded_no_ttm === 1 ? "row" : "rows"} excluded: no current TTM or quarter figures
+              </p>
+            )}
             {notice && <p className="small muted" role="status" style={{ margin: "0 0 8px" }}>{notice} · <Link to={`/watchlist?list=${encodeURIComponent(target ?? "")}`}>open</Link></p>}
             <div className="table-wrap">
               <table className="metric-table">

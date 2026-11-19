@@ -526,7 +526,8 @@ export interface ScreenerStatus {
   fundamentals_at?: string; prices_at?: string; fields: Record<string, { label: string; unit: "$" | "%" | "x"; period: "fy" | "quarter" | "ttm" | "mrq" | null }>;
 }
 export type ScreenRow = Record<string, number | string | boolean | null> & { symbol: string; name: string | null; exchange: string | null };
-export interface ScreenResult { status: ScreenerStatus; matches: number; rows: ScreenRow[] }
+// excluded_no_ttm: rows dropped only for a quarter/TTM figure they lack (stale latest quarter or no TTM)
+export interface ScreenResult { status: ScreenerStatus; matches: number; excluded_no_ttm?: number; rows: ScreenRow[] }
 
 export const api = {
   portfolios: () => get<PortfolioRef[]>("/api/portfolios"),

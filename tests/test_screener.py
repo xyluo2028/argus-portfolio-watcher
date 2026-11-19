@@ -204,8 +204,90 @@ def test_build_fetches_quarterly_frames(tmp_path):
     sec = _FakeSec()
     svc = sc.ScreenerService(tmp_path, sec, _FakeYahoo())
     svc.build(today=date(2026, 11, 17))
-    assert {"CY2026Q3", "CY2025Q1", "CY2026Q3I"} <= sec.periods and "CY2025Q4" not in sec.periods
+    # and, for fiscal fourth quarters, the quarters between and before them and the years either side
+    assert {"CY2026Q3", "CY2025Q1", "CY2026Q3I", "CY2025Q4", "CY2024Q2", "CY2024", "CY2026"} <= sec.periods
     row = svc.load()["rows"][0]
     assert (row["fiscal_year_end"], row["latest_quarter"], row["quarter_end"]) == ("2025-12-31", "Q3 2026", "2026-09-27")
     assert row["revenue_growth_q_yoy_pct"] == pytest.approx(20) and row["revenue_ttm"] == pytest.approx(1120)
     assert row["pe"] == pytest.approx(20) and row["pe_ttm"] is None
+
+
+# An August fiscal year (cik 7, Costco-like dates but 13-week quarters): SEC frames have its first three
+# fiscal quarters, not the fourth, which was filed only inside the 10-K's full year.
+AUG_SPANS = {2025: {7: ("2024-09-02", "2025-08-31")}, 2026: {7: ("2025-09-01", "2026-08-30")}}
+AUG_YEARS = {2025: {"revenue": {7: 400.0}, "operating_income": {7: 40.0}, "net_income": {7: 30.0}},
+             2026: {"revenue": {7: 480.0}, "operating_income": {7: 52.0}, "net_income": {7: 39.0}}}
+
+
+def _aug_frames():
+    q = {"revenue": [120.0, 95.0, 90.0, 140.0, 110.0, 105.0], "operating_income": [12.0, 9.0, 9.0, 15.0, 12.0, 11.0],
+         "net_income": [9.0, 7.0, 7.0, 11.0, 9.0, 8.0]}
+    periods = ["CY2024Q4", "CY2025Q1", "CY2025Q2", "CY2025Q4", "CY2026Q1", "CY2026Q2"]
+    return {k: {p: {7: v} for p, v in zip(periods, vals, strict=True)} for k, vals in q.items()}
+
+
+AUG_ENDS = {"CY2024Q4": {7: "2024-11-24"}, "CY2025Q1": {7: "2025-02-16"}, "CY2025Q2": {7: "2025-05-11"},
+            "CY2025Q4": {7: "2025-11-23"}, "CY2026Q1": {7: "2026-02-15"}, "CY2026Q2": {7: "2026-05-10"}}
+PERIODS = {*RECENT, "CY2025Q3", "CY2025Q2", "CY2025Q1"}
+
+
+def _aug_row(frames, years=AUG_YEARS):
+    ends = {p: dict(v) for p, v in AUG_ENDS.items()}
+    derived = sc.derive_fiscal_q4(frames, years, AUG_SPANS, PERIODS, ends)
+    for p, by_cik in derived.items():
+        ends.setdefault(p, {}).update(by_cik)
+    latest = sc.latest_quarters(frames, RECENT, 2025, {7: "2025-08-31"}, ends, years[2026], {7: "2026-08-30"}, derived)
+    tickers = [{"cik": 7, "ticker": "AUG", "name": "August FY"}]
+    rows = sc.build_rows(tickers, years[2025], {"revenue": {7: 380.0}}, {"equity": {7: 200.0}}, latest, 2025, {7: "2025-08-31"})
+    return sc.add_prices(rows, {"AUG": {"market_cap": 780.0, "quote_type": "EQUITY"}})
+
+
+def test_a_missing_fiscal_q4_is_derived_from_the_year():
+    frames = _aug_frames()
+    a = _aug_row(frames)[0]
+    # Q4 FY2026 = 480 - 140 - 110 - 105 = 125 (CY2026Q3, ending with the year); FY2025's = 400 - 305 = 95
+    assert frames["revenue"]["CY2026Q3"][7] == 125.0 and frames["revenue"]["CY2025Q3"][7] == 95.0
+    assert frames["net_income"]["CY2026Q3"][7] == 11.0 and frames["operating_income"]["CY2026Q3"][7] == 14.0
+    assert (a["latest_quarter"], a["quarter_end"], a["quarter_derived"]) == ("Q3 2026", "2026-08-30", True)
+    assert a["revenue_q"] == 125.0 and a["revenue_growth_q_yoy_pct"] == pytest.approx(125 / 95 * 100 - 100)
+    # The quarter closes FY2026, so TTM is that year (not FY2025, the calendar-aligned year of the row)
+    assert (a["ttm_through"], a["revenue_ttm"], a["net_income_ttm"]) == ("Q3 2026", 480.0, 39.0)
+    assert a["pe_ttm"] == pytest.approx(20) and a["operating_margin_ttm_pct"] == pytest.approx(52 / 480 * 100)
+    r = sc.screen([a], {"pe_ttm": [None, 25]}, today=TODAY)
+    assert r["matches"] == 1 and not r["rows"][0]["quarter_stale"] and r["excluded_no_ttm"] == 0
+
+
+def test_a_negative_fiscal_q4_is_not_derived():
+    # A year below its three quarters (a mis-tagged fact, B-178): no Q4, the row stays at Q2 2026 and stale
+    frames = _aug_frames()
+    years = AUG_YEARS | {2026: AUG_YEARS[2026] | {"revenue": {7: 300.0}}}
+    a = _aug_row(frames, years)[0]
+    assert "CY2026Q3" not in frames["revenue"] and frames["net_income"]["CY2026Q3"][7] == 11.0  # flows derived alone
+    assert (a["latest_quarter"], a["quarter_derived"]) == ("Q2 2026", False)
+    r = sc.screen([a], {"pe_ttm": [None, 25]}, today=TODAY)
+    assert r["matches"] == 0 and r["excluded_no_ttm"] == 1  # stale: counted, not silently gone
+    assert sc.screen([a], {"pe_ttm": [None, 25], "market_cap": [1000, None]}, today=TODAY)["excluded_no_ttm"] == 0
+    # Not a full year, or two quarters ending on the same day (a 16-week quarter): no Q4 either
+    for spans, ends in ((AUG_SPANS | {2026: {7: ("2026-01-01", "2026-08-30")}}, AUG_ENDS),
+                        (AUG_SPANS, AUG_ENDS | {"CY2026Q1": {7: "2026-05-10"}})):
+        frames = _aug_frames()
+        sc.derive_fiscal_q4(frames, AUG_YEARS, spans, PERIODS, ends)
+        assert "CY2026Q3" not in frames["revenue"]
+    # A quarter SEC does have is never overwritten
+    frames = _aug_frames()
+    frames["revenue"]["CY2026Q3"] = {7: 130.0}
+    assert sc.derive_fiscal_q4(frames, AUG_YEARS, AUG_SPANS, PERIODS, AUG_ENDS).get("CY2026Q3", {}) == {}
+    assert frames["revenue"]["CY2026Q3"][7] == 130.0
+
+
+def test_ttm_anchors_on_a_fiscal_year_closed_after_the_calendar_year():
+    # Microsoft: FY to June 2026 is the CY2026 frame. Its latest quarter (Q3 2026) is five quarters past
+    # FY2025 but one past FY2026: TTM = FY2026 + Q3 2026 - Q3 2025.
+    nxt = {"revenue": {1: 1100.0}, "operating_income": {1: 300.0}, "net_income": {1: 260.0}}
+    latest = sc.latest_quarters(Q_FRAMES, RECENT, 2025, {1: "2025-06-30"}, None, nxt, {1: "2026-06-30"})
+    a = sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, latest, 2025)[0]
+    assert a["revenue_ttm"] == pytest.approx(1150) and a["net_income_ttm"] == pytest.approx(260 - 240)
+    assert a["ttm_through"] == "Q3 2026" and a["revenue"] == 1000.0  # the FY columns stay on calendar 2025
+    # A next year that closes after the latest quarter is ignored
+    later = sc.latest_quarters(Q_FRAMES, RECENT, 2025, {1: "2025-12-31"}, None, nxt, {1: "2026-12-31"})
+    assert sc.build_rows(TICKERS[:1], ANNUAL, PRIOR, INSTANT, later, 2025)[0]["revenue_ttm"] == pytest.approx(1120)

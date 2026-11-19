@@ -6,8 +6,11 @@ quarter-end balance sheet each company filed. Companies whose fiscal year doesn'
 are placed in the calendar year their fiscal year mostly covers (SEC's own alignment). On top of the
 year, quarterly frames give each company's latest quarter (revenue growth against the same quarter a
 year earlier) and trailing-twelve-month revenue, operating income and net income, as the year plus
-this year's quarters minus the same quarters a year earlier. The universe is rebuilt weekly in the
-background; prices refresh every few hours.
+this year's quarters minus the same quarters a year earlier. TTM is anchored on each company's newest
+closed fiscal year (the year after the calendar year when that has ended, as at Apple or Microsoft), and
+a fiscal fourth quarter, which SEC frames lack whenever it was only filed inside the 10-K's full year, is
+derived as the year less its first three quarters (derive_fiscal_q4). The universe is rebuilt weekly in
+the background; prices refresh every few hours.
 """
 
 from __future__ import annotations
@@ -112,8 +115,66 @@ def _closing_quarter(fy_end: str | None, fiscal_year: int) -> tuple[int, int]:
     return y, q
 
 
+def _quarter_index(period: str) -> int:
+    """"CY2026Q3" -> a running quarter number (year * 4 + quarter - 1), so quarters subtract."""
+    return int(period[2:6]) * 4 + int(period[7:]) - 1
+
+
+def _period(index: int) -> str:
+    """A running quarter number (year * 4 + quarter - 1) -> "CY2026Q3"."""
+    return f"CY{index // 4}Q{index % 4 + 1}"
+
+
+def full_year(start: str | None, end: str | None) -> bool:
+    """A fiscal year's fact spans 330-380 days (52/53-week years included); anything else is a mis-tag."""
+    return bool(start and end) and 330 <= (date.fromisoformat(end) - date.fromisoformat(start)).days <= 380
+
+
+def derive_fiscal_q4(frames: dict[str, dict[str, dict[int, float]]], annual: dict[int, dict[str, dict[int, float]]],
+                     spans: dict[int, dict[int, tuple[str, str]]], targets: set[str],
+                     ends: dict[str, dict[int, str]] | None = None) -> dict[str, dict[int, str]]:
+    """Fill in the fiscal fourth quarters SEC frames lack. Most companies file Q4 only inside the 10-K's
+    full year, so a fiscal year ending in August-October leaves no frame for its calendar-aligned closing
+    quarter (Apple's FY2026 to 26 Sep: CY2026Q3 is empty) and the latest quarter looks months old.
+    Q4 = FY less the year's other three quarters, all four from the same frames (`annual`: {FY: {concept:
+    {cik: value}}}, aligned like the quarterly ones), so no per-company facts are fetched. Only for a
+    full year (`spans`: {FY: {cik: (start, end)}} of its revenue fact) whose three quarters are all there,
+    end inside it on distinct dates (`ends`: revenue fact end dates; Costco's 16-week quarter leaves two
+    fiscal quarters in one calendar frame and none in the next, so it gets no Q4), and never a negative
+    quarter out of a positive year and quarters (B-178: a mis-tagged year). Fills `frames` in place for
+    the closing quarters in `targets`; returns {period: {cik: fiscal year end}} of the revenue ones."""
+    ends = ends or {}
+    derived: dict[str, dict[int, str]] = {}
+    for fy, by_concept in annual.items():
+        for cik, (start, end) in spans.get(fy, {}).items():
+            if not full_year(start, end):
+                continue
+            cy, cq = _closing_quarter(end, fy)
+            i = cy * 4 + cq - 1
+            closing, *rest = [_period(i - j) for j in range(4)]
+            if closing not in targets:
+                continue
+            q_ends = [ends.get(p, {}).get(cik) for p in rest]
+            if any(q_ends) and (len(set(q_ends)) < 3 or not all(e and start < e < end for e in q_ends)):
+                continue
+            for concept, f in frames.items():
+                total = by_concept.get(concept, {}).get(cik)
+                quarters = [f.get(p, {}).get(cik) for p in rest]
+                if total is None or cik in f.get(closing, {}) or any(v is None for v in quarters):
+                    continue
+                q4 = total - sum(quarters)
+                if q4 < 0 and total > 0 and all(v > 0 for v in quarters):
+                    continue
+                f.setdefault(closing, {})[cik] = q4
+                if concept == "revenue":
+                    derived.setdefault(closing, {})[cik] = end
+    return derived
+
+
 def latest_quarters(frames: dict[str, dict[str, dict[int, float]]], periods: list[str], fiscal_year: int,
-                    fy_end: dict[int, str] | None = None, ends: dict[str, dict[int, str]] | None = None) -> dict[int, dict]:
+                    fy_end: dict[int, str] | None = None, ends: dict[str, dict[int, str]] | None = None,
+                    next_year: dict[str, dict[int, float]] | None = None, next_fy_end: dict[int, str] | None = None,
+                    derived: dict[str, dict[int, str]] | None = None) -> dict[int, dict]:
     """Each company's latest quarter and what its TTM flows add to the fiscal year. `frames`:
     {concept: {"CY2026Q3": {cik: value}}} for the quarters in `periods` (newest first, calendar-aligned
     like the annual frames) and the same quarters a year earlier. The latest quarter is the newest one
@@ -122,15 +183,26 @@ def latest_quarters(frames: dict[str, dict[str, dict[int, float]]], periods: lis
     quarter closes the year, it is the year itself. The year is added in build_rows, once it is checked.
     `revenue_q_max` (the largest quarter of the fiscal year) and `revenue_q_max_ttm` (of the TTM window)
     are floors for the year and the TTM revenue. `ends`: {period: {cik: the revenue fact's end date}},
-    so `end` is the company's own quarter end (a fiscal quarter can end weeks off the calendar one)."""
+    so `end` is the company's own quarter end (a fiscal quarter can end weeks off the calendar one).
+    `next_year`/`next_fy_end`: the following fiscal year's flows and end, for the companies whose year
+    after `fiscal_year` has closed by their latest quarter; TTM is anchored on it instead (`ttm_base`,
+    else Microsoft's year to June 2025 is five quarters behind September 2026). `derived`: the quarters
+    derive_fiscal_q4 filled in, flagged on the row."""
     rev, fy_end, ends = frames.get("revenue", {}), fy_end or {}, ends or {}
+    next_year, next_fy_end, derived = next_year or {}, next_fy_end or {}, derived or {}
     out: dict[int, dict] = {}
     for cik in set().union(*(rev.get(p, {}).keys() for p in periods)):
         period = next(p for p in periods if cik in rev.get(p, {}))
         y, q = int(period[2:6]), int(period[7:])
         row = {"period": period, "end": ends.get(period, {}).get(cik) or _quarter_end(period),
-               "revenue": rev[period][cik], "revenue_prev": rev.get(f"CY{y - 1}Q{q}", {}).get(cik)}
+               "revenue": rev[period][cik], "revenue_prev": rev.get(f"CY{y - 1}Q{q}", {}).get(cik),
+               "derived": cik in derived.get(period, {})}
         cy, cq = _closing_quarter(fy_end.get(cik), fiscal_year)
+        if cik in next_fy_end:
+            ny, nq = _closing_quarter(next_fy_end[cik], fiscal_year + 1)
+            if ny * 4 + nq <= y * 4 + q:
+                cy, cq = ny, nq
+                row["ttm_base"] = {k: next_year.get(k, {}).get(cik) for k in QUARTERLY}
         since = (y * 4 + q) - (cy * 4 + cq)  # quarters reported since the fiscal year closed
         in_year = [v for p, by_cik in rev.items() if p.startswith(f"CY{fiscal_year}Q") and (v := by_cik.get(cik)) is not None]
         if in_year:
@@ -183,7 +255,8 @@ def build_rows(tickers: list[dict], annual: dict[str, dict[int, float]], prior: 
             odd = True
         if odd:
             a = a | {"revenue": None, "gross_profit": None, "operating_income": None}
-        ttm = {k: a[k] + lq[f"{k}_delta"] if a.get(k) is not None and f"{k}_delta" in lq else None for k in QUARTERLY}
+        base = lq.get("ttm_base", a)  # the newest closed fiscal year
+        ttm = {k: base[k] + lq[f"{k}_delta"] if base.get(k) is not None and f"{k}_delta" in lq else None for k in QUARTERLY}
         ttm["net_income"] = _plausible_income(ttm["net_income"], ttm["revenue"])
         if ttm["revenue"] is not None and ttm["revenue"] < (lq.get("revenue_q_max_ttm") or 0):
             odd = True  # twelve months can't be less than one of their quarters: tags mixed across periods
@@ -207,6 +280,7 @@ def build_rows(tickers: list[dict], annual: dict[str, dict[int, float]], prior: 
             "equity": i.get("equity"), "cash": i.get("cash"),
             "fiscal_year": fiscal_year, "fiscal_year_end": fy_end.get(cik),
             "latest_quarter": _quarter_label(lq["period"]) if lq else None, "quarter_end": lq.get("end"),
+            "quarter_derived": bool(lq.get("derived")),
             "revenue_q": lq.get("revenue"), "revenue_q_prev": lq.get("revenue_prev"),
             "revenue_growth_q_yoy_pct": _growth(lq.get("revenue"), lq.get("revenue_prev")),
             "ttm_through": _quarter_label(lq["period"]) if any(v is not None for v in ttm.values()) else None,
@@ -247,28 +321,28 @@ def with_staleness(row: dict, today: date) -> dict:
 def screen(rows: list[dict], filters: dict[str, list], sort: str = "market_cap", descending: bool = True,
            limit: int = 100, include_otc: bool = False, today: date | None = None) -> dict:
     """`filters`: {field: [min, max]} (either bound may be null). Rows missing a filtered field drop out,
-    as do a stale quarter's figures (see with_staleness)."""
+    as do a stale quarter's figures (see with_staleness). `excluded_no_ttm` counts the rows dropped only
+    for a quarter or TTM figure they lack because their latest quarter is stale or they have no TTM, so a
+    screen says how much of the universe it can't see."""
     unknown = [f for f in [*filters, sort] if f not in FIELDS]
     if unknown:
         raise ValueError(f"Unknown fields: {', '.join(unknown)}")
     today = today or datetime.now(UTC).date()
-    hits = []
+    hits, no_ttm = [], 0
     for r in rows:
         r = with_staleness(r, today)
         if not include_otc and r.get("otc"):
             continue
         if r.get("quote_type") not in (None, "EQUITY"):
             continue
-        ok = True
-        for f, (lo, hi) in filters.items():
-            v = r.get(f)
-            if v is None or (lo is not None and v < lo) or (hi is not None and v > hi):
-                ok = False
-                break
-        if ok:
+        fails = [f for f, (lo, hi) in filters.items()
+                 if (v := r.get(f)) is None or (lo is not None and v < lo) or (hi is not None and v > hi)]
+        if not fails:
             hits.append(r)
+        elif (r["quarter_stale"] or r.get("ttm_through") is None) and all(f in QUARTER_FIGURES and r.get(f) is None for f in fails):
+            no_ttm += 1
     hits.sort(key=lambda r: (r.get(sort) is None, -(r.get(sort) or 0) if descending else (r.get(sort) or 0)))
-    return {"matches": len(hits), "rows": hits[:limit]}
+    return {"matches": len(hits), "excluded_no_ttm": no_ttm, "rows": hits[:limit]}
 
 
 class ScreenerService:
@@ -302,7 +376,7 @@ class ScreenerService:
                 "prices_stale": time.time() - u.get("prices_ts", 0) > PRICES_MAX_AGE_S}
 
     def build(self, progress: Callable[[str], None] = lambda _: None, today: date | None = None) -> dict:
-        """Fetch frames (about 100 SEC requests, each cached a week) and prices; save the universe."""
+        """Fetch frames (about 160 SEC requests, each cached a week) and prices; save the universe."""
         today = today or datetime.now(UTC).date()
         year = today.year - 1  # the latest calendar year most companies have reported in full
         progress("SEC ticker map")
@@ -311,7 +385,10 @@ class ScreenerService:
         fy_end: dict[int, str] = {}
         q_ends: dict[str, dict[int, str]] = {}  # each quarter's revenue fact end dates
 
-        def best(concepts: tuple[str, ...], period: str, ends: dict[int, str] | None = None) -> dict[int, float]:
+        spans: dict[int, dict[int, tuple[str, str]]] = {}  # {FY: {cik: its revenue fact's (start, end)}}
+
+        def best(concepts: tuple[str, ...], period: str, ends: dict[int, str] | None = None,
+                 span: dict[int, tuple[str, str]] | None = None) -> dict[int, float]:
             """The largest value across alternative tags: companies often tag a revenue *component*
             (e.g. contract revenue at a REIT) besides the total, and the total is never smaller."""
             out: dict[int, float] = {}
@@ -321,10 +398,12 @@ class ScreenerService:
                         out[cik] = f["val"]
                         if ends is not None and f.get("end"):
                             ends[cik] = f["end"]
+                        if span is not None:
+                            span[cik] = (f.get("start"), f.get("end"))
             return out
 
-        def revenue(period: str, ends: dict[int, str] | None = None) -> dict[int, float]:
-            out = best(REVENUE, period, ends)
+        def revenue(period: str, ends: dict[int, str] | None = None, span: dict[int, tuple[str, str]] | None = None) -> dict[int, float]:
+            out = best(REVENUE, period, ends, span)
             nii, fees = (self.sec.frame(c, "USD", period) for c in BANK_REVENUE)
             for cik in nii.keys() & fees.keys():
                 bank = (nii[cik]["val"] or 0) + (fees[cik]["val"] or 0)
@@ -332,15 +411,21 @@ class ScreenerService:
                     out[cik] = bank
                     if ends is not None and nii[cik].get("end"):
                         ends[cik] = nii[cik]["end"]
+                    if span is not None:
+                        span[cik] = (nii[cik].get("start"), nii[cik].get("end"))
             return out
 
-        annual, prior = {}, {}
+        annual, prior, nxt = {}, {}, {}  # nxt: the fiscal years after `year` that have already closed
         progress(f"annual figures, calendar {year}")
-        annual["revenue"] = revenue(f"CY{year}", fy_end)
-        prior["revenue"] = revenue(f"CY{year - 1}")
+        annual["revenue"] = revenue(f"CY{year}", fy_end, spans.setdefault(year, {}))
+        prior["revenue"] = revenue(f"CY{year - 1}", span=spans.setdefault(year - 1, {}))
+        nxt["revenue"] = revenue(f"CY{year + 1}", span=spans.setdefault(year + 1, {}))
         for k, concepts in ANNUAL.items():
             annual[k] = best(concepts, f"CY{year}")
         prior["net_income"] = best(ANNUAL["net_income"], f"CY{year - 1}")
+        prior_operating = best(ANNUAL["operating_income"], f"CY{year - 1}")
+        for k in ("operating_income", "net_income"):
+            nxt[k] = best(ANNUAL[k], f"CY{year + 1}")
 
         recent = []  # the three most recent calendar quarters, newest first ("CY2026Q3")
         y, q = today.year, (today.month - 1) // 3  # the quarter before the current one
@@ -355,8 +440,18 @@ class ScreenerService:
         flows = {"revenue": lambda p: revenue(p, q_ends.setdefault(p, {})), "operating_income": lambda p: best(ANNUAL["operating_income"], p),
                  "net_income": lambda p: best(ANNUAL["net_income"], p)}
         periods = [*recent, *(f"CY{int(p[2:6]) - 1}{p[6:]}" for p in recent)]
-        frames = {k: {p: fetch(p) for p in periods} for k, fetch in flows.items()}
-        latest = latest_quarters(frames, recent, year, fy_end, q_ends)
+        # Plus the quarters in between and the three before the oldest: the other quarters of any
+        # fiscal year closing in one of `periods`, to derive its fourth quarter from.
+        idx = sorted(_quarter_index(p) for p in periods)
+        support = [p for i in range(idx[0] - 3, idx[-1]) if (p := _period(i)) not in periods]
+        frames = {k: {p: fetch(p) for p in [*periods, *support]} for k, fetch in flows.items()}
+        years = {year - 1: {"revenue": prior["revenue"], "operating_income": prior_operating, "net_income": prior["net_income"]},
+                 year: annual, year + 1: nxt}
+        derived = derive_fiscal_q4(frames, years, spans, set(periods), q_ends)
+        for p, by_cik in derived.items():
+            q_ends.setdefault(p, {}).update(by_cik)
+        next_fy_end = {cik: end for cik, (start, end) in spans[year + 1].items() if full_year(start, end)}
+        latest = latest_quarters(frames, recent, year, fy_end, q_ends, nxt, next_fy_end, derived)
 
         progress("latest balance sheets")
         quarters = [f"{p}I" for p in recent]  # their quarter-end instants
