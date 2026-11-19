@@ -994,11 +994,14 @@ class Argus:
         sym = normalize_symbol(symbol)
         computed = set(self.PRICE_STATS)
         stored = [f for f in fields if f not in computed] if fields else None
+        price = None  # P/E is the current price ÷ EPS (market.with_pe): this quote, not whatever is cached
         try:
-            self.market.get_quotes([sym])  # P/E is the current price ÷ EPS (market.with_pe)
+            q = self.market.get_quotes([sym])[0].get(sym)
+            price = q.price if q else None
         except ArgusError as e:
             log.warning("quote %s: %s", sym, e.message)
-        out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh)
+        out = self.market.get_fundamentals(sym, stored or (None if not fields else ["market_cap"]), refresh,
+                                           price=price)
         if fields and not stored:
             out["metrics"] = {}
         stats, err = self._history_part(f"price stats {sym}", lambda: self.price_stats([sym]).get(sym, {}),

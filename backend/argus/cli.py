@@ -206,7 +206,8 @@ def fundamentals(symbol: str,
             t.add_row(k, "-" if v is None else f"{v:,.4g}" if abs(v) < 1e6 else f"{v:,.0f}", d["sources"].get(k, ""))
         console.print(t)
     field_list = [f.strip() for f in fields.split(",")] if fields else None
-    _run(as_json, lambda: _argus().market.get_fundamentals(normalize_symbol(symbol), field_list, refresh), render)
+    # Through Argus.fundamentals, like the API and MCP: it fetches the quote P/E is worked out from.
+    _run(as_json, lambda: _argus().fundamentals(symbol, field_list, refresh), render)
 
 
 @app.command()

@@ -529,6 +529,7 @@ def test_pe_is_the_current_price_over_the_eps_shown(settings):
     out = a.fundamentals("SPY", ["eps_ttm", "pe_ttm"])
     assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (pytest.approx(600 / 2.42), "yahoo")
 
+
     # Losses: no meaningful P/E, rather than the provider's.
     yahoo.data = {"eps_ttm": -0.4, "pe_ttm": 12.0}
     out = a.fundamentals("LOSS", ["eps_ttm", "pe_ttm"])
@@ -537,6 +538,30 @@ def test_pe_is_the_current_price_over_the_eps_shown(settings):
     yahoo.data = {}
     out = a.fundamentals("LOSS", ["pe_ttm"], refresh=True)
     assert (out["metrics"]["pe_ttm"], out["sources"]["pe_ttm"]) == (35.7258, "finnhub")
+
+
+def test_cli_pe_comes_from_the_quote_fundamentals_fetches(settings, monkeypatch):
+    """B-182: `argus fundamentals DE` gave pe_ttm null beside SEC's $18 EPS until the server had quoted DE
+    (the CLI read the provider's metrics without a quote). fundamentals() hands its own quote to the P/E
+    step, so the CLI matches the API on a cold quote cache, even when nothing reaches the cache."""
+    from typer.testing import CliRunner
+
+    from argus import cli
+    from argus.app import Argus
+    from argus.services.market import MarketService
+
+    quotes = FakeQuotes("finnhub", {"DE": (644.75, 640.0)})
+    finnhub = _Fund("finnhub", {"eps_ttm": 18.0, "pe_ttm": None})
+    a = Argus(settings, market_factory=lambda engine, s: MarketService(engine, s, [quotes], None, [finnhub]))
+    monkeypatch.setattr(a.market, "store_quotes", lambda qs: None)  # the price can't come via the cache
+    assert a.market.last_prices(["DE"]) == {}
+    monkeypatch.setattr(cli, "_argus", lambda: a)
+    r = CliRunner().invoke(cli.app, ["fundamentals", "de", "--json"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.output)["data"]
+    assert d["symbol"] == "DE" and d["metrics"]["eps_ttm"] == 18.0
+    assert d["metrics"]["pe_ttm"] == pytest.approx(644.75 / 18.0)
+    assert d["sources"]["pe_ttm"] == "finnhub"
 
 
 def test_last_price_is_the_newer_of_quote_and_close(settings):

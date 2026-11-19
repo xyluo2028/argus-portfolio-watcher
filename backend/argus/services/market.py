@@ -479,7 +479,10 @@ class MarketService:
         return out
 
     # -- fundamentals ---------------------------------------------------------
-    def get_fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False) -> dict:
+    def get_fundamentals(self, symbol: str, fields: list[str] | None = None, refresh: bool = False,
+                         price: float | None = None) -> dict:
+        """One symbol's stored or fetched metrics. P/E is `price` (a quote the caller just fetched) ÷ EPS,
+        else the latest price Argus holds (last_prices)."""
         unknown = [f for f in fields or [] if f not in METRIC_FIELDS]
         if unknown:
             raise ArgusError("INVALID_ARG", f"Unknown fields: {', '.join(unknown)}", hint=f"Valid: {', '.join(METRIC_FIELDS)}")
@@ -494,7 +497,7 @@ class MarketService:
                 metrics, sources, as_of = cached["metrics"], cached["sources"], cached["as_of"]  # stale beats nothing
             else:
                 raise ArgusError("PROVIDER_ERROR", f"No fundamentals for {symbol}.", hint="; ".join(errors.values()) or None)
-        metrics, sources = with_pe(metrics, sources, self.last_prices([symbol]).get(symbol))
+        metrics, sources = with_pe(metrics, sources, price or self.last_prices([symbol]).get(symbol))
         if rng := self.post_split_ranges([symbol]).get(symbol):
             metrics, sources = with_range(metrics, sources, rng)
         wanted = fields or list(METRIC_FIELDS)
