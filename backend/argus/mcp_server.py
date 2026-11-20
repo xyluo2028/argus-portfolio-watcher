@@ -285,7 +285,8 @@ def create_mcp(argus: Argus | None = None, live_quotes: Callable[[], dict] | Non
         benchmark, top gainers/losers and largest $ moves, positions near 52-week highs/lows,
         earnings in the next 7 days (hour: bmo = before open, amc = after close) and results from the
         last 3 days (with EPS surprise), ex-dividend and payment dates in the next 14 days (the
-        Dashboard's Coming up window), alerts fired, theses due for review, movers >= 3% and earnings (next 7 days, last 3) across every watchlist, each row naming
+        Dashboard's Coming up window), alerts fired, notes due for review within 7 days or overdue (on held and watchlist symbols, each
+        marked held true/false with its lists), movers >= 3% and earnings (next 7 days, last 3) across every watchlist, each row naming
         its lists, and headlines for the biggest movers. Write the brief from these facts; say when a section is empty rather than inventing detail."""
         return argus.daily_brief(portfolio, quotes_now(), news=include_news)
 

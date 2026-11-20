@@ -5,6 +5,7 @@ import { BarList, topN } from "../components/BarList";
 import { EventsCard } from "../components/EventsCard";
 import { HoldingsTable } from "../components/HoldingsTable";
 import { HoldingsTabs } from "../components/HoldingsTabs";
+import { NotesDueCard } from "../components/NotesDueCard";
 import { PortfolioHeatmap } from "../components/PortfolioHeatmap";
 import { extLabel, money, pct, tone } from "../format";
 import { useSharedBy } from "../portfolioAccess";
@@ -138,6 +139,8 @@ export function Dashboard({ portfolio, live }: Props) {
                     views={[{ label: "Heatmap", content: (rows) => <PortfolioHeatmap positions={rows as Position[]} /> }]} />
 
       <EventsCard portfolio={portfolio} />
+
+      <NotesDueCard portfolio={portfolio} />
 
       <section className="grid-2">
         <div className="card">

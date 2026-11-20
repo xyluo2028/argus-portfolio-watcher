@@ -443,6 +443,10 @@ def create_app(argus: Argus | None = None, start_hub: bool = True) -> FastAPI:
     async def get_exposure(ref: str):
         return await run(argus.exposure, ref, dict(hub.quotes))
 
+    @app.get("/api/portfolios/{ref}/notes-due")
+    async def get_notes_due(ref: str):
+        return await run(argus.notes_due, ref)
+
     @app.get("/api/portfolios/{ref}/drift")
     async def get_drift(ref: str, level: str = "symbol", tolerance_pp: float = 2.0):
         return await run(argus.drift, ref, level, tolerance_pp, dict(hub.quotes))

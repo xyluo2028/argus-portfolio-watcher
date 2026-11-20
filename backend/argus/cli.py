@@ -393,7 +393,7 @@ def brief(portfolio: str, no_news: Annotated[bool, typer.Option("--no-news")] = 
         for a in b["alerts_fired"]:
             console.print(f"[yellow]Alert[/yellow] {a['message']}")
         for n in b["theses_due"]:
-            console.print(f"Review {n['symbol']} ({n['review_on']}): {n['text'][:80]}")
+            console.print(f"Review {n['symbol']}{'' if n['held'] else ' (not held)'} ({n['review_on']}): {n['text'][:80]}")
     _run(as_json, lambda: _argus().daily_brief(portfolio, news=not no_news), render)
 
 

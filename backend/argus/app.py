@@ -102,6 +102,7 @@ def _transient(err: str | None) -> bool:
 ANNOUNCED_REACH_DAYS = 183  # a declared ex-date this far past a window can still replace an estimate in it
 EVENTS_DAYS_AHEAD = 14  # the Dashboard's Coming up window; the brief's upcoming dividends use the same
 BRIEF_EARNINGS_DAYS_AHEAD = 7
+NOTES_DUE_DAYS_AHEAD = 7  # the brief and the Dashboard list notes whose review falls within a week
 
 
 def _event_happened(e: dict, now: datetime) -> bool:
@@ -1223,8 +1224,7 @@ class Argus:
             "dividends_days_ahead": EVENTS_DAYS_AHEAD,
             "alerts_fired": [a for a in self.alerts.fired(since=min(last_session, today))
                              if mine is None or a["symbol"] in mine],
-            "theses_due": [n for n in self.notes.list(due_by=today + timedelta(days=7))
-                           if mine is None or n["symbol"] in mine],
+            "theses_due": self.notes_due(ref, mine),
             **self._brief_watchlists(mine, live_quotes),
         }
         if news:
@@ -1233,6 +1233,17 @@ class Argus:
                 if items := self.events.news(p["symbol"], days=2, limit=3):
                     out["headlines"][p["symbol"]] = items
         return out
+
+    def notes_due(self, ref: str, held: set[str] | None = None) -> list[dict]:
+        """Unarchived notes with a review date within the next week (or overdue) on symbols the
+        portfolio holds or any of the account's watchlists names, each marked `held` (in this
+        portfolio; any of yours for "all") with the watchlists it's on."""
+        if held is None:
+            held = set(self.held_positions()) if str(ref).lower() == ALL else set(self.open_symbols(ref))
+        watched = self.watchlists.memberships()
+        due_by = datetime.now(NY).date() + timedelta(days=NOTES_DUE_DAYS_AHEAD)
+        return [n | {"held": n["symbol"] in held, "lists": watched.get(n["symbol"], [])}
+                for n in self.notes.list(due_by=due_by) if n["symbol"] in held or n["symbol"] in watched]
 
     def _brief_watchlists(self, held: set[str] | None, live_quotes: dict[str, Quote] | None) -> dict:
         """Movers >= 3% and earnings (next 7 days, last 3) across every one of the account's watchlists,

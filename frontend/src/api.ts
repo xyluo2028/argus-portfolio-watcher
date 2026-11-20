@@ -364,6 +364,9 @@ export interface NoteItem {
   created_by: string; created_at: string; updated_at: string;
 }
 
+/** A note due for review (within a week, or overdue) on a held or watched symbol. */
+export interface DueNote extends NoteItem { held: boolean; lists: string[] }
+
 export interface WeightRow { key: string; value: number; weight_pct: number }
 export interface Concentration { top1_pct: number; top5_pct: number; top10_pct: number; hhi: number; effective_positions: number; positions: number }
 
@@ -636,6 +639,7 @@ export const api = {
   dividends: (name: string) => get<Dividends>(`/api/portfolios/${enc(name)}/dividends`),
   risk: (name: string) => get<RiskReport>(`/api/portfolios/${enc(name)}/risk`),
   exposure: (name: string) => get<Exposure>(`/api/portfolios/${enc(name)}/exposure`),
+  notesDue: (name: string) => get<DueNote[]>(`/api/portfolios/${enc(name)}/notes-due`),
   drift: (name: string, level: string) => get<Drift>(`/api/portfolios/${enc(name)}/drift?level=${level}`),
   setTargets: (name: string, level: string, weights: Record<string, number>, dryRun: boolean) =>
     send<Drift>("PUT", `/api/portfolios/${enc(name)}/targets`, { level, weights, dry_run: dryRun }),

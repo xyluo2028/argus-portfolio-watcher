@@ -402,6 +402,7 @@ def _portfolio_routes(pid):
         ("GET", "/api/portfolios/{ref}/risk"): ("GET", "/risk", None),
         ("GET", "/api/portfolios/{ref}/exposure"): ("GET", "/exposure", None),
         ("GET", "/api/portfolios/{ref}/drift"): ("GET", "/drift", None),
+        ("GET", "/api/portfolios/{ref}/notes-due"): ("GET", "/notes-due", None),
         ("PUT", "/api/portfolios/{ref}/targets"): ("PUT", "/targets", targets),
         ("POST", "/api/portfolios/{ref}/simulate"): ("POST", "/simulate", sim),
     }

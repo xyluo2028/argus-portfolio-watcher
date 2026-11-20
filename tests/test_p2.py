@@ -119,6 +119,38 @@ def test_daily_brief_shape(make_argus):
     assert b["theses_due"][0]["symbol"] == "AAA"
 
 
+def test_notes_due_include_watchlist_symbols_marked_not_held(make_argus):
+    # A due note on a watchlist-only name shows (held: false) beside held ones; archived and
+    # untracked ones don't, nor one held only in another portfolio (B-183)
+    from argus.market_calendar import NY
+
+    a = make_argus([FakeQuotes("fake", {s: (100, 100) for s in ("AAA", "BBB", "WWW", "XXX", "ZZZ", "SPY")})])
+    a.portfolios.create_portfolio("growth")
+    a.portfolios.create_portfolio("income")
+    a.portfolios.add_transactions("growth", [TxnInput("BUY", "AAA", NOW - timedelta(days=30), 10, 90)])
+    a.portfolios.add_transactions("income", [TxnInput("BUY", "BBB", NOW - timedelta(days=30), 10, 90)])
+    a.watchlists.add(["WWW"])
+    a.watchlists.add(["XXX"], name="Ideas")
+    today = datetime.now(NY).date()
+    for sym in ("AAA", "BBB", "WWW", "ZZZ"):
+        a.notes.add(sym, f"{sym} thesis", kind="thesis", review_on=today)
+    a.notes.add("XXX", "overdue", review_on=today - timedelta(days=3))
+    a.notes.add("WWW", "later", review_on=today + timedelta(days=30))
+    archived = a.notes.add("WWW", "old view", review_on=today)["id"]
+    a.notes.update(archived, archived=True)
+
+    def rows(notes):
+        return [(n["symbol"], n["text"], n["held"], n["lists"]) for n in notes]
+
+    expected = [("AAA", "AAA thesis", True, []), ("WWW", "WWW thesis", False, ["Watchlist"]),
+                ("XXX", "overdue", False, ["Ideas"])]
+    assert rows(a.notes_due("growth")) == expected
+    assert rows(a.daily_brief("growth", news=False)["theses_due"]) == expected
+    # "all": held in any portfolio counts as held
+    assert [(n["symbol"], n["held"]) for n in a.notes_due("all")] == [
+        ("AAA", True), ("BBB", True), ("WWW", False), ("XXX", False)]
+
+
 def test_daily_brief_movers_keep_their_sign(make_argus):
     # Mostly up on the day: losers must not be padded with gainers (nor gainers with losers).
     a = make_argus([FakeQuotes("fake", {"AAA": (110, 100), "BBB": (101, 100), "CCC": (100, 100),
@@ -162,13 +194,13 @@ def test_daily_brief_is_scoped_to_its_portfolio(make_argus):
     assert pairs(b["dividends_upcoming"]) == [("BBB", True)]
     assert [(e["symbol"], e["date"]) for e in b["earnings_recent"]] == [("BBB", today.isoformat())]
     assert [x["symbol"] for x in b["alerts_fired"]] == ["BBB"]
-    assert [x["symbol"] for x in b["theses_due"]] == ["BBB"]
+    assert [(x["symbol"], x["held"]) for x in b["theses_due"]] == [("BBB", True), ("WWW", False)]
 
     g = a.daily_brief("growth", news=False)
     assert pairs(g["earnings_upcoming"]) == pairs(g["dividends_upcoming"]) == [("AAA", True)]
     assert g["earnings_recent"] == []
     assert [x["symbol"] for x in g["alerts_fired"]] == ["AAA"]
-    assert [x["symbol"] for x in g["theses_due"]] == ["AAA"]
+    assert [(x["symbol"], x["held"]) for x in g["theses_due"]] == [("AAA", True), ("WWW", False)]
 
 
 def test_daily_brief_dividends_use_the_coming_up_window(make_argus):
