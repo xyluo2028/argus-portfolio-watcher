@@ -6,7 +6,8 @@ quarter-end balance sheet each company filed. Companies whose fiscal year doesn'
 are placed in the calendar year their fiscal year mostly covers (SEC's own alignment). On top of the
 year, quarterly frames give each company's latest quarter (revenue growth against the same quarter a
 year earlier) and trailing-twelve-month revenue, operating income and net income, as the year plus
-this year's quarters minus the same quarters a year earlier. TTM is anchored on each company's newest
+this year's quarters minus the same quarters a year earlier. Net income is the parent's share, as on
+the statements (attributable_income). TTM is anchored on each company's newest
 closed fiscal year (the year after the calendar year when that has ended, as at Apple or Microsoft), and
 a fiscal fourth quarter, which SEC frames lack whenever it was only filed inside the 10-K's full year, is
 derived as the year less its first three quarters (derive_fiscal_q4). The universe is rebuilt weekly in
@@ -31,7 +32,11 @@ REVENUE = (*REVENUE_TAGS, *REVENUE_FALLBACK_TAGS,
            "OperatingLeasesIncomeStatementLeaseRevenue", "RevenuesNetOfInterestExpense")
 # Banks rarely tag total revenue: it is net interest income plus noninterest income.
 BANK_REVENUE = ("InterestIncomeExpenseNet", "NoninterestIncome")
-ANNUAL = {"net_income": ("NetIncomeLoss",), "operating_income": ("OperatingIncomeLoss",),
+# Net income attributable to the parent, which the statements show. Frames serve each company's latest-filed
+# fact, and a proxy's pay-versus-performance table often tags *consolidated* net income (noncontrolling
+# interests included) as NetIncomeLoss; see attributable_income for how ProfitLoss and the NCI share fix it.
+NET_INCOME, PROFIT_LOSS, NCI = "NetIncomeLoss", "ProfitLoss", "NetIncomeLossAttributableToNoncontrollingInterest"
+ANNUAL = {"net_income": (NET_INCOME,), "operating_income": ("OperatingIncomeLoss",),
           "gross_profit": ("GrossProfit",), "cfo": ("NetCashProvidedByUsedInOperatingActivities",),
           "capex": ("PaymentsToAcquirePropertyPlantAndEquipment",)}
 INSTANT = {"assets": "Assets", "liabilities": "Liabilities", "equity": "StockholdersEquity",
@@ -91,6 +96,26 @@ def _plausible_income(income, revenue):
     if income is not None and revenue and abs(income) < abs(revenue) / 1000:
         return None
     return income
+
+
+def attributable_income(net_income: dict[int, dict], profit_loss: dict[int, dict], nci: dict[int, dict]) -> dict[int, float]:
+    """Each company's net income attributable to the parent for one period, from its NetIncomeLoss,
+    ProfitLoss (consolidated, NCI included) and NCI-share frames ({cik: {"val", "accn"}}). NetIncomeLoss
+    is preferred, as on the statements, except when it came from another filing than ProfitLoss and is
+    nearer ProfitLoss than ProfitLoss less the NCI share: a proxy's pay-versus-performance table tagging
+    consolidated income as NetIncomeLoss, which SEC frames serve as the latest-filed fact (B-185:
+    Cheniere's CY2025 frame is its DEF 14A's 6.79B, while its 10-K says 6.79B ProfitLoss - 1.46B NCI =
+    5.33B). Then the parent's share is ProfitLoss less NCI. A company tagging only ProfitLoss gets it,
+    less any NCI share."""
+    out = {cik: f["val"] for cik, f in net_income.items() if f["val"] is not None}
+    for cik, f in profit_loss.items():
+        pl, share = f["val"], (nci.get(cik) or {}).get("val") or 0
+        if pl is None:
+            continue
+        ni = net_income.get(cik)
+        if cik not in out or (share and ni.get("accn") != f.get("accn") and abs(out[cik] - pl) < abs(share) / 2):
+            out[cik] = pl - share
+    return out
 
 
 def _quarter_label(period: str) -> str:
@@ -376,7 +401,7 @@ class ScreenerService:
                 "prices_stale": time.time() - u.get("prices_ts", 0) > PRICES_MAX_AGE_S}
 
     def build(self, progress: Callable[[str], None] = lambda _: None, today: date | None = None) -> dict:
-        """Fetch frames (about 160 SEC requests, each cached a week) and prices; save the universe."""
+        """Fetch frames (about 200 SEC requests, each cached a week) and prices; save the universe."""
         today = today or datetime.now(UTC).date()
         year = today.year - 1  # the latest calendar year most companies have reported in full
         progress("SEC ticker map")
@@ -415,17 +440,20 @@ class ScreenerService:
                         span[cik] = (nii[cik].get("start"), nii[cik].get("end"))
             return out
 
+        def net_income(period: str) -> dict[int, float]:
+            return attributable_income(*(self.sec.frame(c, "USD", period) for c in (NET_INCOME, PROFIT_LOSS, NCI)))
+
         annual, prior, nxt = {}, {}, {}  # nxt: the fiscal years after `year` that have already closed
         progress(f"annual figures, calendar {year}")
         annual["revenue"] = revenue(f"CY{year}", fy_end, spans.setdefault(year, {}))
         prior["revenue"] = revenue(f"CY{year - 1}", span=spans.setdefault(year - 1, {}))
         nxt["revenue"] = revenue(f"CY{year + 1}", span=spans.setdefault(year + 1, {}))
         for k, concepts in ANNUAL.items():
-            annual[k] = best(concepts, f"CY{year}")
-        prior["net_income"] = best(ANNUAL["net_income"], f"CY{year - 1}")
+            annual[k] = net_income(f"CY{year}") if k == "net_income" else best(concepts, f"CY{year}")
+        prior["net_income"] = net_income(f"CY{year - 1}")
         prior_operating = best(ANNUAL["operating_income"], f"CY{year - 1}")
-        for k in ("operating_income", "net_income"):
-            nxt[k] = best(ANNUAL[k], f"CY{year + 1}")
+        nxt["operating_income"] = best(ANNUAL["operating_income"], f"CY{year + 1}")
+        nxt["net_income"] = net_income(f"CY{year + 1}")
 
         recent = []  # the three most recent calendar quarters, newest first ("CY2026Q3")
         y, q = today.year, (today.month - 1) // 3  # the quarter before the current one
@@ -438,7 +466,7 @@ class ScreenerService:
         # Those quarters and the same ones a year earlier: latest-quarter growth and, with the
         # year, TTM flows (any quarters of the year after `year` are among them).
         flows = {"revenue": lambda p: revenue(p, q_ends.setdefault(p, {})), "operating_income": lambda p: best(ANNUAL["operating_income"], p),
-                 "net_income": lambda p: best(ANNUAL["net_income"], p)}
+                 "net_income": net_income}
         periods = [*recent, *(f"CY{int(p[2:6]) - 1}{p[6:]}" for p in recent)]
         # Plus the quarters in between and the three before the oldest: the other quarters of any
         # fiscal year closing in one of `periods`, to derive its fourth quarter from.

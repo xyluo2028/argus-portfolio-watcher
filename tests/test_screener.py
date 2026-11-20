@@ -199,6 +199,34 @@ class _FakeYahoo:
         return {"AAA": {"price": 10.0, "market_cap": 4000.0, "quote_type": "EQUITY"}}
 
 
+def test_net_income_is_the_parents_share():
+    def f(vals, accn="10-K"):
+        return {cik: {"val": v, "accn": accn} for cik, v in vals.items()}
+    # 1: a proxy's consolidated figure; 2: genuine; 3: no NCI; 6: consolidated but tagged so in the 10-K itself
+    ni = f({2: 500.0, 3: 90.0, 6: 80.0}) | f({1: 6794.0}, "DEF 14A")
+    pl = f({1: 6794.0, 2: 560.0, 3: 90.0, 4: 70.0, 5: 40.0, 6: 80.0})  # 4, 5: only ProfitLoss
+    nci = f({1: 1464.0, 2: 60.0, 5: 4.0, 6: 10.0})
+    assert sc.attributable_income(ni, pl, nci) == {1: 5330.0, 2: 500.0, 3: 90.0, 4: 70.0, 5: 36.0, 6: 80.0}
+    assert sc.attributable_income(ni, {}, {}) == {1: 6794.0, 2: 500.0, 3: 90.0, 6: 80.0}
+
+
+def test_build_uses_attributable_net_income(tmp_path):
+    from datetime import date
+
+    class Sec(_FakeSec):
+        def frame(self, concept, unit, period):
+            if period == "CY2025" and concept in ("NetIncomeLoss", "ProfitLoss"):  # consolidated, NetIncomeLoss from a proxy
+                return {1: {"val": 240.0, "end": "2025-12-31", "accn": "proxy" if concept == "NetIncomeLoss" else "10-K"}}
+            if period == "CY2025" and concept == "NetIncomeLossAttributableToNoncontrollingInterest":
+                return {1: {"val": 40.0, "end": "2025-12-31"}}
+            return super().frame(concept, unit, period)
+
+    svc = sc.ScreenerService(tmp_path, Sec(), _FakeYahoo())
+    svc.build(today=date(2026, 11, 17))
+    row = svc.load()["rows"][0]
+    assert row["net_income"] == 200.0 and row["pe"] == pytest.approx(20)
+
+
 def test_build_fetches_quarterly_frames(tmp_path):
     from datetime import date
     sec = _FakeSec()

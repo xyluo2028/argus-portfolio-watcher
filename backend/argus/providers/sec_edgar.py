@@ -171,7 +171,7 @@ class SecEdgarProvider:
 
     def frame(self, concept: str, unit: str, period: str, taxonomy: str = "us-gaap") -> dict[int, dict]:
         """One XBRL fact per company for a period ("CY2025" = a calendar year, "CY2026Q1I" = an
-        instant at that quarter's end): {cik: {"val", "end", "start"?}}. Cached for a week; a period
+        instant at that quarter's end): {cik: {"val", "end", "start"?, "accn"}} (accn: the filing it came from). Cached for a week; a period
         nobody reported yet comes back empty."""
         url = f"https://data.sec.gov/api/xbrl/frames/{taxonomy}/{concept}/{unit}/{period}.json"
         try:
@@ -180,7 +180,8 @@ class SecEdgarProvider:
             if "no XBRL" in str(e):  # 404: nobody has reported this concept for this period (yet)
                 return {}
             raise
-        return {int(r["cik"]): {"val": r["val"], "end": r.get("end"), "start": r.get("start")} for r in data.get("data", [])}
+        return {int(r["cik"]): {"val": r["val"], "end": r.get("end"), "start": r.get("start"), "accn": r.get("accn")}
+                for r in data.get("data", [])}
 
     def get_financials(self, symbol: str, period: str = "quarterly", limit: int = 8) -> dict:
         cik = self.cik_for(symbol)
