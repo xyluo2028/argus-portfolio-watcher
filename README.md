@@ -135,6 +135,8 @@ uv run argus brief growth --json               # facts for a daily brief
 uv run argus events                              # earnings & dividends, next 14 days
 uv run argus alert add NVDA day_move_pct 5       # fires once per session
 uv run argus note add NVDA "AI capex cycle" --thesis --review-on 2026-11-20
+uv run argus note update 7 --review-on 2026-12-15   # or --text, --clear-review, --archive
+uv run argus note archive 7                      # `note list --all` still shows it
 uv run argus market-status
 ```
 

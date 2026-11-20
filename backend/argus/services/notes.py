@@ -47,6 +47,8 @@ class NoteService:
             if n is None or not access.is_mine(s, n.account_id):
                 raise ArgusError("NOT_FOUND", f"No note {note_id}.")
             before = _row(n)
+            if text is not None and not text.strip():
+                raise ArgusError("INVALID_ARG", "Note text is empty.")
             if text is not None:
                 n.text = text.strip()
             if review_on is not None:

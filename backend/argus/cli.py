@@ -433,21 +433,64 @@ def alert_off(alert_id: int, as_json: JsonOpt = False):
     _run(as_json, lambda: _argus().alerts.set_active(alert_id, False), lambda a: console.print(f"Alert {a['id']} off"))
 
 
+def _day(value: str | None) -> date | None:
+    """A YYYY-MM-DD option as a date, or a clean INVALID_ARG error instead of a traceback."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise ArgusError("INVALID_ARG", f"'{value}' is not a date; use YYYY-MM-DD.") from None
+
+
+def _note_line(n: dict) -> str:
+    return (f"[bold]{n['symbol']}[/bold] #{n['id']} {n['kind']}"
+            + (f" (review {n['review_on']})" if n["review_on"] else "")
+            + (" [dim](archived)[/dim]" if n["archived"] else "") + f": {escape(n['text'])}")
+
+
 @note_app.command("add")
 def note_add(symbol: str, text: str, thesis: Annotated[bool, typer.Option("--thesis")] = False,
              review_on: Annotated[str | None, typer.Option(help="YYYY-MM-DD")] = None, as_json: JsonOpt = False):
-    _run(as_json, lambda: _argus().notes.add(symbol, text, "thesis" if thesis else "note",
-                                             date.fromisoformat(review_on) if review_on else None),
+    _run(as_json, lambda: _argus().notes.add(symbol, text, "thesis" if thesis else "note", _day(review_on)),
          lambda n: console.print(f"Saved {n['kind']} {n['id']} on {n['symbol']}"))
 
 
 @note_app.command("list")
-def note_list(symbol: str | None = None, as_json: JsonOpt = False):
+def note_list(symbol: str | None = None,
+              all_: Annotated[bool, typer.Option("--all", help="Include archived notes.")] = False,
+              as_json: JsonOpt = False):
+    """Your notes (archived ones only with --all)."""
     def render(rows):
         for n in rows:
-            console.print(f"[bold]{n['symbol']}[/bold] #{n['id']} {n['kind']}"
-                          + (f" (review {n['review_on']})" if n["review_on"] else "") + f": {n['text']}")
-    _run(as_json, lambda: _argus().notes.list(symbol), render)
+            console.print(_note_line(n))
+    _run(as_json, lambda: _argus().notes.list(symbol, all_), render)
+
+
+@note_app.command("update")
+def note_update(note_id: int,
+                text: Annotated[str | None, typer.Option("--text", "--body", help="Replace the note's text.")] = None,
+                review_on: Annotated[str | None, typer.Option(help="Move the review date (YYYY-MM-DD).")] = None,
+                clear_review: Annotated[bool, typer.Option("--clear-review", help="Remove the review date.")] = False,
+                archived: Annotated[bool | None, typer.Option("--archive/--unarchive",
+                                                              help="Archive the note, or bring it back.")] = None,
+                as_json: JsonOpt = False):
+    """Edit a note (id from `note list`): e.g. `argus note update 7 --review-on 2026-12-15`."""
+    def update():
+        if text is None and review_on is None and not clear_review and archived is None:
+            raise ArgusError("INVALID_ARG", "Nothing to change.",
+                             "Pass --text, --review-on, --clear-review, --archive or --unarchive.")
+        if review_on and clear_review:
+            raise ArgusError("INVALID_ARG", "Use either --review-on or --clear-review, not both.")
+        return _argus().notes.update(note_id, text, _day(review_on), clear_review, archived)
+    _run(as_json, update, lambda n: console.print(_note_line(n)))
+
+
+@note_app.command("archive")
+def note_archive(note_id: int, as_json: JsonOpt = False):
+    """Archive a note: it leaves `note list` and the brief (`note list --all` still shows it)."""
+    _run(as_json, lambda: _argus().notes.update(note_id, archived=True),
+         lambda n: console.print(f"Archived {n['kind']} {n['id']} on {n['symbol']}"))
 
 
 @portfolio_app.command("exposure")

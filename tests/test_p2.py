@@ -71,6 +71,67 @@ def test_notes_and_due_reviews(make_argus):
     assert a.notes.list(due_by=TODAY) == []
 
 
+@pytest.fixture
+def note_cli(make_argus, monkeypatch):
+    """The CLI against a test Argus, through the real `_argus` so `--as` picks the account."""
+    import json
+
+    from typer.testing import CliRunner
+
+    import argus.app
+    from argus import cli
+
+    a = make_argus()
+    monkeypatch.setattr(argus.app, "Argus", lambda: a)
+    monkeypatch.setattr(cli, "_as_user", None)
+    runner = CliRunner()
+
+    def run(*args):
+        r = runner.invoke(cli.app, [*args, "--json"])
+        return r.exit_code, json.loads(r.output)
+    return a, run
+
+
+def test_cli_note_update_archive_and_list_all(note_cli):
+    a, run = note_cli
+    me = a.accounts.create("me", "correct horse battery")["id"]
+    a.accounts.create("bot", None)
+    from argus import access
+    with access.acting_as(me):
+        nid = a.notes.add("NVDA", "AI capex cycle", "thesis", TODAY)["id"]
+        other = a.notes.add("AMD", "MI300 ramp")["id"]
+
+    code, out = run("note", "update", str(nid), "--review-on", "2026-12-15", "--body", " new view ")
+    assert code == 0 and out["data"]["review_on"] == "2026-12-15" and out["data"]["text"] == "new view"
+    code, out = run("note", "update", str(nid), "--clear-review")
+    assert out["data"]["review_on"] is None
+    code, out = run("note", "archive", str(nid))
+    assert code == 0 and out["data"]["archived"] is True
+    assert [n["id"] for n in run("note", "list")[1]["data"]] == [other]
+    assert {n["id"] for n in run("note", "list", "--all")[1]["data"]} == {nid, other}
+    code, out = run("note", "update", str(nid), "--unarchive")
+    assert out["data"]["archived"] is False and len(run("note", "list")[1]["data"]) == 2
+
+    # Usage errors come back as the JSON envelope, not a traceback.
+    for args in (("note", "update", str(nid)),
+                 ("note", "update", str(nid), "--review-on", "15/12/2026"),
+                 ("note", "update", str(nid), "--review-on", "2026-12-15", "--clear-review"),
+                 ("note", "update", str(nid), "--text", "  ")):
+        code, out = run(*args)
+        assert code == 1 and out["error"]["code"] == "INVALID_ARG"
+
+    # A missing note, and another account's note, are both just "not found".
+    code, out = run("note", "archive", "999")
+    assert code == 1 and out["error"]["code"] == "NOT_FOUND"
+    for args in (("--as", "bot", "note", "archive", str(other)),
+                 ("--as", "bot", "note", "update", str(other), "--text", "mine now")):
+        code, out = run(*args)
+        assert code == 1 and out["error"]["code"] == "NOT_FOUND"
+    assert run("--as", "bot", "note", "list", "--all")[1]["data"] == []
+    with access.acting_as(me):
+        assert a.notes.list("AMD")[0]["text"] == "MI300 ramp" and not a.notes.list("AMD")[0]["archived"]
+
+
 class FakeFinnhub:
     def __init__(self):
         self.calls = 0
