@@ -456,7 +456,8 @@ Format, one item per heading, newest IDs at the bottom of their section:
 
 ### B-060 Screener rows have no sector or industry; no sector filter
 - kind: feature · severity: medium
-- reported by: multibagger r003
+- reported by: multibagger r003, trader r021
+- r021: still no sector column or filter in the screener (trader r021 #6)
 - status: open
 
 ### B-061 Stock page revenue chart clips its y-axis label (190.24M shows as "90.24M"); stray value label overlaps bars
@@ -813,6 +814,7 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - r011: LOAR +9.3% (biggest dollar gainer) has no headline anywhere (multibagger r011 #7)
 - r019: brief's `watchlist_earnings.recent` has NVDA's surprise but no after-hours move (+4.8%); only `argus quotes` shows it (trader r019 #7)
 - r020: the brief's `watchlist_earnings.recent` lists NVDA's 11-17 beat with no price reaction (it fell 2.9% at the 11-18 session while AMD +5.3%, AVGO +3.6%); suggestion: `reaction_pct` and `ext_change_pct` on recent earnings (rounds/020/trader.md #5)
+- r021: INTU reported 11-19 after the close, −9.8% after hours; the brief's watchlist recent earnings don't show it (trader r021 #5)
 - status: open
 
 ### B-111 A one-quarter cash windfall shows as a high FCF margin with no warning (INOD 58%)
@@ -905,7 +907,11 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - evidence: the brief still lists theses 21 and 22 as due 10-29 after notes 56 and 57 on the same symbols; `argus note` has only `add` and `list`, while the API has `PATCH /api/notes/{id}` (rounds/010/investor-macro.md #6)
 - r011: theses due lists 17 rows mixing overdue and next-week reviews; suggest `overdue` vs `due_this_week` (macro r011 #7)
 - r013: theses-due list full of superseded notes
-- status: open
+- r021: the trader had to archive note 7 with `curl -X PATCH /api/notes/7` because the CLI has only `add` and `list`; the brief also lists plain notes (not theses) under theses due (trader r021 #4)
+- acceptance: `argus note update <id>` (at least `--review-on DATE`, `--status`/`--archive`, `--body`) and `argus note archive <id>` exist, go through the same app/API path as `PATCH /api/notes/{id}`, support `--json`, and respect the signed-in account (can't touch another account's note); `argus note list` can filter out archived notes by default with `--all` to include them; tests for update, archive, and the not-found / other-account cases
+- reported by (added): trader r021
+- note: `note list` already hid archived notes; `--all` added; blank text on update now rejected (CLI and API 400). The brief's "plain notes under theses due" part is not addressed
+- status: done (r021, d84884f)
 
 ### B-131 REIT earnings surprise compares AFFO with a GAAP EPS estimate (O "beat +162.2%")
 - kind: bug · severity: medium
@@ -1263,7 +1269,10 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - kind: ux · severity: medium
 - reported by: trader r020
 - evidence: note 7 (NVDA, `review_on` 2026-11-18, NVDA on the watchlist, not held); `GET /api/brief/bot0-sim` on 11-18 `theses_due: []`; the brief filters notes to held symbols (rounds/020/trader.md #2)
-- status: open
+- r021: note 9 (INTU, watchlist, `review_on` 2026-11-20) absent from the brief's `theses_due` (trader r021 #2)
+- acceptance: the brief's notes-due list includes due/overdue notes on symbols in any of the account's watchlists (and portfolio-less notes on any symbol the account tracks), each marked `held: true|false`, alongside held-symbol notes; superseded/archived notes stay excluded; the Dashboard brief card shows them; test: a due note on a watchlist-only symbol appears with `held: false`, a due note on a held symbol still appears, an archived one doesn't
+- note: new `GET /api/portfolios/{ref}/notes-due` and a Dashboard "Notes due" card; in the "all" view, notes on symbols neither held nor watched no longer appear
+- status: done (r021, 92177a8)
 
 ### B-184 Stale screener rows still carry `revenue_q` (and the previous quarter)
 - kind: bug · severity: low
@@ -1272,6 +1281,26 @@ Format, one item per heading, newest IDs at the bottom of their section:
 - acceptance: for rows with `quarter_stale: true`, every latest-quarter field (`revenue_q`, its previous/year-ago companions, and any other `*_q*` value) is null, so no quarterly filter passes them; FY fields stay; test: a stale row has all quarter fields null and fails a `revenue_q` filter, a current row keeps them
 - note: r020 also made `revenue_q` a screen field (period "latest qtr"); balance-sheet ratios (P/B, D/E, current ratio) stay on stale rows as point-in-time values
 - status: done (r020, 88bcbe0)
+
+### B-185 Screener P/E TTM uses net income including noncontrolling interests (LNG 13.4 vs 20.8 on the stock page)
+- kind: bug · severity: medium
+- reported by: trader r021
+- evidence: screener LNG TTM net income 4.50B and P/E TTM 13.4; the stock page's SEC quarters sum to 3.04B (EPS 14.19) and P/E 20.8; the 1.46B gap is about Cheniere's noncontrolling interest; MLM also differs (15.7 vs 13.4) (rounds/021/trader.md #1)
+- acceptance: the screener's TTM (and FY) net income uses the attributable-to-parent concept (`NetIncomeLoss`) in preference to `ProfitLoss` / consolidated net income including NCI, matching the statements on the stock page; LNG's screener P/E TTM is within a few percent of the stock page's SEC-based P/E; MLM's gap is explained or fixed; test: a company with both `ProfitLoss` and `NetIncomeLoss` frames gets the `NetIncomeLoss` value, one with only `ProfitLoss` still gets a value
+- note: root cause was SEC frames serving Cheniere's proxy (DEF 14A) pay-vs-performance `NetIncomeLoss` (consolidated, NCI included) for CY2024/CY2025; fix replaces such a figure with `ProfitLoss` − NCI. MLM's gap is share count (≈11M shares issued in Q3 2026), not net income; the screener's figure is the more current one
+- status: done (r021, 88f039b)
+
+### B-186 P/E TTM windows differ silently between the stock page and the screener (NVDA 15.7 vs 18.3)
+- kind: ux · severity: low
+- reported by: trader r021
+- evidence: after NVDA's 11-17 report the stock page's P/E TTM switched from SEC to Yahoo EPS (which includes the new quarter) while the screener stays on SEC quarters; neither says which quarter its TTM runs through (rounds/021/trader.md #3)
+- status: open
+
+### B-187 Dashboard performance chart's end label covers an axis label
+- kind: ux · severity: low
+- reported by: trader r021
+- evidence: desktop dashboard, the "−5.7%" end label of the performance line overlaps the "−6.0%" y-axis label (rounds/021/trader.md #7)
+- status: open
 
 ## Done
 ### B-134 When Yahoo's daily bar for the last completed session is missing, performance and earnings reactions use the previous close

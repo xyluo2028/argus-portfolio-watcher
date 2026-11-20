@@ -2,7 +2,7 @@
  "format": "argus-account-snapshot",
  "version": 1,
  "account": "bot0",
- "created_at": "2026-11-19T02:37:44.512776+00:00",
+ "created_at": "2026-11-20T02:38:05.371223+00:00",
  "tables": {
   "portfolio": [
    {
@@ -340,10 +340,10 @@
     "kind": "note",
     "text": "Plan, 11-17 round: NVDA reported after the 11-17 close (rev $115.8B vs $111.3B est, EPS 2.68 vs 2.53, guide above; board confirms Huang will not return). After-hours 162.94 (+4.8%). I will NOT buy at the 11-17 mid (154.26): that price predates the report, so buying it would trade on information the fill could not have had. Decide at the 11-18 session, at a price that includes the reaction. In favour: P/E ttm 19.7 (0th pct of 5y), forward ~10x FY+1, revenue +106% YoY. Against: CEO ouster / governance, analysts cut buy 49->36 and hold 2->14 in a month, 172 insider sales and no buys in a year. Size: up to ~$1,000 (10%) from cash.",
     "review_on": "2026-11-18",
-    "archived": false,
+    "archived": true,
     "created_by": "ui",
     "created_at": "2026-11-18T02:16:33.078413+00:00",
-    "updated_at": "2026-11-18T02:16:33.078418+00:00"
+    "updated_at": "2026-11-20T02:16:42.724920+00:00"
    },
    {
     "id": 8,
@@ -356,6 +356,30 @@
     "created_by": "cli",
     "created_at": "2026-11-19T02:15:45.311308+00:00",
     "updated_at": "2026-11-19T02:15:45.311313+00:00"
+   },
+   {
+    "id": 9,
+    "account_id": 1,
+    "symbol": "INTU",
+    "kind": "note",
+    "text": "Plan, 11-19 round: INTU reported FQ1 after the 11-19 close (EPS 2.91 vs 2.75 est, revenue $4.354B vs $4.392B est, a small miss). After hours 279.74 (-9.8%). Not buying at the 11-19 mid: it predates the report. Re-look at the 11-20 session only if the reaction settles and I have cash; otherwise drop.",
+    "review_on": "2026-11-20",
+    "archived": false,
+    "created_by": "cli",
+    "created_at": "2026-11-20T02:16:42.453309+00:00",
+    "updated_at": "2026-11-20T02:16:42.453315+00:00"
+   },
+   {
+    "id": 10,
+    "account_id": 1,
+    "symbol": "ZZZZ",
+    "kind": "note",
+    "text": "throwaway edited",
+    "review_on": "2026-12-15",
+    "archived": true,
+    "created_by": "cli",
+    "created_at": "2026-11-20T02:37:30.566780+00:00",
+    "updated_at": "2026-11-20T02:37:40.099466+00:00"
    }
   ],
   "peer_list": [],
