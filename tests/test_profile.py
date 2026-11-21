@@ -181,6 +181,32 @@ def test_parse_nport_reads_every_holding():
     assert parse_nport(NPORT_XML, keep=2)["count"] == 7
 
 
+def test_sec_fund_holdings_asks_for_a_count_sec_accepts_and_takes_the_newest_filing(tmp_path):
+    """SEC's browse-edgar started answering HTTP 400 to count=1, which left every ETF on Yahoo's top 10."""
+    import httpx
+
+    from argus.providers.sec_edgar import SecEdgarProvider
+
+    folder = "https://www.sec.gov/Archives/edgar/data/1/0001"
+    entry = "<entry><filing-date>{d}</filing-date><filing-href>{f}{n}/0001-index.htm</filing-href></entry>"
+
+    def handler(req):
+        if req.url.path.endswith("company_tickers_mf.json"):
+            return httpx.Response(200, json={"fields": ["cik", "seriesId", "classId", "symbol"],
+                                             "data": [[1, "S000000001", "C000000001", "QQQ"]]})
+        if req.url.path == "/cgi-bin/browse-edgar":
+            if req.url.params["count"] not in {str(n) for n in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 500)}:
+                return httpx.Response(400, text="Invalid count")
+            return httpx.Response(200, text="<feed>" + entry.format(d="2026-08-28", f=folder, n="2")
+                                  + entry.format(d="2026-05-28", f=folder, n="1") + "</feed>")
+        assert req.url.path.endswith("00012/primary_doc.xml"), req.url  # the newest filing's document
+        return httpx.Response(200, text=NPORT_XML)
+
+    sec = SecEdgarProvider("argus test@example.com", tmp_path, httpx.Client(transport=httpx.MockTransport(handler)))
+    h = sec.fund_holdings("QQQ")
+    assert (h["series_id"], h["filed"], h["count"]) == ("S000000001", "2026-08-28", 7)
+
+
 def test_pick_listing_follows_the_currency_held():
     from argus.providers.openfigi import pick_listing, yahoo_symbol
 

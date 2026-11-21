@@ -131,8 +131,9 @@ class SecEdgarProvider:
         if latest and latest.exists() and time.time() - latest.stat().st_mtime < NPORT_LATEST_MAX_AGE_S:
             filing = json.loads(latest.read_text())
         else:
+            # Newest first. SEC answers HTTP 400 to any count but 10-100 (in tens) or 500.
             atom = self._fetch_text(FILINGS_URL, {"action": "getcompany", "CIK": series, "type": "NPORT-P",
-                                                  "dateb": "", "owner": "include", "count": "1", "output": "atom"})
+                                                  "dateb": "", "owner": "include", "count": "10", "output": "atom"})
             href = re.search(r"<filing-href>(.*?)</filing-href>", atom)
             filed = re.search(r"<filing-date>(.*?)</filing-date>", atom)
             filing = {"index": href.group(1), "filed": filed.group(1) if filed else None} if href else None
